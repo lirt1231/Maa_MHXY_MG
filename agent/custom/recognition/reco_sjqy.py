@@ -1,17 +1,76 @@
 
 from PIL import Image
-from maa.agent.agent_server import AgentServer
+import os
 from maa.custom_recognition  import CustomRecognition
 from maa.context import Context
 from typing import Dict, List, Tuple
 from utils import logger
-from utils import SendJinSan
 import time
 import re
 
 from .searchAnswer import SearchQuestions
 
-@AgentServer.custom_recognition("reco2")
+
+if os.environ.get("MAA_DIRECT_RESOURCE") != "1":
+    from maa.agent.agent_server import AgentServer
+else:
+    AgentServer = None
+
+
+def register_custom_recognition(name):
+    """Use AgentServer normally, or leave registration to a direct runner."""
+    if os.environ.get("MAA_DIRECT_RESOURCE") == "1":
+        return lambda recognition: recognition
+    return AgentServer.custom_recognition(name)
+
+
+LEGACY_REFERENCE_SIZE = (1280, 720)
+MAC_REFERENCE_SIZE = (923, 720)
+LEGACY_QUESTION_ROI = (447, 40, 673, 94)
+LEGACY_ANSWER_ROI = (439, 218, 678, 212)
+MAC_QUESTION_ROI = (330, 150, 480, 65)
+MAC_ANSWER_ROI = (330, 205, 480, 220)
+
+
+def scale_roi(roi, image_width, image_height, reference_size):
+    """Scale a reference ROI to the controller's current screenshot."""
+    reference_width, reference_height = reference_size
+    scale_x = image_width / reference_width
+    scale_y = image_height / reference_height
+    x, y, width, height = roi
+    return [
+        round(x * scale_x),
+        round(y * scale_y),
+        round(width * scale_x),
+        round(height * scale_y),
+    ]
+
+
+def sjqy_rois(image):
+    """Return question/answer ROIs for emulator or the narrow macOS client."""
+    image_height, image_width = image.shape[:2]
+    if image_width / image_height < 1.5:
+        reference_size = MAC_REFERENCE_SIZE
+        question_roi = MAC_QUESTION_ROI
+        answer_roi = MAC_ANSWER_ROI
+    else:
+        reference_size = LEGACY_REFERENCE_SIZE
+        question_roi = LEGACY_QUESTION_ROI
+        answer_roi = LEGACY_ANSWER_ROI
+    return (
+        scale_roi(question_roi, image_width, image_height, reference_size),
+        scale_roi(answer_roi, image_width, image_height, reference_size),
+    )
+
+
+def parse_answer_candidates(value):
+    """Convert the legacy formatted answer string into OCR candidates."""
+    if isinstance(value, (list, tuple)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    parsed = re.findall(r'"([^"]+)"', str(value))
+    return parsed or ([str(value).strip()] if str(value).strip() else [])
+
+@register_custom_recognition("reco2")
 class reco2_sjqy(CustomRecognition):
     def analyze(
          self,
@@ -23,7 +82,7 @@ class reco2_sjqy(CustomRecognition):
 
  
 
-@AgentServer.custom_recognition("sjqy_tiku_V2")
+@register_custom_recognition("sjqy_tiku_V2")
 class sjqy_tiku_V2(CustomRecognition):
 
     def analyze(
@@ -147,7 +206,7 @@ class sjqy_tiku_V2(CustomRecognition):
         logger.info(f"未在题库中搜索到答案次数:{NotAnswerCount}，请反馈开发者填充题库。")
         return CustomRecognition.AnalyzeResult(box=(0,0,0,0),detail="答题结束")
 
-@AgentServer.custom_recognition("sjqy_tiku_V3")
+@register_custom_recognition("sjqy_tiku_V3")
 class sjqy_tiku_V3(CustomRecognition):
 
     def analyze(
@@ -160,7 +219,7 @@ class sjqy_tiku_V3(CustomRecognition):
             # 根据位置排序OCR结果
         def sort_ocr_results_by_position(ocr_results):
             # 定义行高阈值，如果两个框的y坐标差距小于这个值，认为它们在同一行
-            row_height_threshold = 20
+            row_height_threshold = 10
             
             # 按y坐标分组（将接近的y坐标视为同一行）
             rows = {}
@@ -199,10 +258,11 @@ class sjqy_tiku_V3(CustomRecognition):
         
         #识别三界奇缘题目
         image1 = context.tasker.controller.post_screencap().wait().get()
+        question_roi, answer_roi = sjqy_rois(image1)
         reco_detail = context.run_recognition(
             "三界奇缘题目",
             image1,
-            pipeline_override={"三界奇缘题目": {"roi" : [447,40,673,94],
+            pipeline_override={"三界奇缘题目": {"roi" : question_roi,
                                                 "expected":[".*"],
                                                 "recognition": "OCR",
                                                 "replace":[
@@ -232,47 +292,34 @@ class sjqy_tiku_V3(CustomRecognition):
         for item in sorted_results:
             if item.text!='':
                 ext+=item.text
+        question_key = ext.strip()
         pattern = r'第\d+题：|[（(]\d+/\d+[）)]'
         def clean_string(s):
             return re.sub(pattern, '', s).strip()
         text = clean_string(ext)
         # 获取答案list[]
         results_value, confidence ,match_type = SearchQuestions(text)
-        # 获取时间并格式化
-        formatted = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-        # 如果可信度为零，点击第一个答案
+        answer_candidates = parse_answer_candidates(results_value)
+
+        if question_key == getattr(self, "last_question_key", None):
+            self.last_status = "unchanged"
+            logger.error(f"题目未变化，停止重复点击：{text}")
+            return CustomRecognition.AnalyzeResult(box=(0,0,0,0),detail="题目未变化")
+
         if confidence < 80:
-            # logger.info(f"题库中未找到答案，问题为:{text}.请反馈开发者填充题库")
-            # 预留接口，未在题库中找得到问题，可以把截图发送到服务器。
-            # context.tasker.controller.post_screencap().wait().save("{text}.png")
-            # 发送到金山文档1.识别到的问题，2.匹配度，3.题库答案，4.时间
-            data_to_send = [text,confidence,results_value,formatted]
-            # logger.info(f"发送到金山文档的数据为:{data_to_send}")   
-            if SendJinSan.send(data_to_send):
-                logger.info(f"[color:red]未与题库匹配。[/color]识别题目：{text}，匹配度：{confidence}，已经登记在线文档")
-            else:
-                logger.error(f"登记在线文档失败:{text}")
-            time.sleep(2)
-            context.tasker.controller.post_click(500, 344).wait()
-            time.sleep(3)
+            self.last_status = "low_confidence"
+            logger.error(f"题库匹配度不足，停止答题：{text}，匹配度：{confidence}")
             return CustomRecognition.AnalyzeResult(box=(0,0,0,0),detail="题库缺少本问题")
         elif confidence >=80 and confidence < 100:
-            
-            # 发送到金山文档
-            data_to_send = [text,confidence,results_value,formatted]
-            # logger.info(f"发送到金山文档的数据为:{data_to_send}")   
-            if SendJinSan.send(data_to_send):
-                logger.info(f"本问题与题库非100%匹配:{text},已经登记在线文档")
-            else:
-                logger.error(f"登记在线文档失败:{text}")
+            logger.warning(f"本问题与题库非100%匹配：{text}，匹配度：{confidence}")
         # 识别答案位置
         # new_context = context.clone()
         # image2 = context.tasker.controller.post_screencap().wait().get()
         new_reco_detail = context.run_recognition(
                         "三界奇缘答案位置",
                         image1,
-                        pipeline_override={"三界奇缘答案位置": {"roi" : [439,218,678,212],
-                                                            "expected":results_value,
+                        pipeline_override={"三界奇缘答案位置": {"roi" : answer_roi,
+                                                            "expected":answer_candidates,
                                                             "recognition": "OCR"
                                                             }
                                             }
@@ -284,18 +331,39 @@ class sjqy_tiku_V3(CustomRecognition):
             box = new_reco_detail.box  # 假设box为(x, y, w, h)
             center_x = box[0] + box[2] // 2
             center_y = box[1] + box[3] // 2 
+            if os.environ.get("MAA_SJQY_RECOGNIZE_ONLY") == "1":
+                self.last_question = text
+                self.last_question_key = question_key
+                self.last_status = "ready"
+                self.last_click = (center_x, center_y)
+                self.last_image_size = (image1.shape[1], image1.shape[0])
+                logger.info(
+                    f"识别完成，等待外部输入桥接。题目：{text}。答案：{answer_candidates}。"
+                    f"答案框：{box}。点击坐标：({center_x}, {center_y})。"
+                )
+                return CustomRecognition.AnalyzeResult(box=box, detail="答案坐标已就绪")
             time.sleep(2)
             click_job = context.tasker.controller.post_click(center_x, center_y)
-            click_job.wait()  # 等待点击操作完成
+            click_result = click_job.wait()
+            if not click_result.succeeded:
+                self.last_status = "click_failed"
+                logger.error(f"点击任务失败：{text}，坐标：({center_x}, {center_y})")
+                return CustomRecognition.AnalyzeResult(box=(0,0,0,0),detail="点击失败")
+            self.last_question = text
+            self.last_question_key = question_key
+            self.last_status = "clicked"
             # image2 = context.tasker.controller.post_screencap().wait().get()
             # logger.info(image2)
-            logger.info(f"[color:blue]正确点击答案。[/color]识别题目：{text}。题库答案：{results_value}。匹配度：{confidence}。")
+            logger.info(
+                f"[color:blue]正确点击答案。[/color]识别题目：{text}。"
+                f"题库答案：{results_value}。匹配度：{confidence}。"
+                f"答案框：{box}。点击坐标：({center_x}, {center_y})。答案ROI：{answer_roi}。"
+            )
             time.sleep(2)
-        else:#没找到答案，点击的一个
-            time.sleep(2)
-            context.tasker.controller.post_click(500, 344).wait()
-            logger.info(f"[color:red]未在界面找到答案，点击第一个答案。[/color]识别题目：{text}。题库答案：{results_value}。匹配度：{confidence}。")
-            time.sleep(1)
+        else:
+            self.last_status = "answer_not_found"
+            logger.error(f"未在界面找到题库答案，停止答题。识别题目：{text}。题库答案：{answer_candidates}。匹配度：{confidence}。")
+            return CustomRecognition.AnalyzeResult(box=(0,0,0,0),detail="界面未找到答案")
 
         # logger.info(f"未在题库中搜索到答案次数:{NotAnswerCount}，请反馈开发者填充题库。")
         return CustomRecognition.AnalyzeResult(box=(0,0,0,0),detail="答题结束")

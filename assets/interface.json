@@ -18,6 +18,17 @@
             "label": "PlayCover",
             "type": "PlayCover",
             "description": "部分任务存在兼容问题，不建议使用"
+        },
+        {
+            "name": "MacOSGame",
+            "label": "macOS 手游客户端（实验性）",
+            "type": "MacOS",
+            "description": "连接从 Mac App Store 安装的《梦幻西游》手游客户端；需要授予录屏和辅助功能权限。",
+            "macos": {
+                "title_regex": "梦幻西游",
+                "screencap": "ScreenCaptureKit",
+                "input": "GlobalEvent"
+            }
         }
     ],
     "agent": {
@@ -67,6 +78,17 @@
                 "PlayCover"
             ],
             "description": "适用于Mac使用PlayCover的用户"
+        },
+        {
+            "name": "macOS手游客户端资源（实验性）",
+            "path": [
+                "./resource/base",
+                "./resource/mac"
+            ],
+            "controller": [
+                "MacOSGame"
+            ],
+            "description": "适用于 Mac App Store 安装的《梦幻西游》手游客户端；当前优先验证科举乡试。"
         }
     ],
     "task": [
@@ -505,7 +527,7 @@
         "是否使用Ai进行答题": {
             "type": "switch",
             "default_case": "Yes",
-            "description": "是否使用ai答题",
+            "description": "Yes：本地题库检索 Top 3 后交给远端模型复核；模型超时时仅使用高置信度题库结果兜底。No：全选 A。",
             "cases": [
                 {
                     "name": "No",
@@ -521,13 +543,13 @@
                 },
                 {
                     "name": "Yes",
-                    "description": "支持OpenaiAPI规范的模型",
+                    "description": "本地题库 Top 3 + OpenAI API 兼容模型复核",
                     "pipeline_override": {
                         "活动-科举乡试-进入答题界面": {
                             "next": [
                                 "活动-科举乡试-结束-图片",
                                 "活动-科举乡试-结束ocr",
-                                "[JumpBack]活动-科举乡试-开始答题API"
+                                "[JumpBack]活动-科举乡试-开始答题混合"
                             ]
                         }
                     },
@@ -596,6 +618,13 @@
             ],
             "pipeline_override": {
                 "活动-科举乡试-开始答题API": {
+                    "attach": {
+                        "apikey": "{apikey}",
+                        "url": "{url}",
+                        "model": "{model}"
+                    }
+                },
+                "活动-科举乡试-开始答题混合": {
                     "attach": {
                         "apikey": "{apikey}",
                         "url": "{url}",

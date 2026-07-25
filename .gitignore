@@ -450,5 +450,9 @@ tools/ImageCropper/**/*.png
 config
 debug
 
+# Local development plans and session-maintenance prompt
+.local-planning/
+.venv*/
+
 # 答题日志文件
 agent/custom/recognition/search_log.txt

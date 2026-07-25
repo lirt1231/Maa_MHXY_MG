@@ -78,6 +78,17 @@ class AspectRatioChecker(TaskerEventSink):
             logger.error("无法获取控制器")
             return
 
+        try:
+            controller_type = controller.info.get("type", "")
+        except Exception:
+            controller_type = ""
+
+        # Mac App Store 的 iOS 兼容窗口允许自由改变比例。科举混合识别器会按
+        # 实际截图尺寸缩放 ROI，因此只为这一条实验性任务放宽 16:9 限制。
+        if controller_type == "macos" and detail.entry == "kejuxiangshi":
+            logger.warning("macOS 科举实验任务：跳过全局 16:9 限制，使用动态 ROI")
+            return
+
         # 获取缓存的图像
         try:
             img = controller.cached_image

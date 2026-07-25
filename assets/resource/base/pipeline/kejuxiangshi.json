@@ -236,6 +236,18 @@
             "model": ""
         }
     },
+    "活动-科举乡试-开始答题混合": {
+        "max_hit": 100,
+        "recognition": "Custom",
+        "custom_recognition": "KejuHybridAnswer",
+        "attach": {
+            "apikey": "",
+            "url": "",
+            "model": "",
+            "timeout": 12,
+            "fallback_threshold": 92
+        }
+    },
     "活动-科举乡试-开始答题agent-智谱": {
         "max_hit": 100,
         "recognition": "Custom",
