@@ -456,3 +456,9 @@ debug
 
 # 答题日志文件
 agent/custom/recognition/search_log.txt
+
+# Local dashboard runtime and frontend build files
+dashboard.sqlite3*
+web/node_modules/
+web/dist/
+web/*.tsbuildinfo

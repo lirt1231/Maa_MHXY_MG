@@ -47,6 +47,26 @@
 - [CMD 运行教程](./docs/CMD运行教程.md)
 - [功能列表](./docs/功能列表.md)
 
+## macOS 本地控制看板（实验性）
+
+看板首版仅开放已经过原生 macOS 适配的三界奇缘、科举乡试和捉鬼任务。页面会显示每个任务的操作说明、启动前检查、实时日志、运行历史以及金币/经验快照趋势。
+
+```bash
+# 安装 Python 依赖
+python -m pip install -r requirements.txt
+
+# 首次构建前端
+cd web
+npm install
+npm run build
+cd ..
+
+# 启动本地页面（默认 http://127.0.0.1:8765）
+python -m dashboard
+```
+
+开发前端时可分别运行 `python -m dashboard --no-browser` 和 `cd web && npm run dev`。指标采集不会打断答题任务；请在系统空闲且位于游戏主界面时点击“立即自动采集”，控制台会依次打开背包和人物属性页，读取金币、等级与经验后恢复主界面。控制台每天首次打开时也会提示尚未完成当天采集。
+
 ## 鸣谢
 
 本项目由 [MaaFramework](https://github.com/MaaXYZ/MaaFramework) 提供强力支持，感谢所有参与和支持项目开发的贡献者！
