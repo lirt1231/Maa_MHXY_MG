@@ -1,4 +1,4 @@
-import type { Metrics, Run, RunSummary, SystemState, Task, TaskInspection } from "./types";
+import type { GameDataResponse, GameDataSnapshot, Metrics, Run, RunSummary, SystemState, Task, TaskInspection } from "./types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -16,6 +16,10 @@ export const api = {
   system: () => request<SystemState>("/api/system"),
   tasks: () => request<{ items: Task[] }>("/api/tasks"),
   runs: () => request<{ items: Run[]; summary: RunSummary }>("/api/runs"),
+  gameData: () => request<GameDataResponse>("/api/game-data"),
+  captureDailyTasks: () => request<GameDataSnapshot>(
+    "/api/game-data/daily-tasks/capture", { method: "POST" }
+  ),
   metrics: (metric: "gold" | "experience", rangeDays = 7) =>
     request<Metrics>(`/api/metrics?range=${rangeDays}d&metric=${metric}`),
   start: (taskId: string, options: Record<string, unknown>) =>

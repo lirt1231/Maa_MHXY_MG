@@ -124,6 +124,31 @@ export type MetricSnapshot = {
   corrected: boolean;
 };
 
+export type GameDataSnapshot = {
+  id: number;
+  capturedAt: string;
+  category: string;
+  sourcePage: string;
+  status: "success" | "partial" | "failed";
+  data: Record<string, unknown>;
+  evidence: Record<string, unknown>;
+  error?: string | null;
+};
+
+export type GameDataResponse = {
+  items: GameDataSnapshot[];
+  latestByCategory: Record<string, GameDataSnapshot | null>;
+};
+
+export type DailyTaskItem = {
+  taskId?: string | null;
+  name: string;
+  completed: number | null;
+  target: number | null;
+  status: "completed" | "available" | "locked" | "unknown";
+  rewardStatus: "claimable" | "claimed" | "unknown";
+};
+
 export type RunSummary = {
   total: number;
   succeeded: number;

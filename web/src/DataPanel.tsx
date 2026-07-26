@@ -1,5 +1,7 @@
+import { useState } from "react";
+import { CharacterResourcesView, DailyTasksView } from "./GameDataViews";
 import { TrendChart } from "./TrendChart";
-import type { MetricSnapshot, Metrics, SystemState } from "./types";
+import type { GameDataResponse, GameDataSnapshot, MetricSnapshot, Metrics, SystemState } from "./types";
 
 function formatNumber(value: number | null | undefined) {
   return value == null ? "—" : new Intl.NumberFormat("zh-CN").format(value);
@@ -55,39 +57,81 @@ function SnapshotStatus({ snapshot }: { snapshot: MetricSnapshot }) {
 type Props = {
   system?: SystemState;
   metrics?: Metrics;
+  gameData?: GameDataResponse;
   metricKind: "gold" | "experience";
   rangeDays: 7 | 30;
   busy: boolean;
   capturing: boolean;
+  capturingDailyTasks: boolean;
   onMetricKindChange: (kind: "gold" | "experience") => void;
   onRangeDaysChange: (days: 7 | 30) => void;
   onCapture: () => void;
+  onCaptureDailyTasks: () => void;
   onCorrect: () => void;
 };
 
 export function DataPanel({
-  system, metrics, metricKind, rangeDays, busy, capturing,
-  onMetricKindChange, onRangeDaysChange, onCapture, onCorrect
+  system, metrics, gameData, metricKind, rangeDays, busy, capturing,
+  capturingDailyTasks, onMetricKindChange, onRangeDaysChange, onCapture,
+  onCaptureDailyTasks, onCorrect
 }: Props) {
+  const [view, setView] = useState<"resources" | "daily" | "history">("resources");
   const latest = metrics?.snapshots.at(-1);
   const latestSuccessful = [...(metrics?.snapshots || [])].reverse().find((item) => item.status === "success");
   const stats = metrics?.stats;
   const history = [...(metrics?.snapshots || [])].reverse().slice(0, 8);
   const metricLabel = metricKind === "gold" ? "金币" : "经验";
   const changeClass = (value: number | null | undefined) => (value || 0) >= 0 ? "positive" : "negative";
+  const latestResource = gameData?.latestByCategory.character_resources || (
+    latestSuccessful ? {
+      id: latestSuccessful.id,
+      capturedAt: latestSuccessful.capturedAt,
+      category: "character_resources",
+      sourcePage: "历史指标快照",
+      status: "success",
+      data: {
+        gold: latestSuccessful.gold,
+        level: latestSuccessful.level,
+        experience: latestSuccessful.experience,
+        experienceRequired: latestSuccessful.experienceRequired,
+      },
+      evidence: { migratedFromMetrics: true },
+      error: latestSuccessful.error,
+    } satisfies GameDataSnapshot : undefined
+  );
+  const latestDaily = gameData?.latestByCategory.daily_tasks;
+  const latestRaw = (gameData?.items || []).reduce<GameDataSnapshot | undefined>((current, item) => {
+    if (!current) return item;
+    return Date.parse(item.capturedAt) > Date.parse(current.capturedAt) ? item : current;
+  }, undefined);
 
   return <div className="panel-page data-panel-page">
     <section className="data-hero">
       <div>
-        <span className="eyebrow">RESOURCE ANALYTICS · {rangeDays} DAYS</span>
+        <span className="eyebrow">GAME DATA · SOURCE SNAPSHOTS</span>
         <h1>数据面板</h1>
-        <p>查看资源变化、角色快照与采集质量。</p>
+        <p>查看角色资源、今日任务与历史趋势。</p>
       </div>
-      <div className={`snapshot-badge ${system?.metricCollectedToday ? "done" : "pending"}`}>
-        <span>{system?.metricCollectedToday ? "今日已采集" : "今日待采集"}</span>
-        <small>{latest ? formatTime(latest.capturedAt) : "暂无快照"}</small>
+      <div className={`snapshot-badge ${latestRaw ? "done" : "pending"}`}>
+        <span>{latestRaw ? "原始数据已接入" : "等待原始数据"}</span>
+        <small>{latestRaw ? formatTime(latestRaw.capturedAt) : "暂无快照"}</small>
       </div>
     </section>
+
+    <div className="segmented data-view-tabs" role="tablist" aria-label="数据视图">
+      <button id="data-tab-resources" role="tab" aria-selected={view === "resources"} aria-controls="data-panel-resources" className={view === "resources" ? "active" : ""} onClick={() => setView("resources")}>角色资源</button>
+      <button id="data-tab-daily" role="tab" aria-selected={view === "daily"} aria-controls="data-panel-daily" className={view === "daily" ? "active" : ""} onClick={() => setView("daily")}>今日任务</button>
+      <button id="data-tab-history" role="tab" aria-selected={view === "history"} aria-controls="data-panel-history" className={view === "history" ? "active" : ""} onClick={() => setView("history")}>历史趋势</button>
+    </div>
+
+    {view === "resources" && <CharacterResourcesView snapshot={latestResource} />}
+    {view === "daily" && <DailyTasksView
+      snapshot={latestDaily}
+      capturing={capturingDailyTasks}
+      disabled={busy || capturing || !system?.available}
+      onCapture={onCaptureDailyTasks}
+    />}
+    {view === "history" && <div role="tabpanel" id="data-panel-history" aria-labelledby="data-tab-history">
 
     <section className="data-toolbar" aria-label="数据筛选">
       <div className="segmented" aria-label="指标类型">
@@ -133,7 +177,7 @@ export function DataPanel({
         <div className="capture-state"><span>最近状态</span><strong className={latest?.status === "success" ? "positive" : "negative"}>{latest ? latest.status === "success" ? "采集成功" : "需要处理" : "尚未采集"}</strong></div>
         <div className="capture-state"><span>区间采集</span><strong>{stats?.attempts ?? 0} 次</strong></div>
         {latest?.error && <small className="capture-error">{latest.error}</small>}
-        <button className="button primary wide" disabled={busy || capturing || !system?.windowFound} onClick={onCapture}>{capturing ? "正在自动采集…" : "立即自动采集"}</button>
+        <button className="button primary wide" disabled={busy || capturing || capturingDailyTasks || !system?.available} onClick={onCapture}>{capturing ? "正在自动采集…" : "立即自动采集"}</button>
         {latest && <button className="button ghost wide correction-button" disabled={busy} onClick={onCorrect}>修正最近记录</button>}
       </article>
     </section>
@@ -152,5 +196,6 @@ export function DataPanel({
         </tr>)}</tbody>
       </table></div> : <div className="snapshot-empty">当前范围内暂无采集记录</div>}
     </section>
+    </div>}
   </div>;
 }
