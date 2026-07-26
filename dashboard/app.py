@@ -63,6 +63,16 @@ def create_app(database_path: Path | None = None) -> FastAPI:
     app.state.database = database
     app.state.broker = broker
     app.state.runner = runner
+
+    def publish_game_data(snapshot: dict, *, level: str, message: str) -> None:
+        broker.publish({
+            "runId": "system",
+            "createdAt": utc_now(),
+            "level": level,
+            "type": "game_data",
+            "message": message,
+            "payload": snapshot,
+        })
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
@@ -170,7 +180,7 @@ def create_app(database_path: Path | None = None) -> FastAPI:
             payload = await asyncio.to_thread(collect_daily_task_data)
         except TimeoutError as exc:
             error = str(exc)
-            database.add_game_data_snapshot({
+            snapshot = database.add_game_data_snapshot({
                 "category": "daily_tasks",
                 "sourcePage": "daily_schedule",
                 "status": "failed",
@@ -178,10 +188,11 @@ def create_app(database_path: Path | None = None) -> FastAPI:
                 "evidence": {},
                 "error": error,
             })
+            publish_game_data(snapshot, level="error", message=error)
             raise HTTPException(status_code=504, detail=error) from exc
         except RuntimeError as exc:
             error = str(exc)
-            database.add_game_data_snapshot({
+            snapshot = database.add_game_data_snapshot({
                 "category": "daily_tasks",
                 "sourcePage": "daily_schedule",
                 "status": "failed",
@@ -189,6 +200,7 @@ def create_app(database_path: Path | None = None) -> FastAPI:
                 "evidence": {},
                 "error": error,
             })
+            publish_game_data(snapshot, level="error", message=error)
             raise HTTPException(status_code=502, detail=error) from exc
         finally:
             runner.end_read_only()
@@ -200,14 +212,7 @@ def create_app(database_path: Path | None = None) -> FastAPI:
             "data": payload["data"],
             "evidence": payload["evidence"],
         })
-        broker.publish({
-            "runId": "system",
-            "createdAt": utc_now(),
-            "level": "info",
-            "type": "game_data",
-            "message": "今日任务数据采集完成",
-            "payload": snapshot,
-        })
+        publish_game_data(snapshot, level="info", message="今日任务数据采集完成")
         return snapshot
 
     @app.post("/api/metrics/capture", status_code=202)

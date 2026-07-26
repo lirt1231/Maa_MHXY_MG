@@ -171,6 +171,9 @@ class DashboardApiTests(unittest.TestCase):
         side_effect=TimeoutError("日程数据采集超过 15 秒，已停止采集"),
     )
     def test_daily_task_capture_timeout_is_recorded_and_releases_lock(self, collect):
+        publish = Mock(wraps=self.client.app.state.broker.publish)
+        self.client.app.state.broker.publish = publish
+
         response = self.client.post("/api/game-data/daily-tasks/capture")
 
         self.assertEqual(response.status_code, 504)
@@ -180,6 +183,10 @@ class DashboardApiTests(unittest.TestCase):
         self.assertEqual(latest["status"], "failed")
         self.assertIn("15 秒", latest["error"])
         self.assertFalse(self.client.app.state.runner.inspecting)
+        event = publish.call_args.args[0]
+        self.assertEqual(event["type"], "game_data")
+        self.assertEqual(event["level"], "error")
+        self.assertEqual(event["payload"], latest)
 
     @patch("dashboard.app.collect_daily_task_data")
     def test_daily_task_capture_is_rejected_during_another_read_only_operation(
