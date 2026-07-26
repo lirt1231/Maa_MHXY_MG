@@ -51,6 +51,8 @@
 
 看板首版仅开放已经过原生 macOS 适配的三界奇缘、科举乡试和捉鬼任务。控制台分为任务面板与数据面板：任务面板负责游戏启动、操作说明、启动前检查、实时日志和运行历史；数据面板负责全自动金币/经验采集、修正与七天趋势。
 
+后续开发顺序与逐项验收标准见 [macOS 控制台后续开发路线](docs/macos-dashboard-roadmap.md)。
+
 ```bash
 # 安装 Python 依赖
 python -m pip install -r requirements.txt
