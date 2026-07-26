@@ -41,6 +41,7 @@ class Database:
                     finished_at TEXT,
                     duration_ms INTEGER,
                     error TEXT,
+                    result_json TEXT,
                     benefit_status TEXT NOT NULL DEFAULT 'not_captured'
                 );
                 CREATE TABLE IF NOT EXISTS run_events (
@@ -68,6 +69,11 @@ class Database:
                 );
                 """
             )
+            columns = {
+                row["name"] for row in db.execute("PRAGMA table_info(task_runs)")
+            }
+            if "result_json" not in columns:
+                db.execute("ALTER TABLE task_runs ADD COLUMN result_json TEXT")
 
     def create_run(self, run: dict[str, Any]) -> None:
         with self.connect() as db:
@@ -79,7 +85,13 @@ class Database:
                 ),
             )
 
-    def update_run(self, run_id: str, status: str, error: str | None = None) -> None:
+    def update_run(
+        self,
+        run_id: str,
+        status: str,
+        error: str | None = None,
+        result: dict[str, Any] | None = None,
+    ) -> None:
         now = utc_now()
         with self.connect() as db:
             row = db.execute("SELECT started_at FROM task_runs WHERE id=?", (run_id,)).fetchone()
@@ -88,8 +100,15 @@ class Database:
             started = datetime.fromisoformat(row["started_at"])
             duration = max(0, int((datetime.now(UTC) - started).total_seconds() * 1000))
             db.execute(
-                "UPDATE task_runs SET status=?, finished_at=?, duration_ms=?, error=? WHERE id=?",
-                (status, now, duration, error, run_id),
+                "UPDATE task_runs SET status=?, finished_at=?, duration_ms=?, error=?, result_json=? WHERE id=?",
+                (
+                    status,
+                    now,
+                    duration,
+                    error,
+                    json.dumps(result, ensure_ascii=False) if result is not None else None,
+                    run_id,
+                ),
             )
 
     def add_event(self, run_id: str, level: str, event_type: str, message: str, payload: dict | None = None) -> dict:
@@ -185,7 +204,6 @@ class Database:
 
     def metrics(self, days: int = 7, metric: str = "gold") -> dict:
         cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
-        column = "gold" if metric == "gold" else "experience"
         with self.connect() as db:
             rows = db.execute(
                 f"SELECT * FROM metric_snapshots WHERE captured_at>=? ORDER BY captured_at", (cutoff,)
@@ -193,11 +211,32 @@ class Database:
         snapshots = [self._metric_row(row) for row in rows]
         points = [{"capturedAt": item["capturedAt"], "value": item[metric], "status": item["status"]} for item in snapshots]
         valid = [point["value"] for point in points if point["value"] is not None and point["status"] == "success"]
+        successful_captures = sum(item["status"] == "success" for item in snapshots)
+        failed_captures = len(snapshots) - successful_captures
+        latest_change = valid[-1] - valid[-2] if len(valid) >= 2 else None
         return {
             "metric": metric,
             "rangeDays": days,
             "current": valid[-1] if valid else None,
             "change": valid[-1] - valid[0] if len(valid) >= 2 else None,
+            "stats": {
+                "attempts": len(snapshots),
+                "successfulCaptures": successful_captures,
+                "failedCaptures": failed_captures,
+                "correctedCaptures": sum(item["corrected"] for item in snapshots),
+                "captureSuccessRate": round(successful_captures * 100 / len(snapshots), 1) if snapshots else 0,
+                "validValues": len(valid),
+                "minimum": min(valid) if valid else None,
+                "maximum": max(valid) if valid else None,
+                "average": round(sum(valid) / len(valid)) if valid else None,
+                "latestChange": latest_change,
+                "averageChangePerCapture": round((valid[-1] - valid[0]) / (len(valid) - 1)) if len(valid) >= 2 else None,
+                "daysWithData": len({
+                    datetime.fromisoformat(point["capturedAt"]).astimezone().date()
+                    for point in points
+                    if point["value"] is not None and point["status"] == "success"
+                }),
+            },
             "points": points,
             "snapshots": snapshots,
         }
@@ -248,7 +287,9 @@ class Database:
             "id": row["id"], "taskId": row["task_id"], "taskName": row["task_name"],
             "status": row["status"], "options": json.loads(row["options_json"]),
             "startedAt": row["started_at"], "finishedAt": row["finished_at"],
-            "durationMs": row["duration_ms"], "error": row["error"], "benefitStatus": row["benefit_status"],
+            "durationMs": row["duration_ms"], "error": row["error"],
+            "result": json.loads(row["result_json"]) if row["result_json"] else None,
+            "benefitStatus": row["benefit_status"],
         }
 
     @staticmethod

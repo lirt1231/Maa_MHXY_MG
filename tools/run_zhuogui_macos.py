@@ -38,6 +38,16 @@ from macos_cancellation import CancellationGuard, CancellationRequested  # noqa:
 from run_sanjieqiyuan_macos import NativeMacOSInput  # noqa: E402
 
 
+RESULT_PREFIX = "result_json="
+RESULT_STATUSES = {
+    "completed",
+    "already_completed",
+    "limit_reached",
+    "safe_stopped",
+    "cancelled",
+}
+
+
 @dataclass
 class WorkflowState:
     phase: str = "ensure_team"
@@ -52,6 +62,49 @@ class WorkflowState:
     round_started_at: float | None = None
     last_task_click_at: float | None = None
     navigate_not_before: float | None = None
+    steps: int = 0
+    last_ghost_progress: int | None = None
+
+
+def build_result(
+    status: str,
+    state: WorkflowState,
+    target_rounds: int,
+    *,
+    reason: str | None = None,
+    max_steps: int | None = None,
+) -> dict:
+    """Build the stable, non-sensitive terminal result for one task run."""
+    if status not in RESULT_STATUSES:
+        raise ValueError(f"unsupported result status: {status}")
+    if (
+        isinstance(target_rounds, bool)
+        or not isinstance(target_rounds, int)
+        or target_rounds <= 0
+    ):
+        raise ValueError("target_rounds must be positive")
+    if status in {"safe_stopped", "cancelled"} and not str(reason or "").strip():
+        raise ValueError(f"{status} requires a reason")
+
+    result = {
+        "task_id": "zhuogui",
+        "status": status,
+        "rounds": state.completed_rounds,
+        "target_rounds": target_rounds,
+        "steps": state.steps,
+    }
+    if state.last_ghost_progress is not None:
+        result["ghost_progress"] = state.last_ghost_progress
+    if max_steps is not None:
+        result["max_steps"] = max_steps
+    if reason:
+        result["reason"] = str(reason)
+    return result
+
+
+def emit_result(result: dict) -> None:
+    """Emit the sole terminal protocol line consumed by the dashboard."""
+    print(RESULT_PREFIX + json.dumps(result, ensure_ascii=False), flush=True)
 
 
 def parse_args():
@@ -216,6 +269,7 @@ def scene_summary(scene):
     return {
         "image_size": scene["image_size"],
         "decision": scene["decision"],
+        "proposed_action": proposed_action(scene["decision"]),
         "evidence": {
             "ocr_item_count": len(scene["texts"]),
             "matched_templates": sorted(
@@ -225,7 +279,12 @@ def scene_summary(scene):
     }
 
 
-def run_workflow(args, guard: CancellationGuard) -> int:
+def run_workflow(
+    args,
+    guard: CancellationGuard,
+    state: WorkflowState | None = None,
+) -> dict | None:
+    state = state or WorkflowState()
     guard.checkpoint()
     os.environ["MAA_DIRECT_RESOURCE"] = "1"
     Toolkit.init_option(str(ROOT))
@@ -263,8 +322,12 @@ def run_workflow(args, guard: CancellationGuard) -> int:
     native_input = NativeMacOSInput()
     first_scene = read_scene(tasker, controller, guard)
     if args.inspect_scene:
-        print(json.dumps(scene_summary(first_scene), ensure_ascii=False), flush=True)
-        return 0
+        print(
+            "preflight_json="
+            + json.dumps(scene_summary(first_scene), ensure_ascii=False),
+            flush=True,
+        )
+        return None
     if args.recognize_only:
         print(
             json.dumps(
@@ -277,9 +340,8 @@ def run_workflow(args, guard: CancellationGuard) -> int:
             ),
             flush=True,
         )
-        return 0
+        return None
 
-    state = WorkflowState()
     budget = RuntimeBudget(
         recruitment_timeout=args.recruit_timeout,
         max_rebuilds=args.max_rebuilds,
@@ -298,11 +360,15 @@ def run_workflow(args, guard: CancellationGuard) -> int:
         click(box_center(box) if box else None, scene, reason)
 
     for step in range(1, args.max_steps + 1):
+        state.steps = step
         guard.checkpoint()
         now = time.monotonic()
         scene = read_scene(tasker, controller, guard)
         decision = scene["decision"]
         status = decision["status"]
+        progress = decision.get("progress")
+        if isinstance(progress, int) and not isinstance(progress, bool) and progress >= 0:
+            state.last_ghost_progress = progress
         log_event(
             "scene",
             step=step,
@@ -313,6 +379,9 @@ def run_workflow(args, guard: CancellationGuard) -> int:
         )
         if status != "unknown":
             state.unknown_count = 0
+
+        if status == "already_completed":
+            return build_result("already_completed", state, args.rounds)
 
         if status == "double_points_prompt":
             if state.double_claims_this_round >= 1:
@@ -347,7 +416,7 @@ def run_workflow(args, guard: CancellationGuard) -> int:
             if action == "finish":
                 click(decision.get("cancel"), scene, "达到目标轮数，取消继续")
                 log_event("completed", rounds=state.completed_rounds)
-                return 0
+                return build_result("completed", state, args.rounds)
             click(decision.get("confirm"), scene, "继续下一轮")
             state.phase = "recruit"
             state.double_claims_this_round = 0
@@ -531,24 +600,58 @@ def run_workflow(args, guard: CancellationGuard) -> int:
 
         state.unknown_count += 1
         if state.unknown_count >= 3:
-            raise RuntimeError(
-                "连续三次无法识别当前画面，停止："
-                + json.dumps(scene_summary(scene), ensure_ascii=False)
-            )
+            raise RuntimeError("连续三次无法识别当前画面，已停止")
         guard.wait(args.poll_interval)
 
-    raise RuntimeError(f"达到最大状态步骤：{args.max_steps}")
+    raise RuntimeError(
+        f"达到最大状态步骤 {args.max_steps}，"
+        f"仅完成 {state.completed_rounds}/{args.rounds} 轮，已安全停止"
+    )
 
 
 def main() -> int:
     guard = CancellationGuard()
     guard.install_signal_handlers()
+    args = parse_args()
+    state = WorkflowState()
     try:
-        return run_workflow(parse_args(), guard)
-    except CancellationRequested as exc:
-        guard.wait_for_tasker_stop()
-        log_event("stop_ack", status="cancelled", reason=str(exc))
+        result = run_workflow(args, guard, state)
+        if args.inspect_scene or args.recognize_only:
+            return 0
+        if result is None:
+            raise RuntimeError("捉鬼任务没有返回结构化最终结果")
+        emit_result(result)
         return 0
+    except CancellationRequested as exc:
+        reason = str(exc) or "收到停止请求"
+        try:
+            guard.wait_for_tasker_stop()
+        except Exception as stop_exc:
+            reason = f"{reason}；停止确认失败：{stop_exc}"
+        if not (args.inspect_scene or args.recognize_only):
+            emit_result(
+                build_result(
+                    "cancelled",
+                    state,
+                    args.rounds,
+                    reason=reason,
+                )
+            )
+        log_event("stop_ack", status="cancelled", reason=reason)
+        return 0
+    except Exception as exc:
+        if not (args.inspect_scene or args.recognize_only):
+            emit_result(
+                build_result(
+                    "safe_stopped",
+                    state,
+                    args.rounds,
+                    reason=str(exc) or "捉鬼任务异常停止",
+                    max_steps=args.max_steps,
+                )
+            )
+        print(f"safe_stop_reason={exc}", flush=True)
+        return 1
 
 
 if __name__ == "__main__":

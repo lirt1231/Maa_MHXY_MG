@@ -20,6 +20,60 @@ bool read_window_bounds(NSDictionary* info, CGRect* bounds)
 
 } // namespace
 
+extern "C" uint32_t MaaMHXYFindWindow(const char* bundle_id_utf8, const char* window_title_utf8)
+{
+    @autoreleasepool {
+        if (!bundle_id_utf8) {
+            return 0;
+        }
+        NSString* bundle_id = [NSString stringWithUTF8String:bundle_id_utf8];
+        NSString* target_title = window_title_utf8
+            ? [NSString stringWithUTF8String:window_title_utf8]
+            : @"";
+        NSArray<NSRunningApplication*>* applications =
+            [NSRunningApplication runningApplicationsWithBundleIdentifier:bundle_id];
+        NSRunningApplication* application = nil;
+        for (NSRunningApplication* candidate in applications) {
+            if (!candidate.terminated) {
+                application = candidate;
+                break;
+            }
+        }
+        if (!application) {
+            return 0;
+        }
+
+        CFArrayRef window_info_ref = CGWindowListCopyWindowInfo(
+            kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
+            kCGNullWindowID);
+        if (!window_info_ref) {
+            return 0;
+        }
+        NSArray* window_info = CFBridgingRelease(window_info_ref);
+        uint32_t best_window_id = 0;
+        double best_score = -1;
+        for (NSDictionary* info in window_info) {
+            NSNumber* owner_pid = info[(id)kCGWindowOwnerPID];
+            NSNumber* layer = info[(id)kCGWindowLayer];
+            if (owner_pid.intValue != application.processIdentifier || layer.intValue != 0) {
+                continue;
+            }
+            CGRect bounds = CGRectZero;
+            if (!read_window_bounds(info, &bounds) || bounds.size.width <= 0 || bounds.size.height <= 0) {
+                continue;
+            }
+            NSString* title = info[(id)kCGWindowName];
+            bool title_matches = target_title.length == 0 || [title isEqualToString:target_title];
+            double score = bounds.size.width * bounds.size.height + (title_matches ? 1e12 : 0);
+            if (score > best_score) {
+                best_score = score;
+                best_window_id = [info[(id)kCGWindowNumber] unsignedIntValue];
+            }
+        }
+        return best_window_id;
+    }
+}
+
 extern "C" int MaaMHXYClickWindow(
     const char* bundle_id_utf8,
     const char* window_title_utf8,

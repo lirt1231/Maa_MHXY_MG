@@ -1,6 +1,10 @@
 import tempfile
 import unittest
+import sqlite3
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from dashboard.database import Database
 from dashboard.metrics import (
@@ -10,13 +14,18 @@ from dashboard.metrics import (
     parse_visible_metrics,
 )
 from dashboard.registry import TASKS, task_list, validate_options
+from dashboard.system import _game_is_running
 
 
 class TaskRegistryTests(unittest.TestCase):
     def test_only_verified_macos_tasks_are_exposed(self):
-        self.assertEqual(set(TASKS), {"sanjieqiyuan", "keju", "zhuogui"})
+        self.assertEqual(
+            set(TASKS),
+            {"sanjieqiyuan", "keju", "zhuogui", "fuli_qiandao", "bangpai_qiandao"},
+        )
         self.assertTrue(all(task["checklist"] for task in task_list()))
         self.assertTrue(all(task["steps"] for task in task_list()))
+        self.assertTrue(all(task["risk"]["level"] in {"low", "medium", "high"} for task in task_list()))
 
     def test_defaults_and_integer_bounds_are_applied(self):
         self.assertEqual(validate_options("zhuogui", {}), {"rounds": 2})
@@ -26,6 +35,8 @@ class TaskRegistryTests(unittest.TestCase):
             validate_options("keju", {"apiKey": "must-not-be-accepted"})
 
     def test_task_specific_defaults(self):
+        self.assertEqual(validate_options("fuli_qiandao", {}), {})
+        self.assertEqual(validate_options("bangpai_qiandao", {}), {})
         self.assertEqual(
             validate_options("sanjieqiyuan", {}),
             {"maxSteps": 10, "navigation": "auto"},
@@ -67,6 +78,25 @@ class MetricParsingTests(unittest.TestCase):
         )
 
 
+class SystemInspectionTests(unittest.TestCase):
+    @patch("dashboard.system.subprocess.run")
+    def test_game_process_detection_does_not_require_window_capture(self, run):
+        run.return_value = SimpleNamespace(returncode=0, stdout='ASN:0x0-0x1-"梦幻西游":\n')
+        self.assertTrue(_game_is_running())
+        run.assert_called_once_with(
+            ["/usr/bin/lsappinfo", "find", "bundleID=com.netease.my"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=3,
+        )
+
+    @patch("dashboard.system.subprocess.run")
+    def test_missing_game_process_returns_false(self, run):
+        run.return_value = SimpleNamespace(returncode=0, stdout="\n")
+        self.assertFalse(_game_is_running())
+
+
 class DatabaseTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -89,6 +119,36 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(corrected["status"], "success")
         self.assertTrue(corrected["corrected"])
         self.assertEqual(corrected["gold"], 1234)
+
+    def test_structured_run_result_round_trips(self):
+        self.database.create_run({
+            "id": "structured", "taskId": "sanjieqiyuan", "taskName": "三界奇缘",
+            "status": "preparing", "options": {}, "startedAt": "2026-07-26T00:00:00+00:00",
+        })
+        result = {
+            "task_id": "sanjieqiyuan", "status": "safe_stopped",
+            "reason": "未识别到明确完成状态",
+        }
+        self.database.update_run("structured", "failed", result["reason"], result)
+
+        restored = self.database.recent_runs(1)[0]
+        self.assertEqual(restored["result"], result)
+
+    def test_existing_database_is_migrated_for_structured_results(self):
+        path = Path(self.temp.name) / "legacy.sqlite3"
+        with sqlite3.connect(path) as db:
+            db.execute(
+                """CREATE TABLE task_runs (
+                id TEXT PRIMARY KEY, task_id TEXT NOT NULL, task_name TEXT NOT NULL,
+                status TEXT NOT NULL, options_json TEXT NOT NULL, started_at TEXT NOT NULL,
+                finished_at TEXT, duration_ms INTEGER, error TEXT,
+                benefit_status TEXT NOT NULL DEFAULT 'not_captured')"""
+            )
+
+        migrated = Database(path)
+        with migrated.connect() as db:
+            columns = {row["name"] for row in db.execute("PRAGMA table_info(task_runs)")}
+        self.assertIn("result_json", columns)
 
     def test_incomplete_runs_are_recovered_after_restart(self):
         self.database.create_run({
@@ -120,6 +180,41 @@ class DatabaseTests(unittest.TestCase):
         self.assertFalse(self.database.metric_collected_today())
         self.database.add_metric({"status": "success", "gold": 100})
         self.assertTrue(self.database.metric_collected_today())
+
+    def test_metric_statistics_distinguish_values_failures_and_corrections(self):
+        now = datetime.now(timezone.utc)
+        self.database.add_metric({
+            "capturedAt": (now - timedelta(days=2)).isoformat(),
+            "status": "success", "gold": 100,
+        })
+        self.database.add_metric({
+            "capturedAt": (now - timedelta(days=1)).isoformat(),
+            "status": "failed", "error": "OCR failed",
+        })
+        self.database.add_metric({
+            "capturedAt": now.isoformat(),
+            "status": "success", "gold": 160, "corrected": True,
+        })
+
+        metrics = self.database.metrics(7, "gold")
+
+        self.assertEqual(metrics["rangeDays"], 7)
+        self.assertEqual(metrics["current"], 160)
+        self.assertEqual(metrics["change"], 60)
+        self.assertEqual(metrics["stats"], {
+            "attempts": 3,
+            "successfulCaptures": 2,
+            "failedCaptures": 1,
+            "correctedCaptures": 1,
+            "captureSuccessRate": 66.7,
+            "validValues": 2,
+            "minimum": 100,
+            "maximum": 160,
+            "average": 130,
+            "latestChange": 60,
+            "averageChangePerCapture": 60,
+            "daysWithData": 2,
+        })
 
 
 if __name__ == "__main__":

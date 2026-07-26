@@ -1,4 +1,4 @@
-import type { Metrics, Run, RunSummary, SystemState, Task } from "./types";
+import type { Metrics, Run, RunSummary, SystemState, Task, TaskInspection } from "./types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -16,9 +16,14 @@ export const api = {
   system: () => request<SystemState>("/api/system"),
   tasks: () => request<{ items: Task[] }>("/api/tasks"),
   runs: () => request<{ items: Run[]; summary: RunSummary }>("/api/runs"),
-  metrics: (metric: "gold" | "experience") => request<Metrics>(`/api/metrics?range=7d&metric=${metric}`),
+  metrics: (metric: "gold" | "experience", rangeDays = 7) =>
+    request<Metrics>(`/api/metrics?range=${rangeDays}d&metric=${metric}`),
   start: (taskId: string, options: Record<string, unknown>) =>
     request<Run>("/api/runs", { method: "POST", body: JSON.stringify({ taskId, options, checklistConfirmed: true }) }),
+  inspect: (taskId: string, options: Record<string, unknown>) =>
+    request<TaskInspection>(`/api/tasks/${taskId}/inspect`, {
+      method: "POST", body: JSON.stringify({ options })
+    }),
   stop: (runId: string) => request<Run>(`/api/runs/${runId}/stop`, { method: "POST" }),
   capture: () => request("/api/metrics/capture", { method: "POST" }),
   startGame: () => request<SystemState>("/api/game/start", { method: "POST" }),

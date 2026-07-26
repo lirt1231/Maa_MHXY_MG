@@ -1,6 +1,11 @@
+import json
 import sys
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 
 RECOGNITION_DIR = Path(__file__).parents[1] / "agent" / "custom" / "recognition"
@@ -14,6 +19,7 @@ from zhuogui_macos_core import (  # noqa: E402
     round_completion_action,
     proposed_action,
 )
+from tools import run_zhuogui_macos as zhuogui_runner  # noqa: E402
 
 
 def item(text, x=10, y=10, width=80, height=24):
@@ -97,6 +103,20 @@ class SceneClassificationTests(unittest.TestCase):
         self.assertEqual(decision["status"], "round_complete")
         self.assertIsNotNone(decision["confirm"])
         self.assertIsNotNone(decision["cancel"])
+
+    def test_daily_limit_is_an_explicit_already_completed_state(self):
+        for message in ("今日捉鬼任务已完成", "捉鬼次数已达上限"):
+            with self.subTest(message=message):
+                decision = classify_scene([item(message)], self.image_size)
+                self.assertEqual(decision, {"status": "already_completed"})
+
+    def test_completion_words_from_other_rows_do_not_complete_ghost_task(self):
+        decision = classify_scene(
+            [item("今日活动"), item("捉鬼任务"), item("师门已完成")],
+            self.image_size,
+        )
+
+        self.assertNotEqual(decision["status"], "already_completed")
 
     def test_team_page_detects_offline_and_full_fifth_slot(self):
         items = [
@@ -222,6 +242,134 @@ class SafetyAndCountingTests(unittest.TestCase):
         budget.round_started_at = 100
         self.assertFalse(budget.round_expired(1300))
         self.assertTrue(budget.round_expired(1301))
+
+
+class StructuredResultTests(unittest.TestCase):
+    @staticmethod
+    def args(**changes):
+        values = {
+            "rounds": 2,
+            "inspect_scene": False,
+            "recognize_only": False,
+            "max_steps": 600,
+        }
+        values.update(changes)
+        return SimpleNamespace(**values)
+
+    @staticmethod
+    def protocol_results(output: str) -> list[dict]:
+        return [
+            json.loads(line[len(zhuogui_runner.RESULT_PREFIX):])
+            for line in output.splitlines()
+            if line.startswith(zhuogui_runner.RESULT_PREFIX)
+        ]
+
+    def run_main(self, args, workflow):
+        guard = Mock()
+        output = StringIO()
+        with (
+            patch.object(zhuogui_runner, "CancellationGuard", return_value=guard),
+            patch.object(zhuogui_runner, "parse_args", return_value=args),
+            patch.object(zhuogui_runner, "run_workflow", side_effect=workflow),
+            redirect_stdout(output),
+        ):
+            return_code = zhuogui_runner.main()
+        return (
+            return_code,
+            self.protocol_results(output.getvalue()),
+            guard,
+            output.getvalue(),
+        )
+
+    def test_completed_result_has_stable_round_counts(self):
+        state = zhuogui_runner.WorkflowState(completed_rounds=2, steps=24)
+        result = zhuogui_runner.build_result("completed", state, 2)
+        self.assertEqual(
+            result,
+            {
+                "task_id": "zhuogui",
+                "status": "completed",
+                "rounds": 2,
+                "target_rounds": 2,
+                "steps": 24,
+            },
+        )
+
+    def test_limit_result_preserves_partial_progress(self):
+        state = zhuogui_runner.WorkflowState(
+            completed_rounds=1,
+            steps=20,
+            last_ghost_progress=7,
+        )
+        result = zhuogui_runner.build_result(
+            "limit_reached", state, 2, max_steps=20
+        )
+        self.assertEqual(result["rounds"], 1)
+        self.assertEqual(result["target_rounds"], 2)
+        self.assertEqual(result["ghost_progress"], 7)
+        self.assertEqual(result["max_steps"], 20)
+
+    def test_successful_main_emits_exactly_one_completed_result(self):
+        def complete(args, _guard, state):
+            state.completed_rounds = args.rounds
+            state.steps = 24
+            return zhuogui_runner.build_result("completed", state, args.rounds)
+
+        return_code, results, _, _ = self.run_main(self.args(), complete)
+        self.assertEqual(return_code, 0)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["status"], "completed")
+        self.assertEqual(results[0]["rounds"], 2)
+
+    def test_exception_emits_exactly_one_safe_stop_result(self):
+        def fail(_args, _guard, state):
+            state.completed_rounds = 1
+            state.steps = 9
+            raise RuntimeError("连续三次无法识别当前画面，已停止")
+
+        return_code, results, _, _ = self.run_main(self.args(), fail)
+        self.assertEqual(return_code, 1)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["status"], "safe_stopped")
+        self.assertEqual(results[0]["rounds"], 1)
+        self.assertEqual(results[0]["target_rounds"], 2)
+        self.assertEqual(results[0]["reason"], "连续三次无法识别当前画面，已停止")
+
+    def test_cancellation_emits_exactly_one_cancelled_result(self):
+        def cancel(_args, _guard, state):
+            state.completed_rounds = 1
+            state.steps = 12
+            raise zhuogui_runner.CancellationRequested("收到 SIGTERM")
+
+        return_code, results, guard, _ = self.run_main(self.args(), cancel)
+        self.assertEqual(return_code, 0)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["status"], "cancelled")
+        self.assertEqual(results[0]["rounds"], 1)
+        guard.wait_for_tasker_stop.assert_called_once_with()
+
+    def test_inspection_never_emits_task_result(self):
+        def inspect(_args, _guard, _state):
+            print('preflight_json={"decision":{"status":"main_screen"}}')
+            return None
+
+        return_code, results, _, output = self.run_main(
+            self.args(inspect_scene=True), inspect
+        )
+        self.assertEqual(return_code, 0)
+        self.assertEqual(results, [])
+        self.assertIn("preflight_json=", output)
+
+    def test_recognize_only_never_emits_task_result(self):
+        def recognize(_args, _guard, _state):
+            print('{"decision":{"status":"main_screen"}}')
+            return None
+
+        return_code, results, _, _ = self.run_main(
+            self.args(recognize_only=True), recognize
+        )
+        self.assertEqual(return_code, 0)
+        self.assertEqual(results, [])
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ import { MetricCorrectionDialog } from "./MetricCorrectionDialog";
 import { PanelNavigation, type PanelKind } from "./PanelNavigation";
 import { TaskDialog } from "./TaskDialog";
 import { TaskPanel } from "./TaskPanel";
-import type { LiveEvent, Metrics, Run, RunSummary, SystemState, Task } from "./types";
+import type { LiveEvent, Metrics, Run, RunSummary, SystemState, Task, TaskInspection } from "./types";
 
 const ACTIVE = new Set(["preparing", "running", "stopping"]);
 const EMPTY_SUMMARY: RunSummary = { total: 0, succeeded: 0, failed: 0, successRate: 0, averageDurationMs: 0 };
@@ -25,6 +25,7 @@ export function App() {
   const [runs, setRuns] = useState<Run[]>([]);
   const [summary, setSummary] = useState<RunSummary>(EMPTY_SUMMARY);
   const [metricKind, setMetricKind] = useState<"gold" | "experience">("gold");
+  const [metricRangeDays, setMetricRangeDays] = useState<7 | 30>(7);
   const [metrics, setMetrics] = useState<Metrics>();
   const [selected, setSelected] = useState<Task>();
   const [logs, setLogs] = useState<LiveEvent[]>([]);
@@ -36,10 +37,10 @@ export function App() {
 
   const refresh = useCallback(async () => {
     const [systemData, taskData, runData, metricData] = await Promise.all([
-      api.system(), api.tasks(), api.runs(), api.metrics(metricKind)
+      api.system(), api.tasks(), api.runs(), api.metrics(metricKind, metricRangeDays)
     ]);
     setSystem(systemData); setTasks(taskData.items); setRuns(runData.items); setSummary(runData.summary); setMetrics(metricData);
-  }, [metricKind]);
+  }, [metricKind, metricRangeDays]);
 
   useEffect(() => { refresh().catch((error) => setMessage(error.message)); }, [refresh]);
   useEffect(() => {
@@ -76,6 +77,11 @@ export function App() {
     setLogs([]);
   }
 
+  async function inspectTask(options: Record<string, unknown>): Promise<TaskInspection> {
+    if (!selected) throw new Error("未选择任务");
+    return api.inspect(selected.id, options);
+  }
+
   async function stopTask() {
     if (!current) return;
     try { await api.stop(current.id); await refresh(); }
@@ -107,7 +113,7 @@ export function App() {
       <div className="brand-copy"><strong>梦手控制台</strong><span>MACOS AUTOMATION DECK</span></div>
       <PanelNavigation active={panel} needsCapture={Boolean(system && !system.metricCollectedToday)} onChange={selectPanel} />
       <div className="topbar-status">
-        <StatusDot ok={Boolean(system?.windowFound)} label={system?.windowFound ? "游戏窗口已发现" : "未发现游戏窗口"} />
+        <StatusDot ok={Boolean(system?.gameRunning)} label={system?.gameRunning ? "游戏已运行" : "游戏未运行"} />
         <StatusDot ok={Boolean(system?.screenCapturePermission)} label="录屏" />
         <StatusDot ok={Boolean(system?.accessibilityPermission)} label="辅助功能" />
       </div>
@@ -125,11 +131,12 @@ export function App() {
         system={system} tasks={tasks} runs={runs} summary={summary} logs={logs} busy={busy} progress={progress}
         startingGame={startingGame} onStartGame={startGame} onStop={stopTask} onSelectTask={setSelected}
       /> : <DataPanel
-        system={system} metrics={metrics} metricKind={metricKind} busy={busy} capturing={capturing}
-        onMetricKindChange={setMetricKind} onCapture={capture} onCorrect={() => setCorrecting(true)}
+        system={system} metrics={metrics} metricKind={metricKind} rangeDays={metricRangeDays}
+        busy={busy} capturing={capturing} onMetricKindChange={setMetricKind}
+        onRangeDaysChange={setMetricRangeDays} onCapture={capture} onCorrect={() => setCorrecting(true)}
       />}
     </div>
-    {selected && <TaskDialog task={selected} busy={busy} onClose={() => setSelected(undefined)} onStart={startTask} />}
+    {selected && <TaskDialog task={selected} busy={busy} onClose={() => setSelected(undefined)} onStart={startTask} onInspect={inspectTask} />}
     {correcting && metrics?.snapshots.at(-1) && <MetricCorrectionDialog snapshot={metrics.snapshots.at(-1)!} onClose={() => setCorrecting(false)} onSave={async (values) => { await api.correctMetric(metrics.snapshots.at(-1)!.id, values); await refresh(); }} />}
   </main>;
 }

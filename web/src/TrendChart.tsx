@@ -20,7 +20,10 @@ export function TrendChart({ data }: { data?: Metrics }) {
       xAxis: {
         type: "category",
         boundaryGap: false,
-        data: points.map((item) => new Date(item.capturedAt).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" })),
+        data: points.map((item) => new Date(item.capturedAt).toLocaleString("zh-CN", {
+          month: "numeric", day: "numeric",
+          ...(data?.rangeDays === 7 ? { hour: "2-digit", minute: "2-digit" } : {})
+        })),
         axisLine: { lineStyle: { color: "#394257" } },
         axisLabel: { color: "#7f8a9d" }
       },

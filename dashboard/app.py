@@ -32,6 +32,10 @@ class RunRequest(BaseModel):
     checklistConfirmed: bool = False
 
 
+class InspectionRequest(BaseModel):
+    options: dict[str, Any] = Field(default_factory=dict)
+
+
 class MetricCorrection(BaseModel):
     gold: int | None = Field(default=None, ge=0)
     level: int | None = Field(default=None, ge=1)
@@ -76,6 +80,8 @@ def create_app(database_path: Path | None = None) -> FastAPI:
 
     @app.post("/api/game/start", status_code=202)
     async def start_game():
+        if runner.inspecting:
+            raise HTTPException(status_code=409, detail="画面检测期间不能重新启动游戏")
         current = runner.current
         if current and current["status"] not in {"succeeded", "failed", "cancelled"}:
             raise HTTPException(status_code=409, detail="任务运行期间不能重新启动游戏")
@@ -92,6 +98,19 @@ def create_app(database_path: Path | None = None) -> FastAPI:
     @app.get("/api/tasks")
     def tasks():
         return {"items": task_list()}
+
+    @app.post("/api/tasks/{task_id}/inspect")
+    async def inspect_task(task_id: str, request: InspectionRequest):
+        try:
+            return await asyncio.to_thread(runner.inspect, task_id, request.options)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except TimeoutError as exc:
+            raise HTTPException(status_code=504, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            message = str(exc)
+            status_code = 409 if "期间不能" in message or "正在进行" in message else 502
+            raise HTTPException(status_code=status_code, detail=message) from exc
 
     @app.post("/api/runs", status_code=202)
     def start_run(request: RunRequest):
@@ -123,6 +142,8 @@ def create_app(database_path: Path | None = None) -> FastAPI:
 
     @app.post("/api/metrics/capture", status_code=202)
     async def capture_metrics():
+        if runner.inspecting:
+            raise HTTPException(status_code=409, detail="画面检测期间不能采集指标")
         current = runner.current
         if current and current["status"] not in {"succeeded", "failed", "cancelled"}:
             raise HTTPException(status_code=409, detail="任务运行期间不能采集指标")

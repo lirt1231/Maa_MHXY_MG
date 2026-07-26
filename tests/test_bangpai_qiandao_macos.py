@@ -1,0 +1,298 @@
+import io
+import json
+import unittest
+from contextlib import redirect_stdout
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
+
+from tools.bangpai_qiandao_macos_core import classify_clan_sign_in_scene
+import tools.run_bangpai_qiandao_macos as clan_runner
+from tools.run_bangpai_qiandao_macos import run
+
+
+def text(value, box=(10, 20, 80, 30)):
+    return {"text": value, "box": list(box)}
+
+
+def scene(texts=None, templates=None):
+    return SimpleNamespace(
+        image_size=(1020, 718),
+        texts=texts or [],
+        templates=templates or {},
+    )
+
+
+def protocol_payloads(output, prefix):
+    return [
+        json.loads(line[len(prefix):])
+        for line in output.splitlines()
+        if line.startswith(prefix)
+    ]
+
+
+class ClanSignInSceneTests(unittest.TestCase):
+    def test_expands_menu_only_from_entry_phase(self):
+        decision = classify_clan_sign_in_scene(
+            [], {"expand_menu": (940, 630, 50, 50)}, "enter"
+        )
+        self.assertEqual(decision["status"], "expand_menu")
+        self.assertEqual(
+            classify_clan_sign_in_scene(
+                [], {"expand_menu": (940, 630, 50, 50)}, "verify"
+            )["status"],
+            "unknown",
+        )
+
+    def test_opens_recognized_clan_entry(self):
+        decision = classify_clan_sign_in_scene(
+            [text(" 帮 派 ", (800, 620, 70, 60))], {}, "menu"
+        )
+        self.assertEqual(decision, {"status": "open_clan", "box": [800, 620, 70, 60]})
+
+    def test_clan_header_and_welfare_template_are_both_required(self):
+        self.assertEqual(
+            classify_clan_sign_in_scene(
+                [], {"clan_welfare": (880, 350, 60, 90)}, "clan"
+            )["status"],
+            "unknown",
+        )
+        decision = classify_clan_sign_in_scene(
+            [],
+            {
+                "clan_header": (350, 0, 320, 70),
+                "clan_welfare": (880, 350, 60, 90),
+            },
+            "clan",
+        )
+        self.assertEqual(decision["status"], "open_welfare")
+
+    def test_sign_in_is_phase_gated_and_dividend_is_never_an_action(self):
+        self.assertEqual(
+            classify_clan_sign_in_scene([text("签到")], {}, "clan")["status"],
+            "unknown",
+        )
+        self.assertEqual(
+            classify_clan_sign_in_scene(
+                [text("签到")], {"clan_header": (350, 0, 320, 70)}, "welfare"
+            )["status"],
+            "sign_in",
+        )
+        self.assertEqual(
+            classify_clan_sign_in_scene([text("领取分红")], {}, "verify")["status"],
+            "unknown",
+        )
+
+    def test_completion_requires_welfare_context(self):
+        self.assertEqual(
+            classify_clan_sign_in_scene([text("今日已签到")], {}, "enter")["status"],
+            "unknown",
+        )
+        self.assertEqual(
+            classify_clan_sign_in_scene(
+                [text("今日已签到")],
+                {"clan_header": (350, 0, 320, 70)},
+                "welfare",
+            )["status"],
+            "already_completed",
+        )
+        self.assertEqual(
+            classify_clan_sign_in_scene(
+                [text("签到成功")],
+                {"clan_header": (350, 0, 320, 70)},
+                "verify",
+            )["status"],
+            "completed",
+        )
+
+    def test_out_of_place_templates_are_not_actionable(self):
+        self.assertEqual(
+            classify_clan_sign_in_scene(
+                [], {"expand_menu": (10, 10, 50, 50)}, "enter", (1020, 718)
+            )["status"],
+            "unknown",
+        )
+        self.assertEqual(
+            classify_clan_sign_in_scene(
+                [text("签到", (10, 20, 80, 30))],
+                {"clan_header": (350, 0, 320, 70)},
+                "welfare",
+                (1020, 718),
+            )["status"],
+            "clan_idle",
+        )
+
+    def test_not_joined_clan_is_explicit_terminal_state(self):
+        self.assertEqual(
+            classify_clan_sign_in_scene([text("当前未加入帮派")], {}, "enter")["status"],
+            "no_clan",
+        )
+
+
+class ClanSignInRunnerTests(unittest.TestCase):
+    @patch("tools.run_bangpai_qiandao_macos.MacOSTaskRuntime")
+    def test_full_flow_clicks_only_recognized_boxes(self, runtime_class):
+        runtime = runtime_class.return_value
+        runtime.read_scene.side_effect = [
+            scene(templates={"expand_menu": (940, 630, 50, 50)}),
+            scene(templates={"clan_entry": (800, 620, 70, 60)}),
+            scene(templates={
+                "clan_header": (350, 0, 320, 70),
+                "clan_welfare": (880, 350, 60, 90),
+            }),
+            scene(
+                [text("签到", (700, 460, 150, 50))],
+                {"clan_header": (350, 0, 320, 70)},
+            ),
+            scene(
+                [text("签到成功")],
+                {"clan_header": (350, 0, 320, 70)},
+            ),
+        ]
+        guard = Mock()
+        args = SimpleNamespace(inspect_scene=False, recognize_only=False, max_steps=8)
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            self.assertEqual(run(args, guard), 0)
+
+        self.assertEqual(
+            [call.args[0] for call in runtime.click_box.call_args_list],
+            [
+                (940, 630, 50, 50),
+                (800, 620, 70, 60),
+                (880, 350, 60, 90),
+                [700, 460, 150, 50],
+            ],
+        )
+        self.assertEqual(
+            protocol_payloads(output.getvalue(), "result_json="),
+            [{
+                "task_id": "bangpai_qiandao",
+                "status": "completed",
+                "actions": 4,
+                "clicks": 4,
+            }],
+        )
+
+    @patch("tools.run_bangpai_qiandao_macos.MacOSTaskRuntime")
+    def test_already_completed_emits_one_terminal_result(self, runtime_class):
+        runtime_class.return_value.read_scene.return_value = scene(
+            [text("今日已签到")],
+            {"clan_header": (350, 0, 320, 70)},
+        )
+        args = SimpleNamespace(inspect_scene=False, recognize_only=False, max_steps=2)
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            self.assertEqual(run(args, Mock()), 0)
+
+        self.assertEqual(
+            protocol_payloads(output.getvalue(), "result_json="),
+            [{
+                "task_id": "bangpai_qiandao",
+                "status": "already_completed",
+                "actions": 0,
+                "clicks": 0,
+            }],
+        )
+
+    @patch("tools.run_bangpai_qiandao_macos.MacOSTaskRuntime")
+    def test_sign_in_button_is_clicked_at_most_once(self, runtime_class):
+        runtime = runtime_class.return_value
+        runtime.read_scene.side_effect = [
+            scene(templates={
+                "clan_header": (350, 0, 320, 70),
+                "clan_welfare": (880, 350, 60, 90),
+            }),
+            scene(
+                [text("签到", (700, 460, 150, 50))],
+                {"clan_header": (350, 0, 320, 70)},
+            ),
+            scene(
+                [text("签到", (700, 460, 150, 50))],
+                {"clan_header": (350, 0, 320, 70)},
+            ),
+        ]
+        guard = Mock()
+        args = SimpleNamespace(inspect_scene=False, recognize_only=False, max_steps=4)
+
+        with self.assertRaisesRegex(RuntimeError, "点击后仍未变化"):
+            run(args, guard)
+        self.assertEqual(runtime.click_box.call_count, 2)
+
+    @patch("tools.run_bangpai_qiandao_macos.MacOSTaskRuntime")
+    def test_read_only_modes_emit_only_preflight_protocol(self, runtime_class):
+        runtime = runtime_class.return_value
+        runtime.read_scene.return_value = scene(
+            templates={"clan_entry": (800, 620, 70, 60)}
+        )
+        guard = Mock()
+
+        for inspect_scene, recognize_only in ((True, False), (False, True)):
+            with self.subTest(inspect_scene=inspect_scene, recognize_only=recognize_only):
+                output = io.StringIO()
+                args = SimpleNamespace(
+                    inspect_scene=inspect_scene,
+                    recognize_only=recognize_only,
+                    max_steps=1,
+                )
+                with redirect_stdout(output):
+                    self.assertEqual(run(args, guard), 0)
+                self.assertEqual(
+                    len(protocol_payloads(output.getvalue(), "preflight_json=")), 1
+                )
+                self.assertEqual(
+                    protocol_payloads(output.getvalue(), "result_json="), []
+                )
+        runtime.click_box.assert_not_called()
+        runtime.drag.assert_not_called()
+
+    def test_main_emits_one_safe_stopped_result_with_reason(self):
+        args = SimpleNamespace(inspect_scene=False, recognize_only=False, max_steps=1)
+        output = io.StringIO()
+        with (
+            patch.object(clan_runner, "parse_args", return_value=args),
+            patch.object(clan_runner, "CancellationGuard", return_value=Mock()),
+            patch.object(clan_runner, "run", side_effect=RuntimeError("未加入帮派")),
+            redirect_stdout(output),
+        ):
+            self.assertEqual(clan_runner.main(), 1)
+
+        self.assertEqual(
+            protocol_payloads(output.getvalue(), "result_json="),
+            [{
+                "task_id": "bangpai_qiandao",
+                "status": "safe_stopped",
+                "reason": "未加入帮派",
+            }],
+        )
+
+    def test_main_emits_one_cancelled_result(self):
+        args = SimpleNamespace(inspect_scene=False, recognize_only=False, max_steps=1)
+        guard = Mock()
+        output = io.StringIO()
+        with (
+            patch.object(clan_runner, "parse_args", return_value=args),
+            patch.object(clan_runner, "CancellationGuard", return_value=guard),
+            patch.object(
+                clan_runner,
+                "run",
+                side_effect=clan_runner.CancellationRequested("收到停止请求"),
+            ),
+            redirect_stdout(output),
+        ):
+            self.assertEqual(clan_runner.main(), 0)
+
+        self.assertEqual(
+            protocol_payloads(output.getvalue(), "result_json="),
+            [{
+                "task_id": "bangpai_qiandao",
+                "status": "cancelled",
+                "reason": "收到停止请求",
+            }],
+        )
+        guard.wait_for_tasker_stop.assert_called_once_with()
+
+
+if __name__ == "__main__":
+    unittest.main()

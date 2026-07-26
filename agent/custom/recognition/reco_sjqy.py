@@ -28,7 +28,9 @@ LEGACY_REFERENCE_SIZE = (1280, 720)
 MAC_REFERENCE_SIZE = (923, 720)
 LEGACY_QUESTION_ROI = (447, 40, 673, 94)
 LEGACY_ANSWER_ROI = (439, 218, 678, 212)
-MAC_QUESTION_ROI = (330, 150, 480, 65)
+# The macOS question wraps to two lines. The first line starts around y=133
+# after system-window capture normalization, so keep enough space above it.
+MAC_QUESTION_ROI = (330, 125, 480, 90)
 MAC_ANSWER_ROI = (330, 205, 480, 220)
 
 

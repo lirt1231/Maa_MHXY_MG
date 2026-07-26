@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import Mock
 
 from fastapi.testclient import TestClient
 
@@ -23,7 +24,15 @@ class DashboardApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             {item["id"] for item in response.json()["items"]},
-            {"sanjieqiyuan", "keju", "zhuogui"},
+            {"sanjieqiyuan", "keju", "zhuogui", "fuli_qiandao", "bangpai_qiandao"},
+        )
+        self.assertTrue(
+            all(
+                item["risk"]["level"] in {"low", "medium", "high"}
+                and item["risk"]["label"]
+                and item["risk"]["summary"]
+                for item in response.json()["items"]
+            )
         )
 
     def test_start_requires_checklist_confirmation(self):
@@ -33,6 +42,58 @@ class DashboardApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 422)
         self.assertIn("确认", response.json()["detail"])
+
+    def test_inspection_is_transient_and_returns_structured_result(self):
+        database = self.client.app.state.database
+        self.client.app.state.runner.inspect = Mock(return_value={
+            "taskId": "fuli_qiandao", "status": "ready", "canStart": True,
+            "scene": "open_welfare", "sceneLabel": "福利入口",
+            "summary": "当前画面支持启动此任务", "proposedAction": "打开福利",
+            "reason": None, "evidence": {}, "observedAt": "2026-07-26T00:00:00+00:00",
+        })
+
+        response = self.client.post(
+            "/api/tasks/fuli_qiandao/inspect", json={"options": {}}
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["scene"], "open_welfare")
+        self.assertEqual(database.recent_runs(), [])
+        self.assertEqual(database.events_after(0), [])
+
+    def test_inspection_timeout_is_actionable(self):
+        self.client.app.state.runner.inspect = Mock(
+            side_effect=TimeoutError("画面检测超过 15 秒，已停止检测")
+        )
+        response = self.client.post("/api/tasks/keju/inspect", json={"options": {}})
+        self.assertEqual(response.status_code, 504)
+        self.assertIn("15 秒", response.json()["detail"])
+
+    def test_inspection_is_rejected_while_task_is_running(self):
+        runner = self.client.app.state.runner
+        runner._current = {"id": "busy", "status": "running"}
+        inspect = Mock(wraps=runner.inspect)
+        runner.inspect = inspect
+
+        response = self.client.post("/api/tasks/keju/inspect", json={"options": {}})
+        runner._current = None
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("任务运行期间", response.json()["detail"])
+
+    def test_inspection_blocks_other_game_changing_console_actions(self):
+        runner = self.client.app.state.runner
+        runner._inspecting = True
+        try:
+            game_response = self.client.post("/api/game/start")
+            capture_response = self.client.post("/api/metrics/capture")
+        finally:
+            runner._inspecting = False
+
+        self.assertEqual(game_response.status_code, 409)
+        self.assertIn("画面检测期间", game_response.json()["detail"])
+        self.assertEqual(capture_response.status_code, 409)
+        self.assertIn("画面检测期间", capture_response.json()["detail"])
 
     def test_metric_history_starts_empty(self):
         response = self.client.get("/api/metrics?range=7d&metric=experience")

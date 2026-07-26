@@ -98,6 +98,16 @@ def classify_scene(
             "confirm": first_click(items, r"^确定$"),
         }
 
+    if any(
+        re.search(
+            r"今日(?:的)?捉鬼(?:任务)?(?:已完成|次数已达上限)"
+            r"|捉鬼(?:任务)?(?:今日已完成|次数已达上限)",
+            text,
+        )
+        for text in texts
+    ):
+        return {"status": "already_completed"}
+
     if re.search(r"捉完1轮鬼.*继续捉鬼", joined):
         return {
             "status": "round_complete",
@@ -282,6 +292,7 @@ def proposed_action(decision: dict) -> str:
         "invite_members_overlay": "close_invite_overlay",
         "welfare_overlay": "close_known_welfare_overlay",
         "remove_member_menu": "remove_one_abnormal_member",
+        "already_completed": "stop",
     }.get(status, "stop")
 
 
