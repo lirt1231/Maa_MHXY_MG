@@ -114,6 +114,14 @@ class Database:
             rows = db.execute("SELECT * FROM task_runs ORDER BY started_at DESC LIMIT ?", (limit,)).fetchall()
         return [self._run_row(row) for row in rows]
 
+    def events_after(self, event_id: int, limit: int = 300) -> list[dict]:
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT * FROM run_events WHERE id>? ORDER BY id LIMIT ?",
+                (event_id, limit),
+            ).fetchall()
+        return [self._event_row(row) for row in rows]
+
     def summary(self) -> dict:
         with self.connect() as db:
             row = db.execute(
@@ -215,13 +223,24 @@ class Database:
         """Mark runs abandoned by a previous dashboard process as failed."""
         now = utc_now()
         with self.connect() as db:
-            cursor = db.execute(
-                """UPDATE task_runs
-                SET status='failed', finished_at=?, error='看板进程意外退出，任务状态已恢复'
-                WHERE status IN ('preparing','running','stopping')""",
-                (now,),
-            )
-        return cursor.rowcount
+            rows = db.execute(
+                "SELECT id, started_at FROM task_runs WHERE status IN ('preparing','running','stopping')"
+            ).fetchall()
+            finished = datetime.fromisoformat(now)
+            for row in rows:
+                started = datetime.fromisoformat(row["started_at"])
+                duration = max(0, int((finished - started).total_seconds() * 1000))
+                error = "看板进程意外退出，任务状态已恢复"
+                db.execute(
+                    "UPDATE task_runs SET status='failed', finished_at=?, duration_ms=?, error=? WHERE id=?",
+                    (now, duration, error, row["id"]),
+                )
+                db.execute(
+                    """INSERT INTO run_events(run_id, created_at, level, event_type, message, payload_json)
+                    VALUES(?,?,?,?,?,?)""",
+                    (row["id"], now, "error", "status", error, '{"status":"failed","recovered":true}'),
+                )
+        return len(rows)
 
     @staticmethod
     def _run_row(row: sqlite3.Row) -> dict:
@@ -239,4 +258,12 @@ class Database:
             "level": row["level"], "experience": row["experience"],
             "experienceRequired": row["experience_required"], "rawText": row["raw_text"],
             "status": row["status"], "error": row["error"], "corrected": bool(row["corrected"]),
+        }
+
+    @staticmethod
+    def _event_row(row: sqlite3.Row) -> dict:
+        return {
+            "id": row["id"], "runId": row["run_id"], "createdAt": row["created_at"],
+            "level": row["level"], "type": row["event_type"], "message": row["message"],
+            "payload": json.loads(row["payload_json"]),
         }

@@ -1,10 +1,12 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from dashboard.app import create_app
+from dashboard.app import _sse_event, create_app
+from dashboard.database import Database
 
 
 class DashboardApiTests(unittest.TestCase):
@@ -38,6 +40,47 @@ class DashboardApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["points"], [])
         self.assertIsNone(response.json()["current"])
+
+    def test_sse_events_include_resume_id(self):
+        payload = {
+            "id": 42, "runId": "run", "createdAt": "2026-07-26T00:00:00+00:00",
+            "level": "info", "type": "status", "message": "恢复", "payload": {"status": "running"},
+        }
+        encoded = _sse_event(payload)
+        self.assertTrue(encoded.startswith("id: 42\nevent: status\n"))
+        self.assertIn('"message": "恢复"', encoded)
+
+    def test_duplicate_start_returns_conflict(self):
+        with patch("dashboard.runner.threading.Thread") as thread:
+            thread.return_value.start.return_value = None
+            first = self.client.post(
+                "/api/runs",
+                json={"taskId": "zhuogui", "options": {"rounds": 1}, "checklistConfirmed": True},
+            )
+            second = self.client.post(
+                "/api/runs",
+                json={"taskId": "keju", "options": {}, "checklistConfirmed": True},
+            )
+        self.assertEqual(first.status_code, 202)
+        self.assertEqual(second.status_code, 409)
+        self.assertIn("已有任务", second.json()["detail"])
+
+
+class DashboardRestartTests(unittest.TestCase):
+    def test_lifespan_recovers_abandoned_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "dashboard.sqlite3"
+            database = Database(path)
+            database.create_run({
+                "id": "from-old-process", "taskId": "keju", "taskName": "科举乡试",
+                "status": "running", "options": {}, "startedAt": "2026-07-26T00:00:00+00:00",
+            })
+            with TestClient(create_app(path)) as client:
+                response = client.get("/api/runs")
+            recovered = response.json()["items"][0]
+            self.assertEqual(recovered["status"], "failed")
+            self.assertIn("意外退出", recovered["error"])
+            self.assertIsNotNone(recovered["finishedAt"])
 
 
 if __name__ == "__main__":

@@ -3,11 +3,11 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -149,22 +149,36 @@ def create_app(database_path: Path | None = None) -> FastAPI:
         return snapshot
 
     @app.get("/api/events")
-    async def events():
+    async def events(last_event_id: int | None = Header(default=None, alias="Last-Event-ID", ge=0)):
         async def stream():
             yield ": connected\n\n"
             subscription = broker.subscribe().__aiter__()
             next_event = asyncio.create_task(subscription.__anext__())
+            await asyncio.sleep(0)
+            last_sent_id = last_event_id or 0
             try:
+                if last_event_id is not None:
+                    for event in database.events_after(last_event_id):
+                        last_sent_id = max(last_sent_id, event["id"])
+                        yield _sse_event(event)
                 while True:
                     done, _ = await asyncio.wait({next_event}, timeout=15)
                     if not done:
                         yield ": keepalive\n\n"
                         continue
                     event = next_event.result()
-                    yield f"event: {event['type']}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
                     next_event = asyncio.create_task(subscription.__anext__())
+                    event_id = event.get("id")
+                    if event_id is not None and event_id <= last_sent_id:
+                        continue
+                    if event_id is not None:
+                        last_sent_id = event_id
+                    yield _sse_event(event)
             finally:
                 next_event.cancel()
+                with suppress(asyncio.CancelledError):
+                    await next_event
+                await subscription.aclose()
 
         return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
 
@@ -181,6 +195,11 @@ def create_app(database_path: Path | None = None) -> FastAPI:
             return FileResponse(FRONTEND_DIST / "index.html")
 
     return app
+
+
+def _sse_event(event: dict) -> str:
+    event_id = f"id: {event['id']}\n" if event.get("id") is not None else ""
+    return f"{event_id}event: {event['type']}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
 
 
 app = create_app()

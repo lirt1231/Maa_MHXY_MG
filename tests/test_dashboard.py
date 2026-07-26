@@ -99,6 +99,20 @@ class DatabaseTests(unittest.TestCase):
         recovered = self.database.recent_runs(1)[0]
         self.assertEqual(recovered["status"], "failed")
         self.assertIn("意外退出", recovered["error"])
+        self.assertIsNotNone(recovered["durationMs"])
+        events = self.database.events_after(0)
+        self.assertEqual(events[-1]["runId"], "abandoned")
+        self.assertTrue(events[-1]["payload"]["recovered"])
+
+    def test_events_can_resume_after_last_received_id(self):
+        self.database.create_run({
+            "id": "run-events", "taskId": "keju", "taskName": "科举乡试",
+            "status": "preparing", "options": {}, "startedAt": "2026-07-26T00:00:00+00:00",
+        })
+        first = self.database.add_event("run-events", "info", "status", "准备")
+        second = self.database.add_event("run-events", "info", "log", "第一题")
+        resumed = self.database.events_after(first["id"])
+        self.assertEqual([event["id"] for event in resumed], [second["id"]])
 
     def test_successful_snapshot_satisfies_daily_reminder(self):
         self.assertFalse(self.database.metric_collected_today())

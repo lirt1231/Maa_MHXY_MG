@@ -51,12 +51,12 @@ export function App() {
     const source = new EventSource("/api/events");
     const receive = (event: MessageEvent) => {
       const item = JSON.parse(event.data) as LiveEvent;
-      setLogs((current) => [...current.slice(-199), item]);
+      setLogs((current) => item.id && current.some((entry) => entry.id === item.id) ? current : [...current.slice(-199), item]);
       if (item.type === "status" || item.type === "metric") refresh().catch(() => undefined);
     };
     ["status", "log", "metric", "system"].forEach((type) => source.addEventListener(type, receive));
     source.onerror = () => setMessage("实时连接暂时中断，正在自动重连…");
-    source.onopen = () => setMessage("");
+    source.onopen = () => { setMessage(""); refresh().catch(() => undefined); };
     return () => source.close();
   }, [refresh]);
 
