@@ -163,6 +163,18 @@ class RunnerManager:
         with self._lock:
             return self._inspecting
 
+    def begin_read_only(self) -> None:
+        with self._lock:
+            if self._inspecting:
+                raise RuntimeError("已有只读采集正在进行")
+            if self._current and self._current["status"] not in TERMINAL_STATES:
+                raise RuntimeError("任务运行期间不能执行只读采集")
+            self._inspecting = True
+
+    def end_read_only(self) -> None:
+        with self._lock:
+            self._inspecting = False
+
     def start(self, task_id: str, options: dict | None, checklist_confirmed: bool) -> dict:
         if not checklist_confirmed:
             raise ValueError("请先确认全部运行前检查项")
@@ -199,12 +211,7 @@ class RunnerManager:
 
     def inspect(self, task_id: str, options: dict | None) -> dict:
         normalized = validate_options(task_id, options)
-        with self._lock:
-            if self._inspecting:
-                raise RuntimeError("已有画面检测正在进行")
-            if self._current and self._current["status"] not in TERMINAL_STATES:
-                raise RuntimeError("任务运行期间不能检测当前画面")
-            self._inspecting = True
+        self.begin_read_only()
         try:
             command = self._inspection_command(task_id, normalized)
             process = subprocess.Popen(
@@ -228,8 +235,7 @@ class RunnerManager:
                 )
             return self._parse_inspection(task_id, normalized, output)
         finally:
-            with self._lock:
-                self._inspecting = False
+            self.end_read_only()
 
     @staticmethod
     def _terminate_inspection_process(process: subprocess.Popen) -> None:

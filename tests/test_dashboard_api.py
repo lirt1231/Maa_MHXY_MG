@@ -136,6 +136,65 @@ class DashboardApiTests(unittest.TestCase):
             422,
         )
 
+    @patch("dashboard.app.collect_daily_task_data")
+    def test_daily_task_capture_persists_structured_data_without_run_history(
+        self, collect
+    ):
+        collect.return_value = {
+            "category": "daily_tasks",
+            "source_page": "daily_schedule",
+            "status": "success",
+            "data": {"tasks": [{
+                "taskId": "daily-shimen",
+                "name": "师门任务",
+                "completed": 10,
+                "target": 20,
+                "status": "available",
+                "rewardStatus": "unknown",
+            }]},
+            "evidence": {"image_size": [1020, 718], "ocr_item_count": 32},
+        }
+        before_runs = self.client.get("/api/runs").json()["items"]
+
+        response = self.client.post("/api/game-data/daily-tasks/capture")
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json()["category"], "daily_tasks")
+        self.assertEqual(response.json()["data"]["tasks"][0]["name"], "师门任务")
+        self.assertEqual(self.client.get("/api/runs").json()["items"], before_runs)
+        latest = self.client.get("/api/game-data").json()["latestByCategory"]
+        self.assertEqual(latest["daily_tasks"], response.json())
+        self.assertFalse(self.client.app.state.runner.inspecting)
+
+    @patch(
+        "dashboard.app.collect_daily_task_data",
+        side_effect=TimeoutError("日程数据采集超过 15 秒，已停止采集"),
+    )
+    def test_daily_task_capture_timeout_is_recorded_and_releases_lock(self, collect):
+        response = self.client.post("/api/game-data/daily-tasks/capture")
+
+        self.assertEqual(response.status_code, 504)
+        latest = self.client.get(
+            "/api/game-data?category=daily_tasks"
+        ).json()["latestByCategory"]["daily_tasks"]
+        self.assertEqual(latest["status"], "failed")
+        self.assertIn("15 秒", latest["error"])
+        self.assertFalse(self.client.app.state.runner.inspecting)
+
+    @patch("dashboard.app.collect_daily_task_data")
+    def test_daily_task_capture_is_rejected_during_another_read_only_operation(
+        self, collect
+    ):
+        runner = self.client.app.state.runner
+        runner.begin_read_only()
+        try:
+            response = self.client.post("/api/game-data/daily-tasks/capture")
+        finally:
+            runner.end_read_only()
+
+        self.assertEqual(response.status_code, 409)
+        collect.assert_not_called()
+
     @patch("dashboard.app.capture_visible_metrics")
     def test_metric_capture_syncs_sanitized_character_resources(self, capture):
         capture.return_value = {

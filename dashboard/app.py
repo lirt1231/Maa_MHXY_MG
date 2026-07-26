@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from .database import Database, utc_now
 from .events import EventBroker
+from .game_data import collect_daily_task_data
 from .metrics import capture_visible_metrics
 from .registry import task_list
 from .runner import RunnerManager
@@ -158,6 +159,56 @@ def create_app(database_path: Path | None = None) -> FastAPI:
                 else database.latest_game_data_by_category()
             ),
         }
+
+    @app.post("/api/game-data/daily-tasks/capture", status_code=202)
+    async def capture_daily_tasks():
+        try:
+            runner.begin_read_only()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        try:
+            payload = await asyncio.to_thread(collect_daily_task_data)
+        except TimeoutError as exc:
+            error = str(exc)
+            database.add_game_data_snapshot({
+                "category": "daily_tasks",
+                "sourcePage": "daily_schedule",
+                "status": "failed",
+                "data": {"tasks": []},
+                "evidence": {},
+                "error": error,
+            })
+            raise HTTPException(status_code=504, detail=error) from exc
+        except RuntimeError as exc:
+            error = str(exc)
+            database.add_game_data_snapshot({
+                "category": "daily_tasks",
+                "sourcePage": "daily_schedule",
+                "status": "failed",
+                "data": {"tasks": []},
+                "evidence": {},
+                "error": error,
+            })
+            raise HTTPException(status_code=502, detail=error) from exc
+        finally:
+            runner.end_read_only()
+
+        snapshot = database.add_game_data_snapshot({
+            "category": payload["category"],
+            "sourcePage": payload["source_page"],
+            "status": payload["status"],
+            "data": payload["data"],
+            "evidence": payload["evidence"],
+        })
+        broker.publish({
+            "runId": "system",
+            "createdAt": utc_now(),
+            "level": "info",
+            "type": "game_data",
+            "message": "今日任务数据采集完成",
+            "payload": snapshot,
+        })
+        return snapshot
 
     @app.post("/api/metrics/capture", status_code=202)
     async def capture_metrics():
