@@ -18,6 +18,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "agent"))
+sys.path.insert(0, str(ROOT / "tools"))
 
 from maa.controller import (  # noqa: E402
     MacOSController,
@@ -28,6 +29,7 @@ from maa.pipeline import JOCR, JTemplateMatch  # noqa: E402
 from maa.resource import Resource  # noqa: E402
 from maa.tasker import Tasker  # noqa: E402
 from maa.toolkit import Toolkit  # noqa: E402
+from macos_cancellation import CancellationGuard, CancellationRequested  # noqa: E402
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -52,18 +54,31 @@ def parse_args():
     return parser.parse_args()
 
 
-def recognition_detail(tasker, recognition_type, recognition_param, image):
+def recognition_detail(
+    tasker,
+    recognition_type,
+    recognition_param,
+    image,
+    guard,
+):
     """Run one direct recognition and return its parsed detail."""
-    task = tasker.post_recognition(recognition_type, recognition_param, image).wait()
+    task = tasker.post_recognition(
+        recognition_type,
+        recognition_param,
+        image,
+    ).wait()
+    guard.checkpoint()
     detail = task.get()
     if detail is None or not detail.nodes:
         return None
     return detail.nodes[-1].recognition
 
 
-def read_scene(tasker, controller):
+def read_scene(tasker, controller, guard):
     """Read the current client scene without causing any input."""
-    image = controller.post_screencap().wait().get()
+    screencap = controller.post_screencap().wait()
+    guard.checkpoint()
+    image = screencap.get()
     if image is None:
         raise RuntimeError("截图失败")
     height, width = image.shape[:2]
@@ -72,6 +87,7 @@ def read_scene(tasker, controller):
         "OCR",
         JOCR(expected=[".*"], roi=(0, 0, width, height), threshold=0.2),
         image,
+        guard,
     )
     texts = []
     if ocr_detail is not None:
@@ -87,6 +103,7 @@ def read_scene(tasker, controller):
             threshold=[0.75],
         ),
         image,
+        guard,
     )
     activity_detail = recognition_detail(
         tasker,
@@ -97,6 +114,7 @@ def read_scene(tasker, controller):
             threshold=[0.8],
         ),
         image,
+        guard,
     )
     scene = {
         "image_size": [width, height],
@@ -227,10 +245,12 @@ def classify_scene(scene):
     return {"status": "unknown"}
 
 
-def perform_click(controller, native_input, point, image_size):
+def perform_click(controller, native_input, point, image_size, guard):
     if native_input is not None:
-        return native_input.click(*point, image_size)
-    result = controller.post_click(*point).wait()
+        return guard.perform_input(native_input.click, *point, image_size)
+    task = guard.perform_input(controller.post_click, *point).wait()
+    guard.checkpoint()
+    result = task
     if not result.succeeded:
         raise RuntimeError(f"Maa 点击失败：{point}")
     return point
@@ -245,14 +265,15 @@ def stable_answer_click(point, image_size):
     return x, y
 
 
-def navigate_to_exam(tasker, controller, native_input, timeout):
+def navigate_to_exam(tasker, controller, native_input, timeout, guard):
     """Navigate by fresh OCR evidence until answer, completion, or a safe stop."""
     deadline = time.monotonic() + timeout
     daily_selected = False
     scroll_count = 0
     battle_return_attempts = 0
     while time.monotonic() < deadline:
-        scene = read_scene(tasker, controller)
+        guard.checkpoint()
+        scene = read_scene(tasker, controller, guard)
         decision = scene["decision"]
         status = decision["status"]
         print(
@@ -286,14 +307,15 @@ def navigate_to_exam(tasker, controller, native_input, timeout):
             if scroll_count >= 5:
                 raise RuntimeError("浏览活动列表五次后仍未找到三界奇缘")
             width, height = scene["image_size"]
-            native_input.drag(
+            guard.perform_input(
+                native_input.drag,
                 (round(width * 0.62), round(height * 0.62)),
                 (round(width * 0.62), round(height * 0.27)),
                 scene["image_size"],
             )
             scroll_count += 1
             print(f"navigation_scroll count={scroll_count}", flush=True)
-            time.sleep(1.2)
+            guard.wait(1.2)
             continue
         if "click" in decision:
             screen_point = perform_click(
@@ -301,6 +323,7 @@ def navigate_to_exam(tasker, controller, native_input, timeout):
                 native_input,
                 decision["click"],
                 scene["image_size"],
+                guard,
             )
             print(
                 f"navigation_click source={decision['click']} screen={screen_point}",
@@ -308,7 +331,7 @@ def navigate_to_exam(tasker, controller, native_input, timeout):
             )
             if status == "click_daily":
                 daily_selected = True
-            time.sleep(1.2)
+            guard.wait(1.2)
             continue
         raise RuntimeError(
             "当前画面没有足够证据执行安全点击："
@@ -406,6 +429,17 @@ class NativeMacOSInput:
 
 
 def main() -> int:
+    guard = CancellationGuard()
+    guard.install_signal_handlers()
+    try:
+        return run(guard)
+    except CancellationRequested:
+        guard.wait_for_tasker_stop()
+        print("stop_ack=true", flush=True)
+        return 0
+
+
+def run(guard: CancellationGuard) -> int:
     args = parse_args()
     if args.recognize_only or args.input_method == "native":
         os.environ["MAA_SJQY_RECOGNIZE_ONLY"] = "1"
@@ -429,7 +463,9 @@ def main() -> int:
         MaaMacOSScreencapMethodEnum.ScreenCaptureKit,
         input_method,
     )
-    if not controller.post_connection().wait().succeeded:
+    connection = controller.post_connection().wait()
+    guard.checkpoint()
+    if not connection.succeeded:
         raise RuntimeError("连接梦幻西游窗口失败")
 
     # Importing the project module registers AgentServer decorators. Keep it
@@ -439,7 +475,9 @@ def main() -> int:
 
     resource = Resource()
     for bundle in (ROOT / "assets/resource/base", ROOT / "assets/resource/mac"):
-        if not resource.post_bundle(bundle).wait().succeeded:
+        bundle_task = resource.post_bundle(bundle).wait()
+        guard.checkpoint()
+        if not bundle_task.succeeded:
             raise RuntimeError(f"加载资源失败：{bundle}")
 
     recognizer = sjqy_tiku_V3()
@@ -449,9 +487,17 @@ def main() -> int:
     tasker = Tasker()
     if not tasker.bind(resource, controller) or not tasker.inited:
         raise RuntimeError("初始化 Maa Tasker 失败")
+    guard.bind_tasker(tasker)
+    guard.checkpoint()
 
     if args.inspect_scene:
-        print(json.dumps(read_scene(tasker, controller), ensure_ascii=False), flush=True)
+        print(
+            json.dumps(
+                read_scene(tasker, controller, guard),
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
         return 0
 
     native_input = NativeMacOSInput() if args.input_method == "native" else None
@@ -461,6 +507,7 @@ def main() -> int:
             controller,
             native_input,
             args.entry_timeout,
+            guard,
         )
         print(f"entry_status={entry_status}", flush=True)
         if entry_status != "answering":
@@ -469,8 +516,11 @@ def main() -> int:
         print("entry_status=manual_answer_screen", flush=True)
     last_question_key = None
     for step in range(1, args.max_steps + 1):
+        guard.checkpoint()
         recognizer.last_status = "running"
-        detail = tasker.post_task("活动-三界奇缘-开始答题_agent").wait().get()
+        task = tasker.post_task("活动-三界奇缘-开始答题_agent").wait()
+        guard.checkpoint()
+        detail = task.get()
         status = getattr(recognizer, "last_status", "unknown")
         question = getattr(recognizer, "last_question", "")
         question_key = getattr(recognizer, "last_question_key", question)
@@ -483,7 +533,8 @@ def main() -> int:
                 recognizer.last_click,
                 recognizer.last_image_size,
             )
-            screen_point = native_input.click(
+            screen_point = guard.perform_input(
+                native_input.click,
                 *click_point,
                 recognizer.last_image_size,
             )
@@ -493,7 +544,7 @@ def main() -> int:
                 f"stable={click_point} screen={screen_point}",
                 flush=True,
             )
-            time.sleep(1.2)
+            guard.wait(1.2)
             continue
         if status == "ready":
             print(

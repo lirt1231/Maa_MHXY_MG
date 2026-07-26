@@ -25,6 +25,7 @@ from maa.resource import Resource  # noqa: E402
 from maa.tasker import Tasker  # noqa: E402
 from maa.toolkit import Toolkit  # noqa: E402
 
+from macos_cancellation import CancellationGuard, CancellationRequested  # noqa: E402
 from run_sanjieqiyuan_macos import NativeMacOSInput  # noqa: E402
 
 
@@ -77,8 +78,7 @@ def read_keychain_password(service, account):
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
-def main() -> int:
-    args = parse_args()
+def run(args, guard: CancellationGuard) -> int:
     local_config = load_local_model_config()
     os.environ["MAA_DIRECT_RESOURCE"] = "1"
     os.environ["MAA_KEJU_RECOGNIZE_ONLY"] = "1"
@@ -131,12 +131,16 @@ def main() -> int:
     tasker = Tasker()
     if not tasker.bind(resource, controller) or not tasker.inited:
         raise RuntimeError("初始化 Maa Tasker 失败")
+    guard.bind_tasker(tasker)
 
     native_input = NativeMacOSInput()
     last_question = None
     for step in range(1, args.max_steps + 1):
+        guard.checkpoint()
         recognizer.last_status = "running"
-        detail = tasker.post_task("活动-科举乡试-开始答题混合").wait().get()
+        task = tasker.post_task("活动-科举乡试-开始答题混合").wait()
+        guard.checkpoint()
+        detail = task.get()
         status = getattr(recognizer, "last_status", "unknown")
         payload = {
             "step": step,
@@ -166,7 +170,8 @@ def main() -> int:
                     flush=True,
                 )
                 return 0
-            screen_point = native_input.click(
+            screen_point = guard.perform_input(
+                native_input.click,
                 *recognizer.last_click,
                 recognizer.last_image_size,
             )
@@ -176,7 +181,7 @@ def main() -> int:
                 flush=True,
             )
             last_question = question
-            time.sleep(args.delay)
+            guard.wait(args.delay)
             continue
 
         if status == "no_question":
@@ -190,6 +195,17 @@ def main() -> int:
 
     print(f"达到本次最大答题步数：{args.max_steps}", flush=True)
     return 0
+
+
+def main() -> int:
+    guard = CancellationGuard()
+    guard.install_signal_handlers()
+    try:
+        return run(parse_args(), guard)
+    except CancellationRequested:
+        guard.wait_for_tasker_stop()
+        print("stop_ack=true", flush=True)
+        return 0
 
 
 if __name__ == "__main__":

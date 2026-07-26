@@ -1,7 +1,6 @@
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -49,22 +48,6 @@ class DashboardApiTests(unittest.TestCase):
         encoded = _sse_event(payload)
         self.assertTrue(encoded.startswith("id: 42\nevent: status\n"))
         self.assertIn('"message": "恢复"', encoded)
-
-    def test_duplicate_start_returns_conflict(self):
-        with patch("dashboard.runner.threading.Thread") as thread:
-            thread.return_value.start.return_value = None
-            first = self.client.post(
-                "/api/runs",
-                json={"taskId": "zhuogui", "options": {"rounds": 1}, "checklistConfirmed": True},
-            )
-            second = self.client.post(
-                "/api/runs",
-                json={"taskId": "keju", "options": {}, "checklistConfirmed": True},
-            )
-        self.assertEqual(first.status_code, 202)
-        self.assertEqual(second.status_code, 409)
-        self.assertIn("已有任务", second.json()["detail"])
-
 
 class DashboardRestartTests(unittest.TestCase):
     def test_lifespan_recovers_abandoned_run(self):

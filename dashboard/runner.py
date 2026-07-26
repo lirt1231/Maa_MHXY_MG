@@ -16,16 +16,28 @@ from .registry import TASKS, validate_options
 
 ROOT = Path(__file__).resolve().parents[1]
 TERMINAL_STATES = {"succeeded", "failed", "cancelled"}
+STOP_TERM_TIMEOUT_SECONDS = 5.0
+STOP_KILL_TIMEOUT_SECONDS = 2.0
 
 
 class RunnerManager:
-    def __init__(self, database: Database, broker: EventBroker):
+    def __init__(
+        self,
+        database: Database,
+        broker: EventBroker,
+        *,
+        stop_term_timeout: float = STOP_TERM_TIMEOUT_SECONDS,
+        stop_kill_timeout: float = STOP_KILL_TIMEOUT_SECONDS,
+    ):
         self.database = database
         self.broker = broker
+        self._stop_term_timeout = stop_term_timeout
+        self._stop_kill_timeout = stop_kill_timeout
         self._lock = threading.RLock()
         self._current: dict | None = None
         self._process: subprocess.Popen | None = None
         self._stop_requested = False
+        self._completion = threading.Event()
 
     @property
     def current(self) -> dict | None:
@@ -52,9 +64,16 @@ class RunnerManager:
             }
             self._current = run
             self._stop_requested = False
+            completion = threading.Event()
+            self._completion = completion
             self.database.create_run(run)
             self._emit("info", "status", f"正在准备{task['name']}", {"status": "preparing"})
-            threading.Thread(target=self._execute, args=(run,), daemon=True, name=f"dashboard-{task_id}").start()
+            threading.Thread(
+                target=self._execute,
+                args=(run, completion),
+                daemon=True,
+                name=f"dashboard-{task_id}",
+            ).start()
             return dict(run)
 
     def stop(self, run_id: str) -> dict:
@@ -63,17 +82,73 @@ class RunnerManager:
                 raise LookupError("任务不存在或已经结束")
             if self._current["status"] in TERMINAL_STATES:
                 return dict(self._current)
-            self._stop_requested = True
-            self._current["status"] = "stopping"
-            self._current["stage"] = "正在安全停止"
-            process = self._process
-            self._emit("warning", "status", "收到停止请求，正在停止自动化", {"status": "stopping"})
+            target_run = self._current
+            completion = self._completion
+            already_stopping = target_run["status"] == "stopping"
+            process = None
+            if not already_stopping:
+                self._stop_requested = True
+                target_run["status"] = "stopping"
+                target_run["stage"] = "正在发送停止信号"
+                target_run["lastOperationAt"] = utc_now()
+                process = self._process
+                self._emit(
+                    "warning",
+                    "status",
+                    "收到停止请求，正在停止自动化",
+                    {
+                        "status": "stopping",
+                        "phase": "requested",
+                        "lastOperationAt": target_run["lastOperationAt"],
+                    },
+                )
+        if already_stopping:
+            if not completion.wait(self._stop_term_timeout + self._stop_kill_timeout):
+                raise RuntimeError("自动化进程仍在停止中")
+            return dict(target_run)
         if process and process.poll() is None:
-            try:
-                os.killpg(process.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-        return self.current or {}
+            self._signal_process(target_run, process, signal.SIGTERM, "term")
+
+        if not completion.wait(self._stop_term_timeout):
+            with self._lock:
+                process = self._process
+            if process and process.poll() is None:
+                self._signal_process(target_run, process, signal.SIGKILL, "kill")
+            if not completion.wait(self._stop_kill_timeout):
+                raise RuntimeError("自动化进程在强制停止后仍未退出")
+
+        # The worker sets completion only after the process has exited and the
+        # final cancelled state has been persisted.
+        return dict(target_run)
+
+    def _signal_process(
+        self,
+        run: dict,
+        process: subprocess.Popen,
+        sig: signal.Signals,
+        phase: str,
+    ) -> None:
+        operation_at = utc_now()
+        with self._lock:
+            if self._current is run:
+                run["stage"] = "正在等待进程退出" if phase == "term" else "正在强制结束进程"
+                run["lastOperationAt"] = operation_at
+                self._emit(
+                    "warning",
+                    "status",
+                    "已发送安全停止信号" if phase == "term" else "安全停止超时，已发送强制停止信号",
+                    {
+                        "status": "stopping",
+                        "phase": phase,
+                        "signal": sig.name,
+                        "lastOperationAt": operation_at,
+                    },
+                )
+        try:
+            os.killpg(process.pid, sig)
+        except ProcessLookupError:
+            # Exiting between poll() and killpg() is a successful stop race.
+            pass
 
     def _command(self, task_id: str, options: dict) -> list[str]:
         if task_id == "sanjieqiyuan":
@@ -92,7 +167,7 @@ class RunnerManager:
             return [sys.executable, str(ROOT / "tools/run_zhuogui_macos.py"), "--rounds", str(options["rounds"])]
         raise ValueError("不支持的任务")
 
-    def _execute(self, run: dict) -> None:
+    def _execute(self, run: dict, completion: threading.Event) -> None:
         error = None
         status = "failed"
         try:
@@ -131,16 +206,36 @@ class RunnerManager:
                 status = "cancelled" if self._stop_requested else "failed"
             error = None if status == "cancelled" else str(exc)
         finally:
-            with self._lock:
-                self._process = None
-                if self._current and self._current["id"] == run["id"]:
-                    self._current["status"] = status
-                    self._current["stage"] = {"succeeded": "运行完成", "failed": "运行失败", "cancelled": "已停止"}[status]
-                    self._current["error"] = error
-            self.database.update_run(run["id"], status, error)
-            level = "error" if status == "failed" else ("warning" if status == "cancelled" else "info")
-            message = error or {"succeeded": "任务运行完成", "cancelled": "任务已安全停止"}.get(status, "任务运行失败")
-            self._emit(level, "status", message, {"status": status, "error": error})
+            try:
+                with self._lock:
+                    self._process = None
+                    if self._current and self._current["id"] == run["id"]:
+                        self._current["status"] = status
+                        self._current["stage"] = {
+                            "succeeded": "运行完成",
+                            "failed": "运行失败",
+                            "cancelled": "已停止",
+                        }[status]
+                        self._current["error"] = error
+                        self._current["lastOperationAt"] = utc_now()
+                    # Keep final persistence and publication inside the same state
+                    # transition, so start() cannot replace the run in between.
+                    self.database.update_run(run["id"], status, error)
+                    level = "error" if status == "failed" else (
+                        "warning" if status == "cancelled" else "info"
+                    )
+                    message = error or {
+                        "succeeded": "任务运行完成",
+                        "cancelled": "任务已安全停止",
+                    }.get(status, "任务运行失败")
+                    self._emit(
+                        level,
+                        "status",
+                        message,
+                        {"status": status, "error": error, "lastOperationAt": run.get("lastOperationAt")},
+                    )
+            finally:
+                completion.set()
 
     def _emit(self, level: str, event_type: str, message: str, payload: dict | None = None) -> None:
         run_id = self._current["id"] if self._current else "system"

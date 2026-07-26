@@ -52,7 +52,6 @@ extern "C" int MaaMHXYClickWindow(
             return -2;
         }
 
-        bool was_active = application.active;
         [application activateWithOptions:NSApplicationActivateAllWindows];
         usleep(80000);
 
@@ -113,8 +112,10 @@ extern "C" int MaaMHXYClickWindow(
             CFRelease(current_event);
         }
 
-        int attempts = was_active ? 1 : 2;
-        for (int attempt = 0; attempt < attempts; ++attempt) {
+        // Activation happens before the input is posted. Always submit exactly
+        // one balanced down/up pair so a stop request cannot leave a hidden
+        // second click queued after the Python runner has acknowledged it.
+        for (int attempt = 0; attempt < 1; ++attempt) {
             CGEventRef mouse_move = CGEventCreateMouseEvent(
                 nullptr, kCGEventMouseMoved, point, kCGMouseButtonLeft);
             CGEventRef mouse_down = CGEventCreateMouseEvent(
