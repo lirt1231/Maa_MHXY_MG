@@ -14,7 +14,15 @@ _question_bank_cache_path = None
 
 def normalize_text(value):
     """Normalize OCR and question-bank text before matching."""
-    value = (value or "").lower()
+    value = value or ""
+    # 会试 OCR 会把实时题号、倒计时数字/字母和半个分类括号拼进题干。
+    # 这些内容每秒变化，必须在相似度计算前移除。
+    value = re.sub(
+        r"^第\s*\d+\s*/\s*\d+\s*题(?:剩余时间)?[0-9a-zA-Z【\[（(]*",
+        "",
+        value,
+    )
+    value = value.lower()
     value = re.sub(r"[\s\t\r\n]", "", value)
     return re.sub(r"[，,、。！？?!：:；;“”\"'（）()【】\[\]\-·—…]", "", value)
 

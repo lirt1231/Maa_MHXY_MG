@@ -456,6 +456,8 @@ debug
 
 # 答题日志文件
 agent/custom/recognition/search_log.txt
+agent/custom/recognition/*.sqlite3*
+debug/custom/*.sqlite3*
 
 # Local dashboard runtime and frontend build files
 dashboard.sqlite3*
