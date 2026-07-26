@@ -1,7 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from fastapi.testclient import TestClient
 
@@ -100,6 +100,98 @@ class DashboardApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["points"], [])
         self.assertIsNone(response.json()["current"])
+
+    def test_game_data_api_filters_category_and_limit(self):
+        database = self.client.app.state.database
+        for captured_at, category, value in (
+            ("2026-07-24T00:00:00+00:00", "character_resources", 100),
+            ("2026-07-25T00:00:00+00:00", "character_resources", 200),
+            ("2026-07-26T00:00:00+00:00", "daily_tasks", 1),
+        ):
+            database.add_game_data_snapshot({
+                "capturedAt": captured_at,
+                "category": category,
+                "sourcePage": "test_page",
+                "status": "success",
+                "data": {"value": value},
+                "evidence": {},
+            })
+
+        response = self.client.get(
+            "/api/game-data?category=character_resources&limit=1"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(len(body["items"]), 1)
+        self.assertEqual(body["items"][0]["data"], {"value": 200})
+        self.assertEqual(
+            body["latestByCategory"]["character_resources"], body["items"][0]
+        )
+        self.assertEqual(
+            self.client.get("/api/game-data?limit=0").status_code, 422
+        )
+        self.assertEqual(
+            self.client.get("/api/game-data?category=Bad%20Category").status_code,
+            422,
+        )
+
+    @patch("dashboard.app.capture_visible_metrics")
+    def test_metric_capture_syncs_sanitized_character_resources(self, capture):
+        capture.return_value = {
+            "status": "success",
+            "gold": 7654321,
+            "level": 69,
+            "experience": 123456,
+            "experienceRequired": 987654,
+            "rawText": "背包 OCR 原始文本，不应进入游戏数据快照",
+        }
+
+        metric_response = self.client.post("/api/metrics/capture")
+        game_data_response = self.client.get(
+            "/api/game-data?category=character_resources"
+        )
+
+        self.assertEqual(metric_response.status_code, 202)
+        self.assertEqual(game_data_response.status_code, 200)
+        item = game_data_response.json()["items"][0]
+        self.assertEqual(item["status"], "success")
+        self.assertEqual(item["sourcePage"], "backpack_profile")
+        self.assertEqual(item["data"], {
+            "gold": 7654321,
+            "level": 69,
+            "experience": 123456,
+            "experienceRequired": 987654,
+        })
+        self.assertEqual(item["evidence"], {
+            "metricSnapshotId": metric_response.json()["id"],
+            "capturedFields": [
+                "gold", "level", "experience", "experienceRequired"
+            ],
+            "rawOcrStored": False,
+        })
+        self.assertNotIn("rawText", item)
+        self.assertNotIn("OCR 原始文本", str(item))
+
+    @patch("dashboard.app.capture_visible_metrics", side_effect=RuntimeError("截图失败"))
+    def test_failed_metric_capture_also_creates_failed_game_data(self, capture):
+        metric_response = self.client.post("/api/metrics/capture")
+        game_data_response = self.client.get(
+            "/api/game-data?category=character_resources"
+        )
+
+        self.assertEqual(metric_response.status_code, 202)
+        item = game_data_response.json()["latestByCategory"]["character_resources"]
+        self.assertEqual(item["status"], "failed")
+        self.assertEqual(item["error"], "截图失败")
+        self.assertEqual(item["data"], {
+            "gold": None,
+            "level": None,
+            "experience": None,
+            "experienceRequired": None,
+        })
+        self.assertEqual(item["evidence"]["capturedFields"], [])
+        self.assertFalse(item["evidence"]["rawOcrStored"])
 
     def test_sse_events_include_resume_id(self):
         payload = {

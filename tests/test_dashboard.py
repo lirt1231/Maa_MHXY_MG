@@ -148,7 +148,82 @@ class DatabaseTests(unittest.TestCase):
         migrated = Database(path)
         with migrated.connect() as db:
             columns = {row["name"] for row in db.execute("PRAGMA table_info(task_runs)")}
+            game_data_columns = {
+                row["name"]
+                for row in db.execute("PRAGMA table_info(game_data_snapshots)")
+            }
         self.assertIn("result_json", columns)
+        self.assertEqual(game_data_columns, {
+            "id",
+            "captured_at",
+            "category",
+            "source_page",
+            "status",
+            "data_json",
+            "evidence_json",
+            "error",
+        })
+
+    def test_game_data_snapshots_serialize_filter_and_select_latest(self):
+        first = self.database.add_game_data_snapshot({
+            "capturedAt": "2026-07-25T08:00:00+00:00",
+            "category": "character_resources",
+            "sourcePage": "backpack_profile",
+            "status": "partial",
+            "data": {"gold": 123, "level": None},
+            "evidence": {"capturedFields": ["gold"], "note": "背包"},
+            "error": "等级未识别",
+        })
+        latest = self.database.add_game_data_snapshot({
+            "capturedAt": "2026-07-26T08:00:00+00:00",
+            "category": "character_resources",
+            "sourcePage": "backpack_profile",
+            "status": "success",
+            "data": {"gold": 456, "level": 69},
+            "evidence": {"capturedFields": ["gold", "level"]},
+        })
+        self.database.add_game_data_snapshot({
+            "capturedAt": "2026-07-27T08:00:00+00:00",
+            "category": "daily_tasks",
+            "sourcePage": "activity_list",
+            "status": "success",
+            "data": {"tasks": [{"name": "三界奇缘", "completed": True}]},
+            "evidence": {},
+        })
+
+        resources = self.database.game_data_snapshots(
+            category="character_resources", limit=1
+        )
+
+        self.assertEqual(resources, [latest])
+        self.assertEqual(
+            self.database.latest_game_data("character_resources"), latest
+        )
+        latest_by_category = self.database.latest_game_data_by_category()
+        self.assertEqual(latest_by_category["character_resources"], latest)
+        self.assertEqual(
+            latest_by_category["daily_tasks"]["data"]["tasks"][0]["name"],
+            "三界奇缘",
+        )
+        self.assertEqual(first["evidence"]["note"], "背包")
+        self.assertEqual(len(self.database.game_data_snapshots(limit=10)), 3)
+
+    def test_game_data_snapshot_rejects_invalid_status_and_shapes(self):
+        base = {
+            "category": "character_resources",
+            "sourcePage": "backpack_profile",
+            "status": "success",
+            "data": {},
+            "evidence": {},
+        }
+        for changes in (
+            {"status": "unknown"},
+            {"data": []},
+            {"evidence": []},
+            {"category": ""},
+        ):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                self.database.add_game_data_snapshot({**base, **changes})
 
     def test_incomplete_runs_are_recovered_after_restart(self):
         self.database.create_run({

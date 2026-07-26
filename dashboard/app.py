@@ -140,6 +140,25 @@ def create_app(database_path: Path | None = None) -> FastAPI:
         days = min(365, max(1, int(range[:-1])))
         return database.metrics(days, metric)
 
+    @app.get("/api/game-data")
+    def game_data(
+        category: str | None = Query(
+            default=None,
+            min_length=1,
+            max_length=80,
+            pattern=r"^[a-z][a-z0-9_]*$",
+        ),
+        limit: int = Query(50, ge=1, le=200),
+    ):
+        return {
+            "items": database.game_data_snapshots(category=category, limit=limit),
+            "latestByCategory": (
+                {category: database.latest_game_data(category)}
+                if category is not None
+                else database.latest_game_data_by_category()
+            ),
+        }
+
     @app.post("/api/metrics/capture", status_code=202)
     async def capture_metrics():
         if runner.inspecting:
@@ -152,6 +171,31 @@ def create_app(database_path: Path | None = None) -> FastAPI:
         except Exception as exc:
             values = {"status": "failed", "error": str(exc), "rawText": None}
         snapshot = database.add_metric(values)
+        resource_fields = ("gold", "level", "experience", "experienceRequired")
+        resource_data = {field: snapshot.get(field) for field in resource_fields}
+        captured_fields = [
+            field for field, value in resource_data.items() if value is not None
+        ]
+        game_data_status = (
+            "success"
+            if snapshot["status"] == "success"
+            else "partial"
+            if captured_fields
+            else "failed"
+        )
+        database.add_game_data_snapshot({
+            "capturedAt": snapshot["capturedAt"],
+            "category": "character_resources",
+            "sourcePage": "backpack_profile",
+            "status": game_data_status,
+            "data": resource_data,
+            "evidence": {
+                "metricSnapshotId": snapshot["id"],
+                "capturedFields": captured_fields,
+                "rawOcrStored": False,
+            },
+            "error": snapshot.get("error"),
+        })
         broker.publish({
             "runId": "system", "createdAt": utc_now(), "level": "info" if snapshot["status"] == "success" else "error",
             "type": "metric", "message": "指标采集完成" if snapshot["status"] == "success" else snapshot["error"],
