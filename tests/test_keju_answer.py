@@ -2,6 +2,9 @@ import sys
 import tempfile
 import unittest
 import json
+from unittest.mock import Mock
+
+import numpy as np
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -149,6 +152,22 @@ class HybridAnswerTests(unittest.TestCase):
         )
         self.assertLessEqual(question_bottom, keju_hybrid.MAC_OPTION_ROIS["A"][1])
         self.assertGreaterEqual(keju_hybrid.MAC_QUESTION_ROI[3], 80)
+
+    def test_recognizer_prefers_explicit_argv_image(self):
+        image = np.ones((20, 30, 3), dtype=np.uint8)
+        context = SimpleNamespace(
+            tasker=SimpleNamespace(
+                controller=SimpleNamespace(post_screencap=Mock())
+            )
+        )
+
+        result = keju_hybrid._recognition_image(
+            context,
+            SimpleNamespace(image=image),
+        )
+
+        self.assertIs(result, image)
+        context.tasker.controller.post_screencap.assert_not_called()
 
 
 class KnowledgeStoreTests(unittest.TestCase):

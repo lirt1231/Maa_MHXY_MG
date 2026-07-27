@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT / "agent"))
 sys.path.insert(0, str(ROOT / "tools"))
 
 from macos_cancellation import CancellationGuard, CancellationRequested  # noqa: E402
+from maa.pipeline import JCustomRecognition  # noqa: E402
 
 
 RESULT_PREFIX = "result_json="
@@ -144,6 +145,51 @@ def should_end_loop(
     return current >= total
 
 
+def recognize_keju_frame(tasker, capture, recognizer, guard):
+    """Recognize exactly the frame captured from the bound game window."""
+    recognizer.last_status = "capturing"
+    try:
+        image = capture.capture(guard)
+    except CancellationRequested:
+        recognizer.last_status = "cancelled"
+        raise
+    except Exception as exc:
+        recognizer.last_status = "capture_failed"
+        reason = str(exc).strip() or exc.__class__.__name__
+        raise RuntimeError(f"科举窗口截图失败：{reason}") from exc
+
+    height, width = image.shape[:2]
+    recognizer.last_status = "recognizing"
+    try:
+        task = tasker.post_recognition(
+            "Custom",
+            JCustomRecognition(
+                custom_recognition="KejuHybridAnswer",
+                roi=(0, 0, width, height),
+            ),
+            image,
+        ).wait()
+        guard.checkpoint()
+        if not task.succeeded:
+            raise RuntimeError("Maa 自定义识别任务未成功")
+        detail = task.get()
+        if detail is None or not detail.nodes:
+            raise RuntimeError("Maa 自定义识别未返回结果")
+    except CancellationRequested:
+        recognizer.last_status = "cancelled"
+        raise
+    except Exception as exc:
+        if recognizer.last_status in {"capturing", "recognizing", "running"}:
+            recognizer.last_status = "recognition_failed"
+        reason = str(exc).strip() or exc.__class__.__name__
+        raise RuntimeError(f"科举识别失败：{reason}") from exc
+
+    if recognizer.last_status in {"capturing", "recognizing", "running"}:
+        recognizer.last_status = "recognition_failed"
+        raise RuntimeError("科举识别失败：识别器未返回明确状态")
+    return detail.nodes[-1].recognition
+
+
 def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | None:
     progress = progress if progress is not None else {
         "answers": 0,
@@ -172,7 +218,7 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
     from maa.resource import Resource
     from maa.tasker import Tasker
     from maa.toolkit import Toolkit
-    from run_sanjieqiyuan_macos import NativeMacOSInput
+    from run_sanjieqiyuan_macos import NativeMacOSInput, WindowCapture
 
     local_config = load_local_model_config()
     os.environ["MAA_DIRECT_RESOURCE"] = "1"
@@ -210,12 +256,15 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
     if not windows:
         raise RuntimeError("未找到已打开的梦幻西游窗口")
 
+    window_id = windows[0].hwnd
     controller = MacOSController(
-        windows[0].hwnd,
+        window_id,
         MaaMacOSScreencapMethodEnum.ScreenCaptureKit,
         MaaMacOSInputMethodEnum.GlobalEvent,
     )
-    if not controller.post_connection().wait().succeeded:
+    connection = controller.post_connection().wait()
+    guard.checkpoint()
+    if not connection.succeeded:
         raise RuntimeError("连接梦幻西游窗口失败")
 
     from custom.recognition.keju_hybrid import KejuHybridAnswer
@@ -234,16 +283,15 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
         raise RuntimeError("初始化 Maa Tasker 失败")
     guard.bind_tasker(tasker)
 
-    native_input = NativeMacOSInput()
+    capture = WindowCapture(controller, window_id)
+    native_input = NativeMacOSInput(window_id)
     last_question = None
     step = 0
     answered = 0
     while not should_end_loop(answered, args.max_steps):
         step += 1
         guard.checkpoint()
-        recognizer.last_status = "running"
-        detail = tasker.post_task("活动-科举乡试-开始答题混合").wait().get()
-        guard.checkpoint()
+        recognize_keju_frame(tasker, capture, recognizer, guard)
         status = getattr(recognizer, "last_status", "unknown")
         payload = {
             "step": step,
@@ -318,8 +366,6 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
             continue
         if status == "unreliable":
             raise RuntimeError("当前题目无法可靠决策，已保留页面")
-        if detail is None:
-            raise RuntimeError("Maa 科举任务执行失败")
         raise RuntimeError(f"未处理的科举状态：{status}")
 
     print(f"达到本次最大答题数：{args.max_steps}", flush=True)

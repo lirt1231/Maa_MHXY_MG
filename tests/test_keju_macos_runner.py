@@ -3,17 +3,102 @@ import json
 import unittest
 from contextlib import redirect_stdout
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+
+import numpy as np
 
 from tools.run_keju_macos import (
     CancellationRequested,
     classify_keju_inspection,
     main,
     parse_question_round,
+    recognize_keju_frame,
     should_end_loop,
     stable_question_key,
     task_result,
 )
+
+
+class KejuExplicitFrameTests(unittest.TestCase):
+    def setUp(self):
+        self.image = np.ones((718, 1020, 3), dtype=np.uint8)
+        self.capture = Mock()
+        self.capture.capture.return_value = self.image
+        self.recognizer = SimpleNamespace(last_status="idle")
+        self.guard = Mock()
+        self.task = Mock(succeeded=True)
+        self.task.wait.return_value = self.task
+        self.recognition = object()
+        self.task.get.return_value = SimpleNamespace(
+            nodes=[SimpleNamespace(recognition=self.recognition)]
+        )
+        self.tasker = Mock()
+
+        def post_recognition(*_args):
+            self.recognizer.last_status = "ready"
+            return self.task
+
+        self.tasker.post_recognition.side_effect = post_recognition
+
+    def test_passes_bound_window_capture_to_custom_recognition(self):
+        result = recognize_keju_frame(
+            self.tasker,
+            self.capture,
+            self.recognizer,
+            self.guard,
+        )
+
+        self.assertIs(result, self.recognition)
+        self.capture.capture.assert_called_once_with(self.guard)
+        recognition_type, params, image = self.tasker.post_recognition.call_args.args
+        self.assertEqual(recognition_type, "Custom")
+        self.assertEqual(params.custom_recognition, "KejuHybridAnswer")
+        self.assertEqual(params.roi, (0, 0, 1020, 718))
+        self.assertIs(image, self.image)
+
+    def test_capture_failure_sets_terminal_status(self):
+        self.capture.capture.side_effect = RuntimeError("no frame")
+
+        with self.assertRaisesRegex(RuntimeError, "科举窗口截图失败"):
+            recognize_keju_frame(
+                self.tasker,
+                self.capture,
+                self.recognizer,
+                self.guard,
+            )
+
+        self.assertEqual(self.recognizer.last_status, "capture_failed")
+        self.tasker.post_recognition.assert_not_called()
+
+    def test_recognition_failure_sets_terminal_status(self):
+        self.tasker.post_recognition.side_effect = RuntimeError("recognizer crashed")
+
+        with self.assertRaisesRegex(RuntimeError, "科举识别失败"):
+            recognize_keju_frame(
+                self.tasker,
+                self.capture,
+                self.recognizer,
+                self.guard,
+            )
+
+        self.assertEqual(self.recognizer.last_status, "recognition_failed")
+
+    def test_running_status_cannot_escape_as_success(self):
+        def incomplete_recognition(*_args):
+            self.recognizer.last_status = "running"
+            return self.task
+
+        self.tasker.post_recognition.side_effect = incomplete_recognition
+
+        with self.assertRaisesRegex(RuntimeError, "未返回明确状态"):
+            recognize_keju_frame(
+                self.tasker,
+                self.capture,
+                self.recognizer,
+                self.guard,
+            )
+
+        self.assertEqual(self.recognizer.last_status, "recognition_failed")
 
 
 class KejuMacOSRunnerStateTests(unittest.TestCase):

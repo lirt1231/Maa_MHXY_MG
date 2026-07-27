@@ -160,6 +160,16 @@ def _ocr_region_with_box(context, image, name, scaled_roi):
     return _sorted_ocr_text(detail.all_results), list(detail.box)
 
 
+def _recognition_image(context, argv):
+    """Use the runner-supplied frame, with a fallback for legacy pipelines."""
+    image = getattr(argv, "image", None)
+    if image is None or getattr(image, "size", 0) == 0:
+        image = context.tasker.controller.post_screencap().wait().get()
+    if image is None or getattr(image, "size", 0) == 0:
+        raise RuntimeError("科举识别没有可用截图")
+    return image
+
+
 def _clean_option_text(choice, text):
     text = re.sub(rf"^{choice}\s*[.、:：]?\s*", "", text, flags=re.IGNORECASE)
     # 当前会试界面会把 B 选项左侧的【中华历史】等分类标签一起 OCR。
@@ -293,7 +303,7 @@ class KejuHybridAnswer(CustomRecognition):
 
     def _analyze(self, context, argv, timings):
         with timings.track("screenshot"):
-            image = context.tasker.controller.post_screencap().wait().get()
+            image = _recognition_image(context, argv)
         question_roi, option_rois = keju_rois(image)
         with timings.track("ocr"):
             question = _ocr_region(
