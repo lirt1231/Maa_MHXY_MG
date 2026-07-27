@@ -6,9 +6,19 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from .game_data_contract import (
+    GAME_DATA_CATEGORIES,
+    GAME_DATA_SCHEMA_VERSION,
+    GAME_DATA_STATUSES,
+    LOCAL_PRIMARY_TARGET_ID,
+    snapshot_is_stale,
+    validate_category_data,
+    validate_evidence,
+    validate_game_date,
+    validate_target_id,
+)
 
 UTC = timezone.utc
-GAME_DATA_STATUSES = {"success", "partial", "failed"}
 
 
 def utc_now() -> str:
@@ -71,6 +81,9 @@ class Database:
                 CREATE TABLE IF NOT EXISTS game_data_snapshots (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     captured_at TEXT NOT NULL,
+                    game_date TEXT,
+                    schema_version INTEGER NOT NULL DEFAULT 2,
+                    target_id TEXT NOT NULL DEFAULT 'local-primary',
                     category TEXT NOT NULL,
                     source_page TEXT NOT NULL,
                     status TEXT NOT NULL,
@@ -78,8 +91,6 @@ class Database:
                     evidence_json TEXT NOT NULL DEFAULT '{}',
                     error TEXT
                 );
-                CREATE INDEX IF NOT EXISTS idx_game_data_category_captured
-                ON game_data_snapshots(category, captured_at DESC, id DESC);
                 """
             )
             columns = {
@@ -87,6 +98,29 @@ class Database:
             }
             if "result_json" not in columns:
                 db.execute("ALTER TABLE task_runs ADD COLUMN result_json TEXT")
+            game_data_columns = {
+                row["name"]
+                for row in db.execute("PRAGMA table_info(game_data_snapshots)")
+            }
+            if "game_date" not in game_data_columns:
+                db.execute("ALTER TABLE game_data_snapshots ADD COLUMN game_date TEXT")
+                db.execute(
+                    "UPDATE game_data_snapshots SET game_date=substr(captured_at, 1, 10)"
+                )
+            if "schema_version" not in game_data_columns:
+                db.execute(
+                    "ALTER TABLE game_data_snapshots ADD COLUMN schema_version "
+                    "INTEGER NOT NULL DEFAULT 1"
+                )
+            if "target_id" not in game_data_columns:
+                db.execute(
+                    "ALTER TABLE game_data_snapshots ADD COLUMN target_id "
+                    "TEXT NOT NULL DEFAULT 'local-primary'"
+                )
+            db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_game_data_target_category_captured "
+                "ON game_data_snapshots(target_id, category, captured_at DESC, id DESC)"
+            )
 
     def create_run(self, run: dict[str, Any]) -> None:
         with self.connect() as db:
@@ -197,6 +231,8 @@ class Database:
 
     def add_game_data_snapshot(self, values: dict[str, Any]) -> dict:
         captured_at = values.get("capturedAt", utc_now())
+        schema_version = values.get("schemaVersion", GAME_DATA_SCHEMA_VERSION)
+        target_id = values.get("targetId", LOCAL_PRIMARY_TARGET_ID)
         category = values.get("category")
         source_page = values.get("sourcePage")
         status = values.get("status")
@@ -207,11 +243,22 @@ class Database:
         if not isinstance(captured_at, str) or not captured_at.strip():
             raise ValueError("游戏数据采集时间无效")
         try:
-            datetime.fromisoformat(captured_at)
+            captured_datetime = datetime.fromisoformat(captured_at)
         except ValueError as exc:
             raise ValueError("游戏数据采集时间无效") from exc
-        if not isinstance(category, str) or not category.strip():
-            raise ValueError("游戏数据分类不能为空")
+        game_date = values.get(
+            "gameDate", captured_datetime.astimezone().date().isoformat()
+        )
+        if (
+            isinstance(schema_version, bool)
+            or not isinstance(schema_version, int)
+            or schema_version != GAME_DATA_SCHEMA_VERSION
+        ):
+            raise ValueError("游戏数据契约版本无效")
+        target_id = validate_target_id(target_id)
+        game_date = validate_game_date(game_date)
+        if category not in GAME_DATA_CATEGORIES:
+            raise ValueError("不支持的游戏数据分类")
         if not isinstance(source_page, str) or not source_page.strip():
             raise ValueError("游戏数据来源页面不能为空")
         if status not in GAME_DATA_STATUSES:
@@ -222,10 +269,15 @@ class Database:
             raise ValueError("游戏数据证据必须是对象")
         if error is not None and (not isinstance(error, str) or not error.strip()):
             raise ValueError("游戏数据错误信息无效")
+        validate_category_data(category, status, data)
+        validate_evidence(evidence)
 
         payload = {
             "capturedAt": captured_at,
-            "category": category.strip(),
+            "gameDate": game_date,
+            "schemaVersion": schema_version,
+            "targetId": target_id,
+            "category": category,
             "sourcePage": source_page.strip(),
             "status": status,
             "data": data,
@@ -242,10 +294,14 @@ class Database:
         with self.connect() as db:
             cursor = db.execute(
                 """INSERT INTO game_data_snapshots(
-                captured_at, category, source_page, status, data_json, evidence_json, error
-                ) VALUES(?,?,?,?,?,?,?)""",
+                captured_at, game_date, schema_version, target_id, category,
+                source_page, status, data_json, evidence_json, error
+                ) VALUES(?,?,?,?,?,?,?,?,?,?)""",
                 (
                     captured_at,
+                    game_date,
+                    schema_version,
+                    target_id,
                     payload["category"],
                     payload["sourcePage"],
                     status,
@@ -255,10 +311,15 @@ class Database:
                 ),
             )
             payload["id"] = cursor.lastrowid
+        payload["stale"] = snapshot_is_stale(payload)
         return payload
 
     def game_data_snapshots(
-        self, category: str | None = None, limit: int = 50
+        self,
+        category: str | None = None,
+        limit: int = 50,
+        target_id: str = LOCAL_PRIMARY_TARGET_ID,
+        statuses: set[str] | None = None,
     ) -> list[dict]:
         if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
             raise ValueError("游戏数据查询数量必须是正整数")
@@ -266,33 +327,58 @@ class Database:
             not isinstance(category, str) or not category.strip()
         ):
             raise ValueError("游戏数据分类不能为空")
-        query = "SELECT * FROM game_data_snapshots"
-        parameters: list[Any] = []
+        target_id = validate_target_id(target_id)
+        if statuses is not None and (not statuses or not statuses <= GAME_DATA_STATUSES):
+            raise ValueError("游戏数据查询状态无效")
+        query = "SELECT * FROM game_data_snapshots WHERE target_id=?"
+        parameters: list[Any] = [target_id]
         if category is not None:
-            query += " WHERE category=?"
+            query += " AND category=?"
             parameters.append(category.strip())
+        if statuses is not None:
+            placeholders = ",".join("?" for _ in statuses)
+            query += f" AND status IN ({placeholders})"
+            parameters.extend(sorted(statuses))
         query += " ORDER BY captured_at DESC, id DESC LIMIT ?"
         parameters.append(limit)
         with self.connect() as db:
             rows = db.execute(query, parameters).fetchall()
         return [self._game_data_row(row) for row in rows]
 
-    def latest_game_data(self, category: str | None = None) -> dict | None:
-        snapshots = self.game_data_snapshots(category=category, limit=1)
+    def latest_game_data(
+        self,
+        category: str | None = None,
+        target_id: str = LOCAL_PRIMARY_TARGET_ID,
+        usable_only: bool = False,
+    ) -> dict | None:
+        snapshots = self.game_data_snapshots(
+            category=category,
+            limit=1,
+            target_id=target_id,
+            statuses={"success"} if usable_only else None,
+        )
         return snapshots[0] if snapshots else None
 
-    def latest_game_data_by_category(self) -> dict[str, dict]:
+    def latest_game_data_by_category(
+        self,
+        target_id: str = LOCAL_PRIMARY_TARGET_ID,
+        usable_only: bool = False,
+    ) -> dict[str, dict]:
+        target_id = validate_target_id(target_id)
+        status_clause = "AND status='success'" if usable_only else ""
         with self.connect() as db:
             rows = db.execute(
-                """SELECT * FROM (
+                f"""SELECT * FROM (
                 SELECT game_data_snapshots.*,
                        ROW_NUMBER() OVER (
                            PARTITION BY category
                            ORDER BY captured_at DESC, id DESC
                        ) AS category_rank
                 FROM game_data_snapshots
+                WHERE target_id=? {status_clause}
                 ) WHERE category_rank=1
-                ORDER BY category"""
+                ORDER BY category""",
+                (target_id,),
             ).fetchall()
         return {
             row["category"]: self._game_data_row(row)
@@ -420,9 +506,12 @@ class Database:
 
     @staticmethod
     def _game_data_row(row: sqlite3.Row) -> dict:
-        return {
+        payload = {
             "id": row["id"],
             "capturedAt": row["captured_at"],
+            "gameDate": row["game_date"],
+            "schemaVersion": row["schema_version"],
+            "targetId": row["target_id"],
             "category": row["category"],
             "sourcePage": row["source_page"],
             "status": row["status"],
@@ -430,6 +519,8 @@ class Database:
             "evidence": json.loads(row["evidence_json"]),
             "error": row["error"],
         }
+        payload["stale"] = snapshot_is_stale(payload)
+        return payload
 
     @staticmethod
     def _event_row(row: sqlite3.Row) -> dict:

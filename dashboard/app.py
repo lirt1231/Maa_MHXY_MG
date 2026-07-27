@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from .database import Database, utc_now
 from .events import EventBroker
 from .game_data import collect_daily_task_data
+from .game_data_contract import LOCAL_PRIMARY_TARGET_ID
 from .metrics import capture_visible_metrics
 from .registry import task_list
 from .runner import RunnerManager
@@ -160,14 +161,38 @@ def create_app(database_path: Path | None = None) -> FastAPI:
             pattern=r"^[a-z][a-z0-9_]*$",
         ),
         limit: int = Query(50, ge=1, le=200),
+        targetId: str = Query(
+            LOCAL_PRIMARY_TARGET_ID,
+            min_length=1,
+            max_length=64,
+            pattern=r"^[a-z][a-z0-9-]*$",
+        ),
     ):
+        items = database.game_data_snapshots(
+            category=category, limit=limit, target_id=targetId
+        )
+        latest_attempt = (
+            {category: database.latest_game_data(category, target_id=targetId)}
+            if category is not None
+            else database.latest_game_data_by_category(target_id=targetId)
+        )
+        latest_usable = (
+            {
+                category: database.latest_game_data(
+                    category, target_id=targetId, usable_only=True
+                )
+            }
+            if category is not None
+            else database.latest_game_data_by_category(
+                target_id=targetId, usable_only=True
+            )
+        )
         return {
-            "items": database.game_data_snapshots(category=category, limit=limit),
-            "latestByCategory": (
-                {category: database.latest_game_data(category)}
-                if category is not None
-                else database.latest_game_data_by_category()
-            ),
+            "targetId": targetId,
+            "items": items,
+            "latestByCategory": latest_attempt,
+            "latestAttemptByCategory": latest_attempt,
+            "latestUsableByCategory": latest_usable,
         }
 
     @app.post("/api/game-data/daily-tasks/capture", status_code=202)
@@ -181,8 +206,9 @@ def create_app(database_path: Path | None = None) -> FastAPI:
         except TimeoutError as exc:
             error = str(exc)
             snapshot = database.add_game_data_snapshot({
+                "targetId": LOCAL_PRIMARY_TARGET_ID,
                 "category": "daily_tasks",
-                "sourcePage": "daily_schedule",
+                "sourcePage": "daily_schedule_capture",
                 "status": "failed",
                 "data": {"tasks": []},
                 "evidence": {},
@@ -193,8 +219,9 @@ def create_app(database_path: Path | None = None) -> FastAPI:
         except RuntimeError as exc:
             error = str(exc)
             snapshot = database.add_game_data_snapshot({
+                "targetId": LOCAL_PRIMARY_TARGET_ID,
                 "category": "daily_tasks",
-                "sourcePage": "daily_schedule",
+                "sourcePage": "daily_schedule_capture",
                 "status": "failed",
                 "data": {"tasks": []},
                 "evidence": {},
@@ -206,6 +233,7 @@ def create_app(database_path: Path | None = None) -> FastAPI:
             runner.end_read_only()
 
         snapshot = database.add_game_data_snapshot({
+            "targetId": LOCAL_PRIMARY_TARGET_ID,
             "category": payload["category"],
             "sourcePage": payload["source_page"],
             "status": payload["status"],
@@ -223,9 +251,16 @@ def create_app(database_path: Path | None = None) -> FastAPI:
         if current and current["status"] not in {"succeeded", "failed", "cancelled"}:
             raise HTTPException(status_code=409, detail="任务运行期间不能采集指标")
         try:
-            values = await asyncio.to_thread(capture_visible_metrics)
-        except Exception as exc:
-            values = {"status": "failed", "error": str(exc), "rawText": None}
+            runner.begin_read_only()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        try:
+            try:
+                values = await asyncio.to_thread(capture_visible_metrics)
+            except Exception as exc:
+                values = {"status": "failed", "error": str(exc), "rawText": None}
+        finally:
+            runner.end_read_only()
         snapshot = database.add_metric(values)
         resource_fields = ("gold", "level", "experience", "experienceRequired")
         resource_data = {field: snapshot.get(field) for field in resource_fields}
@@ -241,6 +276,7 @@ def create_app(database_path: Path | None = None) -> FastAPI:
         )
         database.add_game_data_snapshot({
             "capturedAt": snapshot["capturedAt"],
+            "targetId": LOCAL_PRIMARY_TARGET_ID,
             "category": "character_resources",
             "sourcePage": "backpack_profile",
             "status": game_data_status,
@@ -249,6 +285,16 @@ def create_app(database_path: Path | None = None) -> FastAPI:
                 "metricSnapshotId": snapshot["id"],
                 "capturedFields": captured_fields,
                 "rawOcrStored": False,
+                "fields": {
+                    field: {
+                        "status": "captured" if value is not None else "missing",
+                        "confidence": None,
+                        "sourcePage": (
+                            "backpack" if field == "gold" else "character_profile"
+                        ),
+                    }
+                    for field, value in resource_data.items()
+                },
             },
             "error": snapshot.get("error"),
         })

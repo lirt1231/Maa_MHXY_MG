@@ -127,17 +127,24 @@ export type MetricSnapshot = {
 export type GameDataSnapshot = {
   id: number;
   capturedAt: string;
+  gameDate: string;
+  schemaVersion: number;
+  targetId: string;
   category: string;
   sourcePage: string;
   status: "success" | "partial" | "failed";
+  stale: boolean;
   data: Record<string, unknown>;
   evidence: Record<string, unknown>;
   error?: string | null;
 };
 
 export type GameDataResponse = {
+  targetId: string;
   items: GameDataSnapshot[];
   latestByCategory: Record<string, GameDataSnapshot | null>;
+  latestAttemptByCategory: Record<string, GameDataSnapshot | null>;
+  latestUsableByCategory: Record<string, GameDataSnapshot | null>;
 };
 
 export type DailyTaskItem = {

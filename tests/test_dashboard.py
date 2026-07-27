@@ -161,6 +161,9 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(game_data_columns, {
             "id",
             "captured_at",
+            "game_date",
+            "schema_version",
+            "target_id",
             "category",
             "source_page",
             "status",
@@ -168,6 +171,37 @@ class DatabaseTests(unittest.TestCase):
             "evidence_json",
             "error",
         })
+
+    def test_existing_game_data_is_migrated_without_breaking_legacy_rows(self):
+        path = Path(self.temp.name) / "legacy-game-data.sqlite3"
+        with sqlite3.connect(path) as db:
+            db.execute(
+                """CREATE TABLE game_data_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, captured_at TEXT NOT NULL,
+                category TEXT NOT NULL, source_page TEXT NOT NULL,
+                status TEXT NOT NULL, data_json TEXT NOT NULL DEFAULT '{}',
+                evidence_json TEXT NOT NULL DEFAULT '{}', error TEXT)"""
+            )
+            db.execute(
+                """INSERT INTO game_data_snapshots(
+                captured_at, category, source_page, status, data_json
+                ) VALUES(?,?,?,?,?)""",
+                (
+                    "2026-07-26T08:00:00+00:00",
+                    "legacy_category",
+                    "legacy_page",
+                    "success",
+                    '{"value": 1}',
+                ),
+            )
+
+        migrated = Database(path)
+        snapshot = migrated.game_data_snapshots()[0]
+
+        self.assertEqual(snapshot["schemaVersion"], 1)
+        self.assertEqual(snapshot["targetId"], "local-primary")
+        self.assertEqual(snapshot["gameDate"], "2026-07-26")
+        self.assertTrue(snapshot["stale"])
 
     def test_game_data_snapshots_serialize_filter_and_select_latest(self):
         first = self.database.add_game_data_snapshot({
@@ -192,7 +226,14 @@ class DatabaseTests(unittest.TestCase):
             "category": "daily_tasks",
             "sourcePage": "activity_list",
             "status": "success",
-            "data": {"tasks": [{"name": "三界奇缘", "completed": True}]},
+            "data": {"tasks": [{
+                "taskId": "sanjieqiyuan",
+                "name": "三界奇缘",
+                "completed": 1,
+                "target": 1,
+                "status": "completed",
+                "rewardStatus": "unknown",
+            }]},
             "evidence": {},
         })
 
@@ -211,7 +252,55 @@ class DatabaseTests(unittest.TestCase):
             "三界奇缘",
         )
         self.assertEqual(first["evidence"]["note"], "背包")
+        self.assertEqual(latest["schemaVersion"], 2)
+        self.assertEqual(latest["targetId"], "local-primary")
+        self.assertEqual(latest["gameDate"], "2026-07-26")
         self.assertEqual(len(self.database.game_data_snapshots(limit=10)), 3)
+
+    def test_game_data_keeps_latest_attempt_and_latest_usable_separate(self):
+        usable = self.database.add_game_data_snapshot({
+            "capturedAt": "2026-07-26T08:00:00+00:00",
+            "category": "character_resources",
+            "sourcePage": "backpack_profile",
+            "status": "success",
+            "data": {"gold": 456},
+            "evidence": {},
+        })
+        failed = self.database.add_game_data_snapshot({
+            "capturedAt": "2026-07-27T08:00:00+00:00",
+            "category": "character_resources",
+            "sourcePage": "capture_attempt",
+            "status": "failed",
+            "data": {"gold": None},
+            "evidence": {},
+            "error": "截图失败",
+        })
+
+        self.assertEqual(
+            self.database.latest_game_data("character_resources"), failed
+        )
+        self.assertEqual(
+            self.database.latest_game_data(
+                "character_resources", usable_only=True
+            ),
+            usable,
+        )
+
+    def test_game_data_is_isolated_by_target(self):
+        self.database.add_game_data_snapshot({
+            "targetId": "secondary-window",
+            "category": "character_resources",
+            "sourcePage": "backpack",
+            "status": "success",
+            "data": {"gold": 999},
+            "evidence": {},
+        })
+
+        self.assertEqual(self.database.game_data_snapshots(), [])
+        self.assertEqual(
+            self.database.game_data_snapshots(target_id="secondary-window")[0]["data"],
+            {"gold": 999},
+        )
 
     def test_game_data_snapshot_rejects_invalid_status_and_shapes(self):
         base = {
@@ -226,6 +315,9 @@ class DatabaseTests(unittest.TestCase):
             {"data": []},
             {"evidence": []},
             {"category": ""},
+            {"schemaVersion": 1},
+            {"targetId": "INVALID"},
+            {"evidence": {"fields": {"gold": {"status": "guessed"}}}},
         ):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 self.database.add_game_data_snapshot({**base, **changes})

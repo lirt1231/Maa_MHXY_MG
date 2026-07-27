@@ -103,17 +103,17 @@ class DashboardApiTests(unittest.TestCase):
 
     def test_game_data_api_filters_category_and_limit(self):
         database = self.client.app.state.database
-        for captured_at, category, value in (
-            ("2026-07-24T00:00:00+00:00", "character_resources", 100),
-            ("2026-07-25T00:00:00+00:00", "character_resources", 200),
-            ("2026-07-26T00:00:00+00:00", "daily_tasks", 1),
+        for captured_at, category, data in (
+            ("2026-07-24T00:00:00+00:00", "character_resources", {"gold": 100}),
+            ("2026-07-25T00:00:00+00:00", "character_resources", {"gold": 200}),
+            ("2026-07-26T00:00:00+00:00", "daily_tasks", {"tasks": []}),
         ):
             database.add_game_data_snapshot({
                 "capturedAt": captured_at,
                 "category": category,
                 "sourcePage": "test_page",
                 "status": "success",
-                "data": {"value": value},
+                "data": data,
                 "evidence": {},
             })
 
@@ -124,13 +124,40 @@ class DashboardApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(len(body["items"]), 1)
-        self.assertEqual(body["items"][0]["data"], {"value": 200})
+        self.assertEqual(body["targetId"], "local-primary")
+        self.assertEqual(body["items"][0]["data"], {"gold": 200})
         self.assertEqual(
             body["latestByCategory"]["character_resources"], body["items"][0]
         )
         self.assertEqual(
+            body["latestAttemptByCategory"], body["latestByCategory"]
+        )
+        self.assertEqual(
+            body["latestUsableByCategory"]["character_resources"], body["items"][0]
+        )
+        self.assertEqual(
             self.client.get("/api/game-data?limit=0").status_code, 422
         )
+
+    def test_game_data_api_isolates_targets(self):
+        database = self.client.app.state.database
+        database.add_game_data_snapshot({
+            "targetId": "secondary-window",
+            "category": "character_resources",
+            "sourcePage": "backpack",
+            "status": "success",
+            "data": {"gold": 999},
+            "evidence": {},
+        })
+
+        primary = self.client.get("/api/game-data").json()
+        secondary = self.client.get(
+            "/api/game-data?targetId=secondary-window"
+        ).json()
+
+        self.assertEqual(primary["items"], [])
+        self.assertEqual(secondary["targetId"], "secondary-window")
+        self.assertEqual(secondary["items"][0]["data"], {"gold": 999})
         self.assertEqual(
             self.client.get("/api/game-data?category=Bad%20Category").status_code,
             422,
@@ -235,6 +262,28 @@ class DashboardApiTests(unittest.TestCase):
                 "gold", "level", "experience", "experienceRequired"
             ],
             "rawOcrStored": False,
+            "fields": {
+                "gold": {
+                    "status": "captured",
+                    "confidence": None,
+                    "sourcePage": "backpack",
+                },
+                "level": {
+                    "status": "captured",
+                    "confidence": None,
+                    "sourcePage": "character_profile",
+                },
+                "experience": {
+                    "status": "captured",
+                    "confidence": None,
+                    "sourcePage": "character_profile",
+                },
+                "experienceRequired": {
+                    "status": "captured",
+                    "confidence": None,
+                    "sourcePage": "character_profile",
+                },
+            },
         })
         self.assertNotIn("rawText", item)
         self.assertNotIn("OCR 原始文本", str(item))
