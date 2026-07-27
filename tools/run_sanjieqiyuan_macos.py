@@ -495,10 +495,11 @@ def navigate_to_exam(tasker, controller, capture, native_input, timeout, guard):
             if navigation_inputs >= MAX_NAVIGATION_INPUTS:
                 raise RuntimeError("活动导航已达到输入上限，已停止以避免死循环")
             width, height = scene["image_size"]
+            scroll_end_y = 0.52 if status == "scroll_daily" else 0.27
             guard.perform_input(
                 native_input.drag,
                 (round(width * 0.62), round(height * 0.62)),
-                (round(width * 0.62), round(height * 0.27)),
+                (round(width * 0.62), round(height * scroll_end_y)),
                 scene["image_size"],
             )
             scroll_count += 1
