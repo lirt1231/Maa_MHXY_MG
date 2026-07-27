@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { InspectionEvidence } from "./InspectionEvidence";
 import type { Task, TaskInspection } from "./types";
 
@@ -18,7 +18,16 @@ export function TaskDialog({ task, busy, onClose, onStart, onInspect }: {
   const [error, setError] = useState("");
   const inspectionRequest = useRef(0);
   const activeInspection = useRef(0);
+  const selectAllChecks = useRef<HTMLInputElement>(null);
+  const allChecksSelected = task.checklist.length > 0 && checks.every(Boolean);
+  const someChecksSelected = checks.some(Boolean);
   const ready = checks.every(Boolean) && !busy && !submitting && !inspecting;
+
+  useEffect(() => {
+    if (selectAllChecks.current) {
+      selectAllChecks.current.indeterminate = someChecksSelected && !allChecksSelected;
+    }
+  }, [allChecksSelected, someChecksSelected]);
 
   function updateOption(key: string, value: unknown) {
     inspectionRequest.current += 1;
@@ -75,9 +84,21 @@ export function TaskDialog({ task, busy, onClose, onStart, onInspect }: {
           </div>
         </div>
         <div className="check-panel">
-          <h3>启动前检查</h3>
+          <div className="check-panel-heading">
+            <h3>启动前检查</h3>
+            {task.checklist.length > 0 && <label className="check-all">
+              <input
+                ref={selectAllChecks}
+                type="checkbox"
+                aria-label={allChecksSelected ? "取消全选启动前检查" : "全选启动前检查"}
+                checked={allChecksSelected}
+                onChange={() => setChecks(task.checklist.map(() => !allChecksSelected))}
+              />
+              <span>{allChecksSelected ? "取消全选" : "全选"}</span>
+            </label>}
+          </div>
           {task.checklist.map((item, index) => <label className="check" key={item}>
-            <input type="checkbox" checked={checks[index]} onChange={(event) => setChecks(checks.map((value, i) => i === index ? event.target.checked : value))} />
+            <input type="checkbox" checked={checks[index]} onChange={(event) => setChecks((current) => current.map((value, i) => i === index ? event.target.checked : value))} />
             <span>{item}</span>
           </label>)}
           <div className="inspection-panel">

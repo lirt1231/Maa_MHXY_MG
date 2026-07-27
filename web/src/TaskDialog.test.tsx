@@ -37,9 +37,43 @@ describe("TaskDialog", () => {
     const view = render(<TaskDialog task={task} busy={false} onClose={() => undefined} onStart={vi.fn()} onInspect={vi.fn()} />);
     const start = view.getByText("确认并启动") as HTMLButtonElement;
     expect(start.disabled).toBe(true);
-    view.getAllByRole("checkbox").forEach((checkbox) => fireEvent.click(checkbox));
+    fireEvent.click(view.getByLabelText("全选启动前检查"));
     expect(start.disabled).toBe(false);
     expect(view.getByText("低置信度时停止", { exact: false })).toBeTruthy();
+  });
+
+  it("selects and clears every preflight check from the select-all control", () => {
+    const view = render(<TaskDialog task={task} busy={false} onClose={() => undefined} onStart={vi.fn()} onInspect={vi.fn()} />);
+    const selectAll = view.getByLabelText("全选启动前检查") as HTMLInputElement;
+    const itemChecks = view.getAllByRole("checkbox").filter((checkbox) => checkbox !== selectAll) as HTMLInputElement[];
+
+    fireEvent.click(selectAll);
+    expect(itemChecks.every((checkbox) => checkbox.checked)).toBe(true);
+    expect(view.getByText("取消全选")).toBeTruthy();
+
+    fireEvent.click(selectAll);
+    expect(itemChecks.every((checkbox) => !checkbox.checked)).toBe(true);
+    expect((view.getByText("确认并启动") as HTMLButtonElement).disabled).toBe(true);
+    expect(view.getByText("全选")).toBeTruthy();
+  });
+
+  it("keeps the select-all state in sync with individual checks", () => {
+    const view = render(<TaskDialog task={task} busy={false} onClose={() => undefined} onStart={vi.fn()} onInspect={vi.fn()} />);
+    const selectAll = view.getByLabelText("全选启动前检查") as HTMLInputElement;
+    const itemChecks = view.getAllByRole("checkbox").filter((checkbox) => checkbox !== selectAll);
+
+    fireEvent.click(itemChecks[0]);
+    expect(selectAll.checked).toBe(false);
+    expect(selectAll.indeterminate).toBe(true);
+
+    fireEvent.click(itemChecks[1]);
+    expect(selectAll.checked).toBe(true);
+    expect(selectAll.indeterminate).toBe(false);
+    expect(view.getByText("取消全选")).toBeTruthy();
+
+    fireEvent.click(itemChecks[0]);
+    expect(selectAll.checked).toBe(false);
+    expect(selectAll.indeterminate).toBe(true);
   });
 
   it("shows the recognized scene and proposed next action", async () => {
@@ -83,7 +117,7 @@ describe("TaskDialog", () => {
 
     fireEvent.click(view.getByText("检测当前画面"));
     expect(view.getByText("正在检测当前画面…")).toBeTruthy();
-    view.getAllByRole("checkbox").forEach((checkbox) => fireEvent.click(checkbox));
+    fireEvent.click(view.getByLabelText("全选启动前检查"));
     fireEvent.change(view.getByRole("spinbutton"), { target: { value: "15" } });
     expect((view.getByText("确认并启动") as HTMLButtonElement).disabled).toBe(true);
     await act(async () => resolveInspection(readyInspection));
