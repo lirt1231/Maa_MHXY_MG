@@ -408,6 +408,8 @@ class MacOSTaskRuntimeInputTests(unittest.TestCase):
         self.runtime = MacOSTaskRuntime.__new__(MacOSTaskRuntime)
         self.runtime.guard = Mock()
         self.runtime.native_input = Mock()
+        self.runtime.target_id = "local-primary"
+        self.runtime.window_id = 42
         self.scene = MacOSScene((1020, 718), [], {})
 
     def test_click_rejects_out_of_bounds_evidence(self):
@@ -426,6 +428,28 @@ class MacOSTaskRuntimeInputTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "超出当前画面"):
             self.runtime.drag((10, 20), (1020, 30), self.scene, "测试拖动")
         self.runtime.guard.perform_input.assert_not_called()
+
+    @patch("tools.macos_task_runtime.log_event")
+    def test_click_uses_bound_target_and_logs_identity(self, log_event):
+        self.runtime.guard.perform_input.return_value = (300.0, 240.0)
+
+        result = self.runtime.click((100, 120), self.scene, "测试点击")
+
+        self.assertEqual(result, (300.0, 240.0))
+        self.runtime.guard.perform_input.assert_called_once_with(
+            self.runtime.native_input.click,
+            100,
+            120,
+            (1020, 718),
+        )
+        log_event.assert_called_once_with(
+            "click",
+            targetId="local-primary",
+            windowId=42,
+            reason="测试点击",
+            source=(100, 120),
+            screen=(300.0, 240.0),
+        )
 
 
 if __name__ == "__main__":

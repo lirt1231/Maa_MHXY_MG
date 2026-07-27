@@ -45,8 +45,8 @@ class MacOSTaskRuntime:
 
     def __init__(self, guard: CancellationGuard):
         self.guard = guard
+        self.target_id = "local-primary"
         Toolkit.init_option(str(ROOT))
-        self.native_input = NativeMacOSInput()
         windows = [
             window
             for window in Toolkit.find_desktop_windows()
@@ -54,9 +54,16 @@ class MacOSTaskRuntime:
         ]
         if len(windows) > 1:
             raise RuntimeError("检测到多个梦幻西游窗口，无法保证截图与输入属于同一窗口")
-        self.window_id = windows[0].hwnd if windows else self.native_input.find_window_id()
+        if windows:
+            self.window_id = windows[0].hwnd
+            self.native_input = NativeMacOSInput(self.window_id)
+        else:
+            self.native_input = NativeMacOSInput()
+            self.window_id = self.native_input.find_window_id()
         if not self.window_id:
             raise RuntimeError("未找到已打开且可见的梦幻西游窗口")
+        self.native_input.bind_window(self.window_id)
+        log_event("target_bound", targetId=self.target_id, windowId=self.window_id)
 
         self.controller = MacOSController(
             self.window_id,
@@ -124,7 +131,14 @@ class MacOSTaskRuntime:
             point[1],
             scene.image_size,
         )
-        log_event("click", reason=reason, source=point, screen=screen_point)
+        log_event(
+            "click",
+            targetId=self.target_id,
+            windowId=self.window_id,
+            reason=reason,
+            source=point,
+            screen=screen_point,
+        )
         return screen_point
 
     def click_box(self, box, scene: MacOSScene, reason: str):
@@ -143,7 +157,14 @@ class MacOSTaskRuntime:
             end,
             scene.image_size,
         )
-        log_event("drag", reason=reason, start=start, end=end)
+        log_event(
+            "drag",
+            targetId=self.target_id,
+            windowId=self.window_id,
+            reason=reason,
+            start=start,
+            end=end,
+        )
 
     @staticmethod
     def _validate_point(point, image_size, reason: str) -> None:

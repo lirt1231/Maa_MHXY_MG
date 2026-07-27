@@ -506,7 +506,7 @@ def verify_answering_completion(tasker, capture, guard, attempts=3):
 class NativeMacOSInput:
     """Point-aware macOS input for the iOS-wrapped client."""
 
-    def __init__(self):
+    def __init__(self, window_id=None):
         source = ROOT / "tools/macos_window_input.mm"
         digest = hashlib.sha256(source.read_bytes()).hexdigest()[:16]
         library_path = Path(tempfile.gettempdir()) / f"libmaa_mhxy_input_{digest}.dylib"
@@ -539,7 +539,7 @@ class NativeMacOSInput:
         self.find_window_function.restype = ctypes.c_uint32
         self.click_function = self.library.MaaMHXYClickWindow
         self.click_function.argtypes = [
-            ctypes.c_char_p,
+            ctypes.c_uint32,
             ctypes.c_char_p,
             ctypes.c_double,
             ctypes.c_double,
@@ -551,7 +551,7 @@ class NativeMacOSInput:
         self.click_function.restype = ctypes.c_int
         self.drag_function = self.library.MaaMHXYDragWindow
         self.drag_function.argtypes = [
-            ctypes.c_char_p,
+            ctypes.c_uint32,
             ctypes.c_char_p,
             ctypes.c_double,
             ctypes.c_double,
@@ -561,16 +561,32 @@ class NativeMacOSInput:
             ctypes.c_double,
         ]
         self.drag_function.restype = ctypes.c_int
+        self.window_id = 0
+        if window_id is not None:
+            self.bind_window(window_id)
 
     def find_window_id(self):
         return int(self.find_window_function(b"com.netease.my", "梦幻西游".encode()))
+
+    def bind_window(self, window_id):
+        if isinstance(window_id, bool) or not isinstance(window_id, int) or window_id <= 0:
+            raise ValueError("原生输入需要有效的窗口编号")
+        self.window_id = window_id
+        return self.window_id
+
+    def _bound_window_id(self):
+        if not self.window_id:
+            # Compatibility for older task runners. Resolve once and keep the
+            # result so later input cannot silently switch to another window.
+            self.bind_window(self.find_window_id())
+        return self.window_id
 
     def click(self, x, y, source_size):
         output_x = ctypes.c_double()
         output_y = ctypes.c_double()
         result = self.click_function(
+            self._bound_window_id(),
             b"com.netease.my",
-            "梦幻西游".encode(),
             float(x),
             float(y),
             float(source_size[0]),
@@ -584,8 +600,8 @@ class NativeMacOSInput:
 
     def drag(self, from_point, to_point, source_size):
         result = self.drag_function(
+            self._bound_window_id(),
             b"com.netease.my",
-            "梦幻西游".encode(),
             float(from_point[0]),
             float(from_point[1]),
             float(to_point[0]),
@@ -631,16 +647,27 @@ def run(guard: CancellationGuard, args=None) -> int:
         for window in Toolkit.find_desktop_windows()
         if window.class_name == "com.netease.my" and window.window_name == "梦幻西游"
     ]
-    native_input = (
-        NativeMacOSInput()
-        if args.input_method == "native" and not args.recognize_only
-        else None
-    )
-    window_id = windows[0].hwnd if windows else (
-        native_input.find_window_id() if native_input is not None else 0
-    )
+    native_input = None
+    window_id = windows[0].hwnd if windows else 0
+    if args.input_method == "native" and not args.recognize_only:
+        native_input = NativeMacOSInput(window_id) if window_id else NativeMacOSInput()
+        if not window_id:
+            window_id = native_input.find_window_id()
     if not window_id:
         raise RuntimeError("未找到已打开的梦幻西游窗口")
+    if native_input is not None:
+        native_input.bind_window(window_id)
+    print(
+        json.dumps(
+            {
+                "event": "target_bound",
+                "targetId": "local-primary",
+                "windowId": window_id,
+            },
+            ensure_ascii=False,
+        ),
+        flush=True,
+    )
 
     input_method = (
         MaaMacOSInputMethodEnum.PostToPid

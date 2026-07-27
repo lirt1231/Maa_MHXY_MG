@@ -18,6 +18,49 @@ bool read_window_bounds(NSDictionary* info, CGRect* bounds)
     return CGRectMakeWithDictionaryRepresentation((__bridge CFDictionaryRef)dictionary, bounds);
 }
 
+int resolve_target_window(
+    uint32_t window_id,
+    NSString* bundle_id,
+    CGRect* bounds,
+    pid_t* owner_pid)
+{
+    if (window_id == 0 || bundle_id.length == 0) {
+        return -1;
+    }
+    CFArrayRef window_info_ref = CGWindowListCopyWindowInfo(
+        kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
+        kCGNullWindowID);
+    if (!window_info_ref) {
+        return -3;
+    }
+    NSArray* window_info = CFBridgingRelease(window_info_ref);
+    for (NSDictionary* info in window_info) {
+        NSNumber* number = info[(id)kCGWindowNumber];
+        NSNumber* layer = info[(id)kCGWindowLayer];
+        if (number.unsignedIntValue != window_id || layer.intValue != 0) {
+            continue;
+        }
+        CGRect candidate_bounds = CGRectZero;
+        if (!read_window_bounds(info, &candidate_bounds)
+            || candidate_bounds.size.width <= 0
+            || candidate_bounds.size.height <= 0) {
+            return -4;
+        }
+        pid_t candidate_pid = [info[(id)kCGWindowOwnerPID] intValue];
+        NSRunningApplication* application =
+            [NSRunningApplication runningApplicationWithProcessIdentifier:candidate_pid];
+        if (!application
+            || application.terminated
+            || ![application.bundleIdentifier isEqualToString:bundle_id]) {
+            return -4;
+        }
+        *bounds = candidate_bounds;
+        *owner_pid = candidate_pid;
+        return 0;
+    }
+    return -4;
+}
+
 } // namespace
 
 extern "C" uint32_t MaaMHXYFindWindow(const char* bundle_id_utf8, const char* window_title_utf8)
@@ -74,8 +117,8 @@ extern "C" uint32_t MaaMHXYFindWindow(const char* bundle_id_utf8, const char* wi
 }
 
 extern "C" int MaaMHXYClickWindow(
+    uint32_t window_id,
     const char* bundle_id_utf8,
-    const char* window_title_utf8,
     double source_x,
     double source_y,
     double source_width,
@@ -89,59 +132,15 @@ extern "C" int MaaMHXYClickWindow(
         }
 
         NSString* bundle_id = [NSString stringWithUTF8String:bundle_id_utf8];
-        NSString* target_title = window_title_utf8
-            ? [NSString stringWithUTF8String:window_title_utf8]
-            : @"";
-        NSArray<NSRunningApplication*>* applications =
-            [NSRunningApplication runningApplicationsWithBundleIdentifier:bundle_id];
-        if (applications.count == 0) {
-            return -2;
-        }
-
-        CFArrayRef window_info_ref = CGWindowListCopyWindowInfo(
-            kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
-            kCGNullWindowID);
-        if (!window_info_ref) {
-            return -3;
-        }
-        NSArray* window_info = CFBridgingRelease(window_info_ref);
-
         CGRect best_bounds = CGRectZero;
-        NSRunningApplication* application = nil;
-        double best_score = -1;
-        for (NSDictionary* info in window_info) {
-            NSNumber* owner_pid = info[(id)kCGWindowOwnerPID];
-            NSNumber* layer = info[(id)kCGWindowLayer];
-            NSRunningApplication* owner_application = nil;
-            for (NSRunningApplication* candidate in applications) {
-                if (!candidate.terminated
-                    && candidate.processIdentifier == owner_pid.intValue) {
-                    owner_application = candidate;
-                    break;
-                }
-            }
-            if (!owner_application || layer.intValue != 0) {
-                continue;
-            }
-
-            CGRect bounds = CGRectZero;
-            if (!read_window_bounds(info, &bounds) || bounds.size.width <= 0 || bounds.size.height <= 0) {
-                continue;
-            }
-
-            NSString* title = info[(id)kCGWindowName];
-            bool title_matches = target_title.length == 0 || [title isEqualToString:target_title];
-            double area = bounds.size.width * bounds.size.height;
-            double score = area + (title_matches ? 1e12 : 0);
-            if (score > best_score) {
-                best_score = score;
-                best_bounds = bounds;
-                application = owner_application;
-            }
+        pid_t owner_pid = 0;
+        int resolve_result = resolve_target_window(
+            window_id, bundle_id, &best_bounds, &owner_pid);
+        if (resolve_result != 0) {
+            return resolve_result;
         }
-        if (best_score < 0) {
-            return -4;
-        }
+        NSRunningApplication* application =
+            [NSRunningApplication runningApplicationWithProcessIdentifier:owner_pid];
 
         [application activateWithOptions:NSApplicationActivateAllWindows];
         usleep(80000);
@@ -210,8 +209,8 @@ extern "C" int MaaMHXYClickWindow(
 }
 
 extern "C" int MaaMHXYDragWindow(
+    uint32_t window_id,
     const char* bundle_id_utf8,
-    const char* window_title_utf8,
     double source_from_x,
     double source_from_y,
     double source_to_x,
@@ -224,56 +223,15 @@ extern "C" int MaaMHXYDragWindow(
             return -1;
         }
         NSString* bundle_id = [NSString stringWithUTF8String:bundle_id_utf8];
-        NSString* target_title = window_title_utf8
-            ? [NSString stringWithUTF8String:window_title_utf8]
-            : @"";
-        NSArray<NSRunningApplication*>* applications =
-            [NSRunningApplication runningApplicationsWithBundleIdentifier:bundle_id];
-        if (applications.count == 0) {
-            return -2;
-        }
-
-        CFArrayRef window_info_ref = CGWindowListCopyWindowInfo(
-            kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
-            kCGNullWindowID);
-        if (!window_info_ref) {
-            return -3;
-        }
-        NSArray* window_info = CFBridgingRelease(window_info_ref);
         CGRect best_bounds = CGRectZero;
-        NSRunningApplication* application = nil;
-        double best_score = -1;
-        for (NSDictionary* info in window_info) {
-            NSNumber* owner_pid = info[(id)kCGWindowOwnerPID];
-            NSNumber* layer = info[(id)kCGWindowLayer];
-            NSRunningApplication* owner_application = nil;
-            for (NSRunningApplication* candidate in applications) {
-                if (!candidate.terminated
-                    && candidate.processIdentifier == owner_pid.intValue) {
-                    owner_application = candidate;
-                    break;
-                }
-            }
-            if (!owner_application || layer.intValue != 0) {
-                continue;
-            }
-            CGRect bounds = CGRectZero;
-            if (!read_window_bounds(info, &bounds) || bounds.size.width <= 0 || bounds.size.height <= 0) {
-                continue;
-            }
-            NSString* title = info[(id)kCGWindowName];
-            bool title_matches = target_title.length == 0 || [title isEqualToString:target_title];
-            double area = bounds.size.width * bounds.size.height;
-            double score = area + (title_matches ? 1e12 : 0);
-            if (score > best_score) {
-                best_score = score;
-                best_bounds = bounds;
-                application = owner_application;
-            }
+        pid_t owner_pid = 0;
+        int resolve_result = resolve_target_window(
+            window_id, bundle_id, &best_bounds, &owner_pid);
+        if (resolve_result != 0) {
+            return resolve_result;
         }
-        if (best_score < 0) {
-            return -4;
-        }
+        NSRunningApplication* application =
+            [NSRunningApplication runningApplicationWithProcessIdentifier:owner_pid];
 
         [application activateWithOptions:NSApplicationActivateAllWindows];
         usleep(80000);

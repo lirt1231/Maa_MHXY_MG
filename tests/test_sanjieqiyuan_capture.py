@@ -9,6 +9,7 @@ import numpy as np
 
 from tools.run_sanjieqiyuan_macos import (
     CancellationRequested,
+    NativeMacOSInput,
     WindowCapture,
     advance_question_count,
     main,
@@ -86,6 +87,55 @@ class WindowCaptureTests(unittest.TestCase):
             capture.capture(FakeGuard(fail_at=2))
         fallback.assert_not_called()
         self.assertTrue(capture.maa_available)
+
+
+class NativeMacOSInputBindingTests(unittest.TestCase):
+    @staticmethod
+    def input_stub(window_id=0):
+        native_input = NativeMacOSInput.__new__(NativeMacOSInput)
+        native_input.window_id = window_id
+        native_input.find_window_function = Mock(return_value=0)
+        native_input.click_function = Mock(return_value=0)
+        native_input.drag_function = Mock(return_value=0)
+        return native_input
+
+    def test_click_uses_explicitly_bound_window(self):
+        native_input = self.input_stub()
+        native_input.bind_window(314)
+
+        native_input.click(100, 200, (1020, 718))
+
+        self.assertEqual(native_input.click_function.call_args.args[0], 314)
+        native_input.find_window_function.assert_not_called()
+
+    def test_drag_uses_same_explicitly_bound_window(self):
+        native_input = self.input_stub(271)
+
+        native_input.drag((10, 20), (30, 40), (1020, 718))
+
+        self.assertEqual(native_input.drag_function.call_args.args[0], 271)
+
+    def test_legacy_unbound_input_resolves_window_only_once(self):
+        native_input = self.input_stub()
+        native_input.find_window_function.return_value = 42
+
+        native_input.click(10, 20, (1020, 718))
+        native_input.click(30, 40, (1020, 718))
+
+        self.assertEqual(native_input.window_id, 42)
+        native_input.find_window_function.assert_called_once_with(
+            b"com.netease.my", "梦幻西游".encode()
+        )
+        self.assertEqual(
+            [call.args[0] for call in native_input.click_function.call_args_list],
+            [42, 42],
+        )
+
+    def test_rejects_invalid_window_binding(self):
+        native_input = self.input_stub()
+
+        with self.assertRaisesRegex(ValueError, "有效的窗口编号"):
+            native_input.bind_window(0)
 
 
 class SanjieRoiTests(unittest.TestCase):
