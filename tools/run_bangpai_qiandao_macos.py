@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Safely complete daily clan sign-in without claiming dividends on macOS."""
+"""Safely complete daily clan sign-in and claim an available dividend on macOS."""
 
 from __future__ import annotations
 
@@ -60,6 +60,8 @@ def run(args, guard: CancellationGuard) -> int:
     unknown_polls = 0
     idle_polls = 0
     sign_in_attempts = 0
+    dividend_attempts = 0
+    confirmation_attempts = 0
     actions = 0
     clicks = 0
 
@@ -118,7 +120,23 @@ def run(args, guard: CancellationGuard) -> int:
             runtime.click_box(decision["box"], scene, "执行帮派签到")
             actions += 1
             clicks += 1
-            phase = "verify"
+            phase = "verify_sign_in"
+        elif status == "claim_dividend":
+            dividend_attempts += 1
+            if dividend_attempts > 1:
+                raise RuntimeError("帮派分红按钮点击后仍未变化，已安全停止")
+            runtime.click_box(decision["box"], scene, "领取帮派分红")
+            actions += 1
+            clicks += 1
+            phase = "dividend_confirm"
+        elif status == "confirm_dividend":
+            confirmation_attempts += 1
+            if confirmation_attempts > 1:
+                raise RuntimeError("帮派分红确认后页面仍未变化，已安全停止")
+            runtime.click_box(decision["box"], scene, "确认领取帮派分红")
+            actions += 1
+            clicks += 1
+            phase = "verify_dividend"
         elif status == "clan_idle" and idle_polls >= 4:
             raise RuntimeError("帮派页面未显示可识别的福利入口，已安全停止")
         elif status == "unknown" and unknown_polls >= 3:

@@ -46,6 +46,11 @@ class TaskRegistryTests(unittest.TestCase):
             {"maxSteps": 20, "answerSource": "configured", "waitForRoundOne": True},
         )
 
+    def test_clan_sign_in_discloses_dividend_claiming(self):
+        task = TASKS["bangpai_qiandao"]
+        self.assertIn("领取当前可领的帮派分红", task["summary"])
+        self.assertTrue(any("领取可用分红" in item for item in task["checklist"]))
+
 
 class MetricParsingTests(unittest.TestCase):
     def test_chinese_punctuation_and_full_width_digits(self):

@@ -1,4 +1,4 @@
-"""Pure scene classification for evidence-backed 帮派签到."""
+"""Pure scene classification for evidence-backed 帮派签到和分红领取."""
 
 from __future__ import annotations
 
@@ -64,24 +64,75 @@ def classify_clan_sign_in_scene(
         clan_header, image_size, max_y=0.3
     ) or bool(ocr_header_valid)
     completion = find_text(texts, r"今日已签到|签到成功|帮派签到成功|^已签到$")
-    if completion and header_valid and phase in {"enter", "welfare", "verify"}:
-        return {
-            "status": "completed" if phase == "verify" else "already_completed"
-        }
-
+    dividend_section = find_text(texts, r"^帮派分红$")
     dividend = find_text(texts, r"^领取分红$")
-    dividend_valid = dividend and box_in_region(
-        dividend["box"], image_size, min_x=0.5, min_y=0.72
+    dividend_context_valid = (
+        bool(ocr_header_valid)
+        and dividend_section
+        and box_in_region(
+            dividend_section["box"],
+            image_size,
+            min_x=0.6,
+            max_x=0.9,
+            min_y=0.6,
+            max_y=0.85,
+        )
     )
-    if dividend_valid and header_valid and phase == "verify":
-        return {"status": "completed"}
+    dividend_valid = dividend_context_valid and dividend and box_in_region(
+        dividend["box"],
+        image_size,
+        min_x=0.6,
+        max_x=0.9,
+        min_y=0.72,
+        max_y=0.95,
+    )
+    dividend_claimed = find_text(texts, r"^(今日)?已领取$")
+    dividend_claimed_valid = dividend_context_valid and dividend_claimed and box_in_region(
+        dividend_claimed["box"],
+        image_size,
+        min_x=0.6,
+        max_x=0.9,
+        min_y=0.72,
+        max_y=0.95,
+    )
+
+    confirmation = find_text(texts, r"^领取$")
+    if (
+        confirmation
+        and phase in {"dividend_confirm", "verify_dividend"}
+        and box_in_region(
+            confirmation["box"],
+            image_size,
+            min_x=0.3,
+            max_x=0.7,
+            min_y=0.65,
+            max_y=0.95,
+        )
+    ):
+        return {"status": "confirm_dividend", "box": confirmation["box"]}
 
     sign_in = find_text(texts, r"^签到$")
     sign_in_valid = sign_in and box_in_region(
         sign_in["box"], image_size, min_x=0.5, min_y=0.4, max_y=0.85
     )
-    if sign_in_valid and header_valid and phase in {"enter", "welfare", "verify"}:
+    if sign_in_valid and header_valid and phase in {"enter", "welfare", "verify_sign_in"}:
         return {"status": "sign_in", "box": sign_in["box"]}
+
+    if dividend_valid and phase in {
+        "enter", "welfare", "verify_sign_in", "dividend_confirm", "verify_dividend"
+    }:
+        return {"status": "claim_dividend", "box": dividend["box"]}
+
+    if dividend_claimed_valid and phase == "verify_dividend":
+        return {"status": "completed"}
+
+    if completion and header_valid:
+        if phase == "verify_dividend" and dividend_context_valid and not dividend:
+            return {"status": "completed"}
+        if phase == "verify_sign_in":
+            return {"status": "completed"}
+        if phase in {"enter", "welfare"}:
+            return {"status": "already_completed"}
 
     clan_welfare = templates.get("clan_welfare")
     welfare_valid = box_in_region(

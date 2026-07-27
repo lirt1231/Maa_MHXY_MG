@@ -22,6 +22,15 @@ def scene(texts=None, templates=None):
     )
 
 
+def welfare_texts(*items):
+    return [
+        text("·帮派·", (445, 85, 103, 34)),
+        text("帮派签到", (721, 382, 84, 29)),
+        text("帮派分红", (720, 504, 85, 25)),
+        *items,
+    ]
+
+
 def protocol_payloads(output, prefix):
     return [
         json.loads(line[len(prefix):])
@@ -103,7 +112,7 @@ class ClanSignInSceneTests(unittest.TestCase):
                     "unknown",
                 )
 
-    def test_sign_in_is_phase_gated_and_dividend_is_never_an_action(self):
+    def test_sign_in_and_dividend_are_phase_and_context_gated(self):
         self.assertEqual(
             classify_clan_sign_in_scene([text("签到")], {}, "clan")["status"],
             "unknown",
@@ -115,36 +124,55 @@ class ClanSignInSceneTests(unittest.TestCase):
             "sign_in",
         )
         self.assertEqual(
-            classify_clan_sign_in_scene([text("领取分红")], {}, "verify")["status"],
+            classify_clan_sign_in_scene([text("领取分红")], {}, "enter")["status"],
             "unknown",
         )
 
-    def test_dividend_is_completion_evidence_only_after_sign_in(self):
-        texts = [text("领取分红", (700, 610, 180, 50))]
-        templates = {"clan_header": (350, 0, 320, 70)}
+    def test_claims_dividend_only_with_full_welfare_context(self):
+        claim = text("领取分红", (738, 576, 82, 24))
         image_size = (1020, 718)
 
         self.assertEqual(
             classify_clan_sign_in_scene(
-                texts, templates, "welfare", image_size
-            )["status"],
-            "clan_idle",
-        )
-        self.assertEqual(
-            classify_clan_sign_in_scene(
-                texts, templates, "verify", image_size
-            )["status"],
-            "completed",
-        )
-        self.assertEqual(
-            classify_clan_sign_in_scene(
-                [text("领取分红", (20, 30, 180, 50))],
-                templates,
-                "verify",
+                welfare_texts(text("已签到", (749, 458, 61, 23)), claim),
+                {},
+                "enter",
                 image_size,
-            )["status"],
-            "clan_idle",
+            ),
+            {"status": "claim_dividend", "box": [738, 576, 82, 24]},
         )
+
+        invalid_scenes = [
+            [text("帮派签到", (721, 382, 84, 29)), text("帮派分红", (720, 504, 85, 25)), claim],
+            [text("·帮派·", (445, 85, 103, 34)), text("帮派分红", (720, 504, 85, 25)), claim],
+            welfare_texts(text("领取分红", (20, 30, 82, 24))),
+            [*welfare_texts(claim)[:2], claim],
+        ]
+        for texts in invalid_scenes:
+            with self.subTest(texts=texts):
+                self.assertNotEqual(
+                    classify_clan_sign_in_scene(
+                        texts, {}, "enter", image_size
+                    )["status"],
+                    "claim_dividend",
+                )
+
+    def test_dividend_confirmation_requires_expected_phase_and_region(self):
+        confirmation = text("领取", (475, 550, 70, 40))
+        self.assertEqual(
+            classify_clan_sign_in_scene(
+                [confirmation], {}, "dividend_confirm", (1020, 718)
+            ),
+            {"status": "confirm_dividend", "box": [475, 550, 70, 40]},
+        )
+        for phase, box in (("enter", (475, 550, 70, 40)), ("dividend_confirm", (20, 30, 70, 40))):
+            with self.subTest(phase=phase, box=box):
+                self.assertEqual(
+                    classify_clan_sign_in_scene(
+                        [text("领取", box)], {}, phase, (1020, 718)
+                    )["status"],
+                    "unknown",
+                )
 
     def test_completion_requires_welfare_context(self):
         self.assertEqual(
@@ -163,7 +191,7 @@ class ClanSignInSceneTests(unittest.TestCase):
             classify_clan_sign_in_scene(
                 [text("签到成功")],
                 {"clan_header": (350, 0, 320, 70)},
-                "verify",
+                "verify_sign_in",
             )["status"],
             "completed",
         )
@@ -285,35 +313,71 @@ class ClanSignInRunnerTests(unittest.TestCase):
         self.assertEqual(runtime.click_box.call_count, 2)
 
     @patch("tools.run_bangpai_qiandao_macos.MacOSTaskRuntime")
-    def test_dividend_after_sign_in_completes_without_claiming_it(self, runtime_class):
+    def test_dividend_after_sign_in_is_claimed_and_confirmed(self, runtime_class):
         runtime = runtime_class.return_value
         runtime.read_scene.side_effect = [
             scene(
-                [text("签到", (700, 460, 150, 50))],
-                {"clan_header": (350, 0, 320, 70)},
+                welfare_texts(text("签到", (750, 454, 59, 30))),
             ),
             scene(
-                [text("领取分红", (700, 610, 180, 50))],
-                {"clan_header": (350, 0, 320, 70)},
+                welfare_texts(
+                    text("已签到", (749, 458, 61, 23)),
+                    text("领取分红", (738, 576, 82, 24)),
+                ),
             ),
+            scene([text("领取", (475, 550, 70, 40))]),
+            scene(welfare_texts(
+                text("已签到", (749, 458, 61, 23)),
+                text("已领取", (750, 576, 70, 24)),
+            )),
         ]
-        args = SimpleNamespace(inspect_scene=False, recognize_only=False, max_steps=3)
+        args = SimpleNamespace(inspect_scene=False, recognize_only=False, max_steps=5)
         output = io.StringIO()
 
         with redirect_stdout(output):
             self.assertEqual(run(args, Mock()), 0)
 
-        runtime.click_box.assert_called_once()
-        self.assertEqual(runtime.click_box.call_args.args[0], [700, 460, 150, 50])
+        self.assertEqual(
+            [call.args[0] for call in runtime.click_box.call_args_list],
+            [
+                [750, 454, 59, 30],
+                [738, 576, 82, 24],
+                [475, 550, 70, 40],
+            ],
+        )
         self.assertEqual(
             protocol_payloads(output.getvalue(), "result_json="),
             [{
                 "task_id": "bangpai_qiandao",
                 "status": "completed",
-                "actions": 1,
-                "clicks": 1,
+                "actions": 3,
+                "clicks": 3,
             }],
         )
+
+    @patch("tools.run_bangpai_qiandao_macos.MacOSTaskRuntime")
+    def test_dividend_and_confirmation_are_each_clicked_at_most_once(self, runtime_class):
+        claim_scene = scene(welfare_texts(
+            text("已签到", (749, 458, 61, 23)),
+            text("领取分红", (738, 576, 82, 24)),
+        ))
+        runtime = runtime_class.return_value
+        args = SimpleNamespace(inspect_scene=False, recognize_only=False, max_steps=4)
+
+        runtime.read_scene.side_effect = [claim_scene, claim_scene]
+        with self.assertRaisesRegex(RuntimeError, "分红按钮点击后仍未变化"):
+            run(args, Mock())
+        self.assertEqual(runtime.click_box.call_count, 1)
+
+        runtime.reset_mock()
+        runtime.read_scene.side_effect = [
+            claim_scene,
+            scene([text("领取", (475, 550, 70, 40))]),
+            scene([text("领取", (475, 550, 70, 40))]),
+        ]
+        with self.assertRaisesRegex(RuntimeError, "分红确认后页面仍未变化"):
+            run(args, Mock())
+        self.assertEqual(runtime.click_box.call_count, 2)
 
     @patch("tools.run_bangpai_qiandao_macos.MacOSTaskRuntime")
     def test_read_only_modes_emit_only_preflight_protocol(self, runtime_class):

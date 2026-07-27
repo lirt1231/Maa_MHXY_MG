@@ -274,21 +274,21 @@ class RunnerTaskContractTests(unittest.TestCase):
         payload = self.manager._progress_payload(
             "bangpai_qiandao", '{"event": "scene", "status": "open_welfare"}'
         )
-        self.assertEqual(payload["stage"], "正在识别帮派签到页面")
+        self.assertEqual(payload["stage"], "正在识别帮派签到与分红页面")
         completed = self.manager._progress_payload(
             "bangpai_qiandao", 'result_json={"task_id":"bangpai_qiandao","status":"completed"}'
         )
-        self.assertEqual(completed["stage"], "帮派签到流程完成")
+        self.assertEqual(completed["stage"], "帮派签到与分红流程完成")
         already_completed = self.manager._progress_payload(
             "bangpai_qiandao",
             'result_json={"task_id":"bangpai_qiandao","status":"already_completed"}',
         )
-        self.assertEqual(already_completed["stage"], "帮派签到今日已完成")
+        self.assertEqual(already_completed["stage"], "帮派签到与分红今日已完成")
         cancelled = self.manager._progress_payload(
             "bangpai_qiandao",
             'result_json={"task_id":"bangpai_qiandao","status":"cancelled"}',
         )
-        self.assertEqual(cancelled["stage"], "帮派签到流程已取消")
+        self.assertEqual(cancelled["stage"], "帮派签到与分红流程已取消")
         self.assertIn(
             "帮派签到",
             self.manager._friendly_error("bangpai_qiandao", 1, "unknown scene"),
@@ -491,6 +491,17 @@ class RunnerInspectionTests(unittest.TestCase):
         self.assertEqual(result["proposedAction"], "打开队伍面板")
         self.assertEqual(result["evidence"]["ocrItemCount"], 1)
         self.assertEqual(result["evidence"]["matchedTemplates"], ["main_ready"])
+
+    def test_parser_accepts_claimable_clan_dividend_scene(self):
+        output = (
+            'preflight_json={"image_size":[1020,718],'
+            '"decision":{"status":"claim_dividend","box":[738,576,82,24]},'
+            '"texts":[{"text":"领取分红"}],"templates":{}}'
+        )
+        result = self.manager._parse_inspection("bangpai_qiandao", {}, output)
+        self.assertTrue(result["canStart"])
+        self.assertEqual(result["sceneLabel"], "可领取帮派分红")
+        self.assertEqual(result["proposedAction"], "领取当前可用的帮派分红")
 
     def test_parser_rejects_invalid_protocol_schema(self):
         invalid_payloads = [

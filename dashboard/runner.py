@@ -86,6 +86,8 @@ SCENE_LABELS = {
     "expand_menu": "主界面折叠菜单",
     "open_clan": "帮派入口",
     "sign_in": "帮派福利签到页",
+    "claim_dividend": "可领取帮派分红",
+    "confirm_dividend": "帮派分红确认页",
     "battle": "战斗中",
     "auto_pathing": "自动寻路中",
     "main_screen": "游戏主界面",
@@ -105,6 +107,8 @@ ACTION_LABELS = {
     "expand_menu": "展开主界面菜单",
     "open_clan": "打开帮派页面",
     "sign_in": "点击一次帮派签到按钮",
+    "claim_dividend": "领取当前可用的帮派分红",
+    "confirm_dividend": "确认领取帮派分红",
     "wait": "等待当前游戏状态结束",
     "open_team": "打开队伍面板",
     "create_team": "创建捉鬼队伍",
@@ -401,7 +405,10 @@ class RunnerManager:
         elif task_id == "fuli_qiandao":
             ready = scene in {"open_welfare", "open_scratch", "scratch_ready", "confirm_reward"}
         elif task_id == "bangpai_qiandao":
-            ready = scene in {"expand_menu", "open_clan", "open_welfare", "sign_in"}
+            ready = scene in {
+                "expand_menu", "open_clan", "open_welfare", "sign_in",
+                "claim_dividend", "confirm_dividend",
+            }
 
         action_key = proposed if proposed else scene
         if ready:
@@ -538,7 +545,7 @@ class RunnerManager:
                 "keju": "科举乡试答题完成",
                 "zhuogui": "捉鬼任务已完成目标轮数",
                 "fuli_qiandao": "福利签到完成",
-                "bangpai_qiandao": "帮派签到完成",
+                "bangpai_qiandao": "帮派签到与分红领取完成",
             }[task_id]
         return None
 
@@ -670,14 +677,14 @@ class RunnerManager:
         elif task_id == "fuli_qiandao" and line.startswith(RESULT_PREFIX):
             payload["stage"] = RunnerManager._sign_in_result_stage(line, clan=False)
         elif task_id == "bangpai_qiandao" and '"event": "scene"' in line:
-            payload["stage"] = "正在识别帮派签到页面"
+            payload["stage"] = "正在识别帮派签到与分红页面"
         elif task_id == "bangpai_qiandao" and line.startswith(RESULT_PREFIX):
             payload["stage"] = RunnerManager._sign_in_result_stage(line, clan=True)
         return payload
 
     @staticmethod
     def _sign_in_result_stage(line: str, *, clan: bool) -> str:
-        prefix = "帮派签到" if clan else "签到"
+        prefix = "帮派签到与分红" if clan else "签到"
         try:
             status = json.loads(line[len(RESULT_PREFIX):]).get("status")
         except (json.JSONDecodeError, AttributeError):
