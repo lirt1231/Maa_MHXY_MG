@@ -18,6 +18,41 @@ function formatTime(value: string) {
   });
 }
 
+function snapshotTime(snapshot: GameDataSnapshot) {
+  const timestamp = Date.parse(snapshot.capturedAt);
+  return Number.isNaN(timestamp) ? Number.NEGATIVE_INFINITY : timestamp;
+}
+
+function latestSnapshot(snapshots: GameDataSnapshot[]) {
+  return snapshots.reduce<GameDataSnapshot | undefined>((latest, snapshot) => {
+    if (!latest) return snapshot;
+    if (snapshotTime(snapshot) !== snapshotTime(latest)) {
+      return snapshotTime(snapshot) > snapshotTime(latest) ? snapshot : latest;
+    }
+    return snapshot.id > latest.id ? snapshot : latest;
+  }, undefined);
+}
+
+function categorySnapshots(gameData: GameDataResponse | undefined, category: string) {
+  const candidates = [...(gameData?.items || [])];
+  const declaredSnapshots = [
+    gameData?.latestByCategory?.[category],
+    gameData?.latestAttemptByCategory?.[category],
+    gameData?.latestUsableByCategory?.[category],
+  ];
+  for (const declaredSnapshot of declaredSnapshots) {
+    if (declaredSnapshot && !candidates.some((item) => item.id === declaredSnapshot.id)) {
+      candidates.push(declaredSnapshot);
+    }
+  }
+  const categoryItems = candidates.filter((item) => item.category === category);
+  return {
+    attempt: gameData?.latestAttemptByCategory?.[category] || latestSnapshot(categoryItems),
+    usable: gameData?.latestUsableByCategory?.[category]
+      || latestSnapshot(categoryItems.filter((item) => item.status === "success")),
+  };
+}
+
 function csvCell(value: string | number | null | undefined) {
   const text = value == null ? "" : String(value);
   return `"${text.replaceAll('"', '""')}"`;
@@ -82,13 +117,19 @@ export function DataPanel({
   const history = [...(metrics?.snapshots || [])].reverse().slice(0, 8);
   const metricLabel = metricKind === "gold" ? "金币" : "经验";
   const changeClass = (value: number | null | undefined) => (value || 0) >= 0 ? "positive" : "negative";
-  const latestResource = gameData?.latestByCategory.character_resources || (
+  const resourceSnapshots = categorySnapshots(gameData, "character_resources");
+  const dailySnapshots = categorySnapshots(gameData, "daily_tasks");
+  const latestResource = resourceSnapshots.usable || (
     latestSuccessful ? {
       id: latestSuccessful.id,
       capturedAt: latestSuccessful.capturedAt,
+      gameDate: latestSuccessful.capturedAt.slice(0, 10),
+      schemaVersion: 1,
+      targetId: gameData?.targetId || "local-primary",
       category: "character_resources",
       sourcePage: "历史指标快照",
       status: "success",
+      stale: false,
       data: {
         gold: latestSuccessful.gold,
         level: latestSuccessful.level,
@@ -99,11 +140,17 @@ export function DataPanel({
       error: latestSuccessful.error,
     } satisfies GameDataSnapshot : undefined
   );
-  const latestDaily = gameData?.latestByCategory.daily_tasks;
-  const latestRaw = (gameData?.items || []).reduce<GameDataSnapshot | undefined>((current, item) => {
-    if (!current) return item;
-    return Date.parse(item.capturedAt) > Date.parse(current.capturedAt) ? item : current;
-  }, undefined);
+  const latestDaily = dailySnapshots.usable;
+  const latestRaw = latestSnapshot([
+    ...(gameData?.items || []),
+    ...Object.values(gameData?.latestByCategory || {}).filter((item): item is GameDataSnapshot => Boolean(item)),
+    ...Object.values(gameData?.latestAttemptByCategory || {}).filter((item): item is GameDataSnapshot => Boolean(item)),
+  ]);
+  const rawStatus = latestRaw ? {
+    success: { label: "最近采集成功", className: "done" },
+    partial: { label: "最近采集部分识别", className: "pending" },
+    failed: { label: "最近采集失败", className: "failed" },
+  }[latestRaw.status] : { label: "等待原始数据", className: "pending" };
 
   return <div className="panel-page data-panel-page">
     <section className="data-hero">
@@ -112,8 +159,8 @@ export function DataPanel({
         <h1>数据面板</h1>
         <p>查看角色资源、今日任务与历史趋势。</p>
       </div>
-      <div className={`snapshot-badge ${latestRaw ? "done" : "pending"}`}>
-        <span>{latestRaw ? "原始数据已接入" : "等待原始数据"}</span>
+      <div className={`snapshot-badge ${rawStatus.className}`}>
+        <span>{rawStatus.label}</span>
         <small>{latestRaw ? formatTime(latestRaw.capturedAt) : "暂无快照"}</small>
       </div>
     </section>
@@ -124,9 +171,13 @@ export function DataPanel({
       <button id="data-tab-history" role="tab" aria-selected={view === "history"} aria-controls="data-panel-history" className={view === "history" ? "active" : ""} onClick={() => setView("history")}>历史趋势</button>
     </div>
 
-    {view === "resources" && <CharacterResourcesView snapshot={latestResource} />}
+    {view === "resources" && <CharacterResourcesView
+      snapshot={latestResource}
+      latestAttempt={resourceSnapshots.attempt}
+    />}
     {view === "daily" && <DailyTasksView
       snapshot={latestDaily}
+      latestAttempt={dailySnapshots.attempt}
       capturing={capturingDailyTasks}
       disabled={busy || capturing || !system?.available}
       onCapture={onCaptureDailyTasks}

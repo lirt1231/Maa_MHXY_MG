@@ -51,7 +51,29 @@ function SnapshotMeta({ snapshot }: { snapshot: GameDataSnapshot }) {
   </div>;
 }
 
-export function CharacterResourcesView({ snapshot }: { snapshot?: GameDataSnapshot | null }) {
+function LatestAttemptNotice({
+  latestAttempt, usableSnapshot
+}: {
+  latestAttempt?: GameDataSnapshot | null;
+  usableSnapshot?: GameDataSnapshot | null;
+}) {
+  if (!latestAttempt || latestAttempt.status === "success") return null;
+  const status = latestAttempt.status === "partial" ? "部分识别" : "采集失败";
+  const fallback = usableSnapshot
+    ? `当前继续显示 ${formatTime(usableSnapshot.capturedAt)} 的最近成功数据。`
+    : "当前没有可替代的成功数据。";
+  return <p className="raw-data-error">
+    最近尝试：<strong>{status}</strong>（{formatTime(latestAttempt.capturedAt)}）。
+    {latestAttempt.error ? `${latestAttempt.error} ` : ""}{fallback}
+  </p>;
+}
+
+export function CharacterResourcesView({
+  snapshot, latestAttempt
+}: {
+  snapshot?: GameDataSnapshot | null;
+  latestAttempt?: GameDataSnapshot | null;
+}) {
   const resources = [
     ["金币", snapshot ? formatNumber(snapshot.data.gold) : "—", false],
     ["角色等级", snapshot ? formatNumber(snapshot.data.level) : "—", false],
@@ -68,6 +90,7 @@ export function CharacterResourcesView({ snapshot }: { snapshot?: GameDataSnapsh
       <div><span className="eyebrow">CHARACTER RESOURCES</span><h2>角色资源</h2></div>
       {snapshot && <SnapshotMeta snapshot={snapshot} />}
     </div>
+    <LatestAttemptNotice latestAttempt={latestAttempt} usableSnapshot={snapshot} />
     {snapshot ? <>
       {snapshot.error && <p className="raw-data-error">{snapshot.error}</p>}
       <dl className="resource-ledger">{resources.map(([label, value, pending]) => <div key={label} className={pending ? "pending" : ""}>
@@ -100,14 +123,16 @@ function readDailyTasks(snapshot?: GameDataSnapshot | null): DailyTaskItem[] {
 }
 
 export function DailyTasksView({
-  snapshot, capturing, disabled, onCapture
+  snapshot, latestAttempt, capturing, disabled, onCapture
 }: {
   snapshot?: GameDataSnapshot | null;
+  latestAttempt?: GameDataSnapshot | null;
   capturing: boolean;
   disabled: boolean;
   onCapture: () => void;
 }) {
   const tasks = readDailyTasks(snapshot);
+  const pendingTasks = latestAttempt?.status === "partial" ? readDailyTasks(latestAttempt) : [];
   return <section className="raw-data-section" role="tabpanel" id="data-panel-daily" aria-labelledby="data-tab-daily">
     <div className="panel-heading">
       <div><span className="eyebrow">DAILY TASKS</span><h2>今日任务</h2></div>
@@ -118,7 +143,8 @@ export function DailyTasksView({
         </button>
       </div>
     </div>
-    {snapshot?.error && <p className="raw-data-error">{snapshot.error}</p>}
+    <LatestAttemptNotice latestAttempt={latestAttempt} usableSnapshot={snapshot} />
+    {snapshot?.error && latestAttempt?.id === snapshot.id && <p className="raw-data-error">{snapshot.error}</p>}
     {tasks.length ? <div className="daily-task-table-wrap"><table className="daily-task-table">
       <thead><tr><th>任务</th><th>进度</th><th>状态</th><th>奖励</th></tr></thead>
       <tbody>{tasks.map((task, index) => <tr key={task.taskId || `${task.name}-${index}`}>
@@ -130,5 +156,19 @@ export function DailyTasksView({
     </table></div> : <div className="raw-data-empty">{snapshot
       ? "本次采集未返回今日任务列表。"
       : "暂无今日任务快照。"}</div>}
+    {pendingTasks.length > 0 && <div className="daily-task-table-wrap">
+      <div className="raw-data-meta">
+        <span>最新尝试待确认，不可用于任务编排</span>
+      </div>
+      <table className="daily-task-table" aria-label="最新尝试待确认任务">
+        <thead><tr><th>待确认任务</th><th>进度</th><th>状态</th><th>奖励</th></tr></thead>
+        <tbody>{pendingTasks.map((task, index) => <tr key={task.taskId || `${task.name}-${index}`}>
+          <td>{displayValue(task.name)}</td>
+          <td>{taskProgress(task)}</td>
+          <td>待确认</td>
+          <td>待确认</td>
+        </tr>)}</tbody>
+      </table>
+    </div>}
   </section>;
 }

@@ -47,9 +47,18 @@ const metrics: Metrics = {
   ]
 };
 
+const gameSnapshotMeta = {
+  gameDate: "2026-07-26",
+  schemaVersion: 2,
+  targetId: "local-primary",
+  stale: false,
+};
+
 const gameData: GameDataResponse = {
+  targetId: "local-primary",
   items: [
     {
+      ...gameSnapshotMeta,
       id: 2, capturedAt: "2026-07-26T09:00:00+08:00", category: "daily_tasks",
       sourcePage: "活动面板", status: "success",
       data: { tasks: [
@@ -58,6 +67,7 @@ const gameData: GameDataResponse = {
       ] }, evidence: {}
     },
     {
+      ...gameSnapshotMeta,
       id: 1, capturedAt: "2026-07-26T08:00:00+08:00", category: "character_resources",
       sourcePage: "角色与背包", status: "success",
       data: { gold: 8888, level: 69, experience: 1200, experienceRequired: 2000 },
@@ -67,10 +77,22 @@ const gameData: GameDataResponse = {
   latestByCategory: {
     character_resources: null,
     daily_tasks: null
+  },
+  latestAttemptByCategory: {
+    character_resources: null,
+    daily_tasks: null
+  },
+  latestUsableByCategory: {
+    character_resources: null,
+    daily_tasks: null
   }
 };
 gameData.latestByCategory.character_resources = gameData.items[1];
 gameData.latestByCategory.daily_tasks = gameData.items[0];
+gameData.latestAttemptByCategory.character_resources = gameData.items[1];
+gameData.latestAttemptByCategory.daily_tasks = gameData.items[0];
+gameData.latestUsableByCategory.character_resources = gameData.items[1];
+gameData.latestUsableByCategory.daily_tasks = gameData.items[0];
 
 const panelProps = {
   system, metrics, gameData, metricKind: "gold" as const, rangeDays: 7 as const,
@@ -99,7 +121,10 @@ test("shows daily task rows and a clear empty state", () => {
   expect(screen.getByText("可领取")).toBeTruthy();
   expect(screen.getByText("宝图任务")).toBeTruthy();
 
-  view.rerender(<DataPanel {...panelProps} gameData={{ items: [], latestByCategory: {} }} />);
+  view.rerender(<DataPanel {...panelProps} gameData={{
+    targetId: "local-primary", items: [], latestByCategory: {},
+    latestAttemptByCategory: {}, latestUsableByCategory: {}
+  }} />);
   expect(screen.getByText("暂无今日任务快照。")).toBeTruthy();
 });
 
@@ -130,13 +155,102 @@ test("normalizes incomplete tasks and distinguishes partial snapshots", () => {
     data: { tasks: [{ name: "未知任务" }] }
   };
   render(<DataPanel {...panelProps} gameData={{
-    items: [partial], latestByCategory: { daily_tasks: partial }
+    targetId: "local-primary",
+    items: [partial],
+    latestByCategory: { daily_tasks: partial },
+    latestAttemptByCategory: { daily_tasks: partial },
+    latestUsableByCategory: { daily_tasks: null },
   }} />);
   fireEvent.click(screen.getByRole("tab", { name: "今日任务" }));
 
   expect(screen.getByText("部分识别")).toBeTruthy();
   expect(screen.getByText("未知任务")).toBeTruthy();
   expect(screen.getAllByText("待确认")).toHaveLength(2);
+  expect(screen.getByText("最新尝试待确认，不可用于任务编排")).toBeTruthy();
+});
+
+test("keeps the latest usable resources after a failed attempt", () => {
+  const failedResource = {
+    ...gameSnapshotMeta,
+    id: 3,
+    capturedAt: "2026-07-26T10:00:00+08:00",
+    category: "character_resources",
+    sourcePage: "角色与背包",
+    status: "failed" as const,
+    data: {},
+    evidence: {},
+    error: "未识别到背包金币",
+  };
+  render(<DataPanel {...panelProps} gameData={{
+    targetId: "local-primary",
+    items: [...gameData.items, failedResource],
+    latestByCategory: { ...gameData.latestByCategory, character_resources: failedResource },
+    latestAttemptByCategory: { ...gameData.latestAttemptByCategory, character_resources: failedResource },
+    latestUsableByCategory: gameData.latestUsableByCategory,
+  }} />);
+
+  expect(screen.getByText("8,888")).toBeTruthy();
+  expect(screen.getByText("最近采集失败")).toBeTruthy();
+  expect(screen.getByText("采集失败")).toBeTruthy();
+  expect(screen.getByText(/当前继续显示.*最近成功数据/)).toBeTruthy();
+  expect(screen.getByText(/未识别到背包金币/)).toBeTruthy();
+});
+
+test("keeps trusted daily tasks while showing a partial attempt separately", () => {
+  const partialDaily = {
+    ...gameSnapshotMeta,
+    id: 4,
+    capturedAt: "2026-07-26T11:00:00+08:00",
+    category: "daily_tasks",
+    sourcePage: "活动面板",
+    status: "partial" as const,
+    data: { tasks: [{ name: "疑似活动", completed: 1, target: 3 }] },
+    evidence: {},
+    error: "页面证据不完整",
+  };
+  render(<DataPanel {...panelProps} gameData={{
+    targetId: "local-primary",
+    items: [...gameData.items, partialDaily],
+    latestByCategory: { ...gameData.latestByCategory, daily_tasks: partialDaily },
+    latestAttemptByCategory: { ...gameData.latestAttemptByCategory, daily_tasks: partialDaily },
+    latestUsableByCategory: gameData.latestUsableByCategory,
+  }} />);
+  fireEvent.click(screen.getByRole("tab", { name: "今日任务" }));
+
+  expect(screen.getByText("师门任务")).toBeTruthy();
+  expect(screen.getByText("宝图任务")).toBeTruthy();
+  expect(screen.getByText("疑似活动")).toBeTruthy();
+  expect(screen.getByText("最新尝试待确认，不可用于任务编排")).toBeTruthy();
+  expect(screen.getByText(/当前继续显示.*最近成功数据/)).toBeTruthy();
+  expect(screen.getByText("最近采集部分识别")).toBeTruthy();
+  expect(screen.getAllByText("待确认")).toHaveLength(2);
+});
+
+test("keeps the latest usable daily tasks after a failed attempt", () => {
+  const failedDaily = {
+    ...gameSnapshotMeta,
+    id: 5,
+    capturedAt: "2026-07-26T12:00:00+08:00",
+    category: "daily_tasks",
+    sourcePage: "活动面板",
+    status: "failed" as const,
+    data: {},
+    evidence: {},
+    error: "未确认日程页面",
+  };
+  render(<DataPanel {...panelProps} gameData={{
+    targetId: "local-primary",
+    items: [...gameData.items, failedDaily],
+    latestByCategory: { ...gameData.latestByCategory, daily_tasks: failedDaily },
+    latestAttemptByCategory: { ...gameData.latestAttemptByCategory, daily_tasks: failedDaily },
+    latestUsableByCategory: gameData.latestUsableByCategory,
+  }} />);
+  fireEvent.click(screen.getByRole("tab", { name: "今日任务" }));
+
+  expect(screen.getByText("师门任务")).toBeTruthy();
+  expect(screen.getByText("宝图任务")).toBeTruthy();
+  expect(screen.getByText(/未确认日程页面/)).toBeTruthy();
+  expect(screen.queryByRole("table", { name: "最新尝试待确认任务" })).toBeNull();
 });
 
 test("keeps existing analytics under the history tab", () => {
