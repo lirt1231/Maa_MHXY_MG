@@ -168,6 +168,15 @@ class SanjieRoiTests(unittest.TestCase):
         self.assertEqual(answer, '["白姑娘"]')
         self.assertEqual(confidence, 100)
 
+    def test_lion_monster_question_uses_the_real_option_name(self):
+        answer, confidence, _ = search_answer(
+            get_question_bank(force_reload=True),
+            "以下谁是狮子怪？",
+        )
+
+        self.assertEqual(answer, '["九灵元圣"]')
+        self.assertEqual(confidence, 100)
+
 
 class SanjieNavigationTests(unittest.TestCase):
     image_size = [1020, 718]
