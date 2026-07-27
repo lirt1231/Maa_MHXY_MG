@@ -24,7 +24,10 @@ class DashboardApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             {item["id"] for item in response.json()["items"]},
-            {"sanjieqiyuan", "keju", "zhuogui", "fuli_qiandao", "bangpai_qiandao"},
+            {
+                "sanjieqiyuan", "keju", "keju_huishi", "zhuogui",
+                "fuli_qiandao", "bangpai_qiandao",
+            },
         )
         self.assertTrue(
             all(

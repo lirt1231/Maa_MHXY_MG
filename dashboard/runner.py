@@ -45,6 +45,17 @@ TASK_RESULT_SCHEMAS = {
             for status in TASK_RESULT_STATUSES
         },
     },
+    "keju_huishi": {
+        "statuses": {
+            "completed", "already_completed", "limit_reached", "safe_stopped",
+            "cancelled",
+        },
+        "fields": {"task_id", "status", "reason", "answers", "clicks", "limit"},
+        "required": {
+            status: {"answers", "clicks", "limit"}
+            for status in TASK_RESULT_STATUSES
+        },
+    },
     "zhuogui": {
         "statuses": {"completed", "already_completed", "limit_reached", "safe_stopped", "cancelled"},
         "fields": {
@@ -338,8 +349,16 @@ class RunnerManager:
             if options["navigation"] == "auto":
                 command.append("--navigate")
             return command
-        if task_id == "keju":
-            command = [sys.executable, str(ROOT / "tools/run_keju_macos.py"), "--max-steps", str(options["maxSteps"])]
+        if task_id in {"keju", "keju_huishi"}:
+            exam_type = "xiangshi" if task_id == "keju" else "huishi"
+            command = [
+                sys.executable,
+                str(ROOT / "tools/run_keju_macos.py"),
+                "--exam-type",
+                exam_type,
+                "--max-steps",
+                str(options["maxSteps"]),
+            ]
             if options["answerSource"] == "codex":
                 command.append("--use-codex")
             if options["waitForRoundOne"]:
@@ -357,6 +376,7 @@ class RunnerManager:
         scripts = {
             "sanjieqiyuan": "run_sanjieqiyuan_macos.py",
             "keju": "run_keju_macos.py",
+            "keju_huishi": "run_keju_macos.py",
             "zhuogui": "run_zhuogui_macos.py",
             "fuli_qiandao": "run_fuli_qiandao_macos.py",
             "bangpai_qiandao": "run_bangpai_qiandao_macos.py",
@@ -364,6 +384,11 @@ class RunnerManager:
         command = [sys.executable, str(ROOT / "tools" / scripts[task_id]), "--inspect-scene"]
         if task_id == "sanjieqiyuan":
             command.extend(["--input-method", "global"])
+        elif task_id in {"keju", "keju_huishi"}:
+            command.extend([
+                "--exam-type",
+                "xiangshi" if task_id == "keju" else "huishi",
+            ])
         elif task_id == "zhuogui":
             command.extend(["--rounds", "1"])
         return command
@@ -401,8 +426,12 @@ class RunnerManager:
                 "click_activity_toolbar", "click_activity_template",
             }
             ready = scene == "answering" if manual else scene in actionable
-        elif task_id == "keju":
-            ready = scene == "formal_question_ready"
+        elif task_id in {"keju", "keju_huishi"}:
+            expected_exam_type = "xiangshi" if task_id == "keju" else "huishi"
+            ready = (
+                scene == "formal_question_ready"
+                and decision.get("examType") == expected_exam_type
+            )
         elif task_id == "zhuogui":
             ready = bool(proposed and proposed != "stop")
         elif task_id == "fuli_qiandao":
@@ -414,9 +443,31 @@ class RunnerManager:
             }
 
         action_key = proposed if proposed else scene
+        expected_exam_type = {
+            "keju": "xiangshi",
+            "keju_huishi": "huishi",
+        }.get(task_id)
+        observed_exam_type = decision.get("examType")
         if ready:
             summary = "当前画面支持启动此任务"
             reason = None
+        elif (
+            expected_exam_type
+            and observed_exam_type in {"xiangshi", "huishi"}
+            and observed_exam_type != expected_exam_type
+        ):
+            expected_label = "乡试" if expected_exam_type == "xiangshi" else "会试"
+            observed_label = "乡试" if observed_exam_type == "xiangshi" else "会试"
+            summary = f"当前是科举{observed_label}，不能启动科举{expected_label}"
+            reason = f"请切换到科举{expected_label}正式题目页后重新检测"
+        elif expected_exam_type and scene in {
+            "formal_question_ready",
+            "waiting_for_question",
+            "exam_page_without_question",
+        } and observed_exam_type not in {"xiangshi", "huishi"}:
+            expected_label = "乡试" if expected_exam_type == "xiangshi" else "会试"
+            summary = f"无法确认当前是否为科举{expected_label}"
+            reason = f"请让科举{expected_label}标题和正式题目同时清晰可见后重新检测"
         elif scene in {"completed", "already_completed"}:
             summary = "当前画面显示今日任务已经完成"
             reason = "无需再次启动"
@@ -540,12 +591,14 @@ class RunnerManager:
             return {
                 "sanjieqiyuan": "三界奇缘已达到本次最多答题数",
                 "keju": "科举乡试已达到本次最多答题数",
+                "keju_huishi": "科举会试已达到本次最多答题数",
                 "zhuogui": "捉鬼任务已达到目标轮数",
             }.get(task_id, f"{task_name}已达到本次执行上限")
         if status == "completed":
             return {
                 "sanjieqiyuan": "三界奇缘答题完成",
                 "keju": "科举乡试答题完成",
+                "keju_huishi": "科举会试答题完成",
                 "zhuogui": "捉鬼任务已完成目标轮数",
                 "fuli_qiandao": "福利签到完成",
                 "bangpai_qiandao": "帮派签到与分红领取完成",
@@ -709,6 +762,7 @@ class RunnerManager:
         hints = {
             "sanjieqiyuan": "三界奇缘未能继续，请确认活动可参与且当前页面符合所选进入方式。",
             "keju": "科举答题已停止，请确认正式题目页面可见并检查模型或本地题库配置。",
+            "keju_huishi": "科举会试答题已停止，请确认会试正式题目页面可见并检查模型或本地题库配置。",
             "zhuogui": "捉鬼流程已停止，请检查组队状态、弹窗和当前游戏页面。",
             "fuli_qiandao": "福利签到未能继续，请保持主界面或福利页面完整可见后重试。",
             "bangpai_qiandao": "帮派签到未能继续，请确认角色已加入帮派并保持相关页面完整可见。",

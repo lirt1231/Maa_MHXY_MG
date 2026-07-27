@@ -51,21 +51,67 @@ TASKS = {
     "keju": {
         "id": "keju",
         "name": "科举乡试",
-        "eyebrow": "乡试 / 会试",
+        "eyebrow": "每日乡试",
         "summary": "本地题库 Top 3 配合模型复核，低置信度时保留现场。",
-        "description": "启动前必须手动打开正式答题页。未配置模型时仅使用高置信度本地题库兜底，不能可靠判断时停止而不是盲选。",
+        "description": "启动前必须手动打开科举乡试正式答题页。未配置模型时仅使用高置信度本地题库兜底，不能可靠判断时停止而不是盲选。",
         "status": "experimental",
         "risk": {"level": "low", "label": "低风险", "summary": "仅答题，不消耗角色资产"},
         "steps": [
-            "在游戏中手动进入乡试或会试的正式答题页面。",
+            "在游戏中手动进入科举乡试的正式答题页面。",
             "选择答题来源；兼容 API 的密钥应存放在 macOS Keychain。",
             "确认题目和 A/B/C/D 选项清晰可见后启动。",
         ],
         "checklist": COMMON_CHECKLIST
-        + ["已经进入乡试或会试的正式答题页面，题目与四个选项可见"],
+        + ["已经进入科举乡试正式答题页面，题目与四个选项可见"],
         "warnings": [
             "模型失败且本地题库置信度不足时会停止并保留当前页面。",
             "API Key 不应填写在页面或日志中。",
+        ],
+        "parameters": [
+            {
+                "key": "maxSteps",
+                "label": "最多答题数",
+                "type": "integer",
+                "default": 20,
+                "minimum": 1,
+                "maximum": 30,
+            },
+            {
+                "key": "answerSource",
+                "label": "答题来源",
+                "type": "select",
+                "default": "configured",
+                "choices": [
+                    {"value": "configured", "label": "本地题库 + 已配置兼容模型"},
+                    {"value": "codex", "label": "本地题库 + Codex 复核"},
+                ],
+            },
+            {
+                "key": "waitForRoundOne",
+                "label": "等待正式第 1 题",
+                "type": "boolean",
+                "default": True,
+            },
+        ],
+    },
+    "keju_huishi": {
+        "id": "keju_huishi",
+        "name": "科举会试",
+        "eyebrow": "限时会试",
+        "summary": "严格确认会试页面后，使用本地题库与模型复核完成答题。",
+        "description": "启动前必须手动打开科举会试正式答题页。检测不到明确会试证据或误入乡试时会停止，不会复用乡试页面盲点。",
+        "status": "experimental",
+        "risk": {"level": "low", "label": "低风险", "summary": "仅答题，不消耗角色资产"},
+        "steps": [
+            "在游戏中手动进入科举会试的正式答题页面。",
+            "选择答题来源；兼容 API 的密钥应存放在 macOS Keychain。",
+            "确认页面明确显示会试，且题目和 A/B/C/D 选项清晰可见后启动。",
+        ],
+        "checklist": COMMON_CHECKLIST
+        + ["已经进入科举会试正式答题页面，题目与四个选项可见"],
+        "warnings": [
+            "无法确认当前是会试页面时会停止，不会按乡试坐标尝试点击。",
+            "模型失败且本地题库置信度不足时会停止并保留当前页面。",
         ],
         "parameters": [
             {

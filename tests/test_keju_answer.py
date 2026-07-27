@@ -2,7 +2,7 @@ import sys
 import tempfile
 import unittest
 import json
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import numpy as np
 from pathlib import Path
@@ -168,6 +168,44 @@ class HybridAnswerTests(unittest.TestCase):
 
         self.assertIs(result, image)
         context.tasker.controller.post_screencap.assert_not_called()
+
+    def test_wrong_exam_type_stops_before_question_lookup(self):
+        recognizer = object.__new__(keju_hybrid.KejuHybridAnswer)
+        image = np.ones((720, 923, 3), dtype=np.uint8)
+
+        with (
+            patch.dict("os.environ", {"MAA_KEJU_EXAM_TYPE": "xiangshi"}),
+            patch.object(keju_hybrid, "_ocr_region", return_value="科举会试"),
+            patch.object(keju_hybrid, "search_candidates") as search,
+        ):
+            result = recognizer._analyze(
+                SimpleNamespace(),
+                SimpleNamespace(image=image),
+                keju_hybrid._StageTimings(),
+            )
+
+        self.assertEqual(recognizer.last_status, "wrong_exam_type")
+        self.assertEqual(recognizer.last_exam_type, "huishi")
+        self.assertEqual(tuple(result.box), (0, 0, 0, 0))
+        search.assert_not_called()
+
+    def test_missing_exam_title_stops_before_question_lookup(self):
+        recognizer = object.__new__(keju_hybrid.KejuHybridAnswer)
+        image = np.ones((720, 923, 3), dtype=np.uint8)
+
+        with (
+            patch.dict("os.environ", {"MAA_KEJU_EXAM_TYPE": "xiangshi"}),
+            patch.object(keju_hybrid, "_ocr_region", return_value=""),
+            patch.object(keju_hybrid, "search_candidates") as search,
+        ):
+            recognizer._analyze(
+                SimpleNamespace(),
+                SimpleNamespace(image=image),
+                keju_hybrid._StageTimings(),
+            )
+
+        self.assertEqual(recognizer.last_status, "unverified_exam_type")
+        search.assert_not_called()
 
 
 class KnowledgeStoreTests(unittest.TestCase):

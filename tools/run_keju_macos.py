@@ -29,13 +29,23 @@ RESULT_STATUSES = {
     "safe_stopped",
     "cancelled",
 }
+EXAM_TASK_IDS = {
+    "xiangshi": "keju",
+    "huishi": "keju_huishi",
+}
+EXAM_LABELS = {
+    "xiangshi": "乡试",
+    "huishi": "会试",
+}
 
 
-def task_result(status: str, **payload) -> dict:
+def task_result(status: str, *, exam_type: str = "xiangshi", **payload) -> dict:
     """Build a non-sensitive terminal result for one formal 科举 run."""
     if status not in RESULT_STATUSES:
         raise ValueError(f"unsupported result status: {status}")
-    return {"task_id": "keju", "status": status, **payload}
+    if exam_type not in EXAM_TASK_IDS:
+        raise ValueError(f"unsupported exam type: {exam_type}")
+    return {"task_id": EXAM_TASK_IDS[exam_type], "status": status, **payload}
 
 
 def emit_result(result: dict) -> None:
@@ -45,6 +55,12 @@ def emit_result(result: dict) -> None:
 
 def parse_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--exam-type",
+        choices=tuple(EXAM_TASK_IDS),
+        default="xiangshi",
+        help="严格限定为科举乡试或科举会试，不允许混用页面",
+    )
     parser.add_argument("--max-steps", type=int, default=20)
     parser.add_argument("--delay", type=float, default=3.0)
     parser.add_argument("--recognize-only", action="store_true")
@@ -120,15 +136,45 @@ def parse_question_round(question: str) -> tuple[int, int] | None:
     return int(match.group(1)), int(match.group(2))
 
 
-def classify_keju_inspection(texts: list[dict]) -> dict:
+def _title_texts(texts: list[dict], image_size: tuple[int, int]) -> list[str]:
+    width, height = image_size
+    title_texts = []
+    for item in texts:
+        box = item.get("box")
+        if not isinstance(box, (list, tuple)) or len(box) != 4:
+            continue
+        center_x = box[0] + box[2] / 2
+        center_y = box[1] + box[3] / 2
+        inside_x = width * 0.25 <= center_x <= width * 0.75
+        inside_y = height * 0.08 <= center_y <= height * 0.32
+        if inside_x and inside_y:
+            title_texts.append(re.sub(r"\s+", "", item.get("text", "")))
+    return title_texts
+
+
+def detect_exam_type(texts: list[dict], image_size: tuple[int, int]) -> str | None:
+    """Detect only from the title band so question text cannot spoof the type."""
+    joined = "".join(_title_texts(texts, image_size))
+    matches = {
+        exam_type
+        for exam_type, label in EXAM_LABELS.items()
+        if f"科举{label}" in joined
+    }
+    return matches.pop() if len(matches) == 1 else None
+
+
+def classify_keju_inspection(
+    texts: list[dict], image_size: tuple[int, int] = (1280, 720)
+) -> dict:
     joined = "".join(re.sub(r"\s+", "", item.get("text", "")) for item in texts)
+    exam_type = detect_exam_type(texts, image_size)
     if re.search(r"第\d+/\d+题", joined):
-        return {"status": "formal_question_ready"}
+        return {"status": "formal_question_ready", "examType": exam_type}
     if re.search(r"课堂复习|等待答题|即将开始|准备开始", joined):
-        return {"status": "waiting_for_question"}
-    if re.search(r"科举乡试|科举会试|乡试|会试", joined):
-        return {"status": "exam_page_without_question"}
-    return {"status": "unknown"}
+        return {"status": "waiting_for_question", "examType": exam_type}
+    if exam_type:
+        return {"status": "exam_page_without_question", "examType": exam_type}
+    return {"status": "unknown", "examType": None}
 
 
 def should_end_loop(
@@ -203,7 +249,7 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
         scene = runtime.read_scene()
         payload = {
             "image_size": scene.image_size,
-            "decision": classify_keju_inspection(scene.texts),
+            "decision": classify_keju_inspection(scene.texts, scene.image_size),
             "texts": scene.texts,
             "templates": scene.templates,
         }
@@ -223,6 +269,7 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
     local_config = load_local_model_config()
     os.environ["MAA_DIRECT_RESOURCE"] = "1"
     os.environ["MAA_KEJU_RECOGNIZE_ONLY"] = "1"
+    os.environ["MAA_KEJU_EXAM_TYPE"] = args.exam_type
     url = args.url or str(local_config.get("url", ""))
     model = args.model or str(local_config.get("model", ""))
     if url:
@@ -351,6 +398,7 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
                 print("final_question_answered=true", flush=True)
                 return task_result(
                     "completed",
+                    exam_type=args.exam_type,
                     answers=answered,
                     clicks=answered,
                     limit=args.max_steps,
@@ -366,11 +414,24 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
             continue
         if status == "unreliable":
             raise RuntimeError("当前题目无法可靠决策，已保留页面")
+        if status == "wrong_exam_type":
+            expected_label = EXAM_LABELS[args.exam_type]
+            observed_type = getattr(recognizer, "last_exam_type", None)
+            observed_label = EXAM_LABELS.get(observed_type, "其他考试")
+            raise RuntimeError(
+                f"当前是科举{observed_label}页面，不能启动科举{expected_label}"
+            )
+        if status == "unverified_exam_type":
+            expected_label = EXAM_LABELS[args.exam_type]
+            raise RuntimeError(
+                f"无法确认当前是科举{expected_label}页面，已停止且未执行点击"
+            )
         raise RuntimeError(f"未处理的科举状态：{status}")
 
     print(f"达到本次最大答题数：{args.max_steps}", flush=True)
     return task_result(
         "limit_reached",
+        exam_type=args.exam_type,
         answers=answered,
         clicks=answered,
         limit=args.max_steps,
@@ -379,6 +440,7 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
 
 def main() -> int:
     args = parse_args()
+    exam_type = getattr(args, "exam_type", "xiangshi")
     read_only = args.inspect_scene or args.recognize_only
     guard = CancellationGuard()
     progress = {
@@ -392,16 +454,26 @@ def main() -> int:
     except CancellationRequested:
         guard.wait_for_tasker_stop()
         if not read_only:
-            emit_result(task_result("cancelled", reason="收到停止请求", **progress))
+            emit_result(
+                task_result(
+                    "cancelled",
+                    exam_type=exam_type,
+                    reason="收到停止请求",
+                    **progress,
+                )
+            )
         print("stop_ack=true", flush=True)
         return 0
     except Exception as exc:
         if not read_only:
-            emit_result(task_result(
-                "safe_stopped",
-                reason=str(exc).strip() or exc.__class__.__name__,
-                **progress,
-            ))
+            emit_result(
+                task_result(
+                    "safe_stopped",
+                    exam_type=exam_type,
+                    reason=str(exc).strip() or exc.__class__.__name__,
+                    **progress,
+                )
+            )
         else:
             print(f"read_only_error={exc}", flush=True)
         return 1
@@ -409,11 +481,14 @@ def main() -> int:
     if read_only:
         return 0
     if result is None:
-        emit_result(task_result(
-            "safe_stopped",
-            reason="科举运行未返回最终结果",
-            **progress,
-        ))
+        emit_result(
+            task_result(
+                "safe_stopped",
+                exam_type=exam_type,
+                reason="科举运行未返回最终结果",
+                **progress,
+            )
+        )
         return 1
     emit_result(result)
     return 0

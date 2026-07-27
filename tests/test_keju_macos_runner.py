@@ -10,6 +10,7 @@ import numpy as np
 from tools.run_keju_macos import (
     CancellationRequested,
     classify_keju_inspection,
+    detect_exam_type,
     main,
     parse_question_round,
     recognize_keju_frame,
@@ -114,6 +115,35 @@ class KejuMacOSRunnerStateTests(unittest.TestCase):
         self.assertEqual(
             classify_keju_inspection([{"text": "长安城 世界地图"}])["status"],
             "unknown",
+        )
+
+    def test_exam_type_uses_only_the_title_band(self):
+        image_size = (1000, 720)
+        texts = [
+            {"text": "科举乡试", "box": [430, 120, 120, 30]},
+            {"text": "第3/20题 科举会试在哪里参加", "box": [330, 250, 360, 40]},
+        ]
+
+        self.assertEqual(detect_exam_type(texts, image_size), "xiangshi")
+        decision = classify_keju_inspection(texts, image_size)
+        self.assertEqual(decision, {
+            "status": "formal_question_ready",
+            "examType": "xiangshi",
+        })
+
+    def test_exam_type_rejects_missing_or_ambiguous_title(self):
+        image_size = (1000, 720)
+        question_only = [
+            {"text": "第3/15题 科举会试在哪里参加", "box": [330, 250, 360, 40]}
+        ]
+        both_titles = [
+            {"text": "科举乡试 科举会试", "box": [400, 120, 220, 30]},
+        ]
+
+        self.assertIsNone(detect_exam_type(question_only, image_size))
+        self.assertIsNone(detect_exam_type(both_titles, image_size))
+        self.assertIsNone(
+            classify_keju_inspection(question_only, image_size)["examType"]
         )
 
     def test_waiting_page_is_not_parsed_as_first_question(self):
@@ -320,6 +350,13 @@ class KejuResultContractTests(unittest.TestCase):
                 self.assertEqual(set(result) - {"task_id", "status"}, {
                     "answers", "clicks", "limit"
                 })
+
+    def test_huishi_uses_an_independent_task_id(self):
+        result = task_result(
+            "completed", exam_type="huishi", answers=15, clicks=15, limit=15
+        )
+
+        self.assertEqual(result["task_id"], "keju_huishi")
 
 
 if __name__ == "__main__":

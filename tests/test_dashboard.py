@@ -21,7 +21,10 @@ class TaskRegistryTests(unittest.TestCase):
     def test_only_verified_macos_tasks_are_exposed(self):
         self.assertEqual(
             set(TASKS),
-            {"sanjieqiyuan", "keju", "zhuogui", "fuli_qiandao", "bangpai_qiandao"},
+            {
+                "sanjieqiyuan", "keju", "keju_huishi", "zhuogui",
+                "fuli_qiandao", "bangpai_qiandao",
+            },
         )
         self.assertTrue(all(task["checklist"] for task in task_list()))
         self.assertTrue(all(task["steps"] for task in task_list()))
@@ -45,6 +48,19 @@ class TaskRegistryTests(unittest.TestCase):
             validate_options("keju", {}),
             {"maxSteps": 20, "answerSource": "configured", "waitForRoundOne": True},
         )
+        self.assertEqual(
+            validate_options("keju_huishi", {}),
+            {"maxSteps": 20, "answerSource": "configured", "waitForRoundOne": True},
+        )
+
+    def test_xiangshi_and_huishi_are_separate_tasks(self):
+        xiangshi = TASKS["keju"]
+        huishi = TASKS["keju_huishi"]
+
+        self.assertEqual(xiangshi["name"], "科举乡试")
+        self.assertEqual(huishi["name"], "科举会试")
+        self.assertNotIn("会试", "".join(xiangshi["steps"] + xiangshi["checklist"]))
+        self.assertNotIn("乡试", "".join(huishi["steps"] + huishi["checklist"]))
 
     def test_clan_sign_in_discloses_dividend_claiming(self):
         task = TASKS["bangpai_qiandao"]

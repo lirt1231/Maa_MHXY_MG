@@ -251,6 +251,21 @@ class RunnerTaskContractTests(unittest.TestCase):
         self.assertTrue(command[-1].endswith("tools/run_bangpai_qiandao_macos.py"))
         self.assertEqual(len(command), 2)
 
+    def test_imperial_exam_commands_keep_exam_types_separate(self):
+        options = {
+            "maxSteps": 20,
+            "answerSource": "configured",
+            "waitForRoundOne": True,
+        }
+
+        xiangshi = self.manager._command("keju", options)
+        huishi = self.manager._command("keju_huishi", options)
+
+        self.assertIn("xiangshi", xiangshi)
+        self.assertNotIn("huishi", xiangshi)
+        self.assertIn("huishi", huishi)
+        self.assertNotIn("xiangshi", huishi)
+
     def test_welfare_progress_and_failure_copy_are_specific(self):
         payload = self.manager._progress_payload(
             "fuli_qiandao", '{"event": "scene", "status": "scratch_ready"}'
@@ -344,6 +359,7 @@ class RunnerTaskContractTests(unittest.TestCase):
         fixtures = {
             "sanjieqiyuan": {"status": "completed", "questions": 10, "clicks": 10},
             "keju": {"status": "limit_reached", "answers": 20, "clicks": 20, "limit": 20},
+            "keju_huishi": {"status": "completed", "answers": 15, "clicks": 15, "limit": 20},
             "zhuogui": {"status": "completed", "rounds": 2, "target_rounds": 2, "steps": 24},
             "fuli_qiandao": {"status": "already_completed", "actions": 0, "clicks": 0},
             "bangpai_qiandao": {"status": "completed", "actions": 1, "clicks": 1},
@@ -395,6 +411,7 @@ class RunnerTaskContractTests(unittest.TestCase):
     def test_remaining_task_results_are_persisted(self):
         fixtures = [
             ("keju", {}, {"status": "completed", "answers": 15, "clicks": 15, "limit": 20}),
+            ("keju_huishi", {}, {"status": "completed", "answers": 15, "clicks": 15, "limit": 20}),
             ("zhuogui", {"rounds": 2}, {"status": "completed", "rounds": 2, "target_rounds": 2, "steps": 24}),
             ("fuli_qiandao", {}, {"status": "completed", "actions": 5, "clicks": 3}),
             ("bangpai_qiandao", {}, {"status": "already_completed", "actions": 0, "clicks": 0}),
@@ -429,7 +446,8 @@ class RunnerInspectionTests(unittest.TestCase):
     def test_inspection_commands_are_single_scene_and_read_only(self):
         expected = {
             "sanjieqiyuan": ["run_sanjieqiyuan_macos.py", "--inspect-scene", "--input-method", "global"],
-            "keju": ["run_keju_macos.py", "--inspect-scene"],
+            "keju": ["run_keju_macos.py", "--inspect-scene", "--exam-type", "xiangshi"],
+            "keju_huishi": ["run_keju_macos.py", "--inspect-scene", "--exam-type", "huishi"],
             "zhuogui": ["run_zhuogui_macos.py", "--inspect-scene", "--rounds", "1"],
             "fuli_qiandao": ["run_fuli_qiandao_macos.py", "--inspect-scene"],
             "bangpai_qiandao": ["run_bangpai_qiandao_macos.py", "--inspect-scene"],
@@ -467,7 +485,7 @@ class RunnerInspectionTests(unittest.TestCase):
         process = popen.return_value
         process.returncode = 0
         process.communicate.return_value = (
-            'preflight_json={"image_size":[1020,718],"decision":{"status":"formal_question_ready"},"texts":[],"templates":{}}\n',
+            'preflight_json={"image_size":[1020,718],"decision":{"status":"formal_question_ready","examType":"xiangshi"},"texts":[],"templates":{}}\n',
             None,
         )
 
@@ -478,6 +496,31 @@ class RunnerInspectionTests(unittest.TestCase):
         self.assertEqual(self.database.events_after(0), [])
         self.assertEqual(process.communicate.call_args.kwargs["timeout"], 15.0)
         self.assertTrue(popen.call_args.kwargs["start_new_session"])
+
+    def test_keju_inspection_requires_matching_exam_type(self):
+        xiangshi = (
+            'preflight_json={"decision":{"status":"formal_question_ready",'
+            '"examType":"xiangshi"},"texts":[],"templates":{}}'
+        )
+        huishi = (
+            'preflight_json={"decision":{"status":"formal_question_ready",'
+            '"examType":"huishi"},"texts":[],"templates":{}}'
+        )
+        unknown_type = (
+            'preflight_json={"decision":{"status":"formal_question_ready"},'
+            '"texts":[],"templates":{}}'
+        )
+
+        self.assertTrue(self.manager._parse_inspection("keju", {}, xiangshi)["canStart"])
+        self.assertTrue(
+            self.manager._parse_inspection("keju_huishi", {}, huishi)["canStart"]
+        )
+        wrong = self.manager._parse_inspection("keju", {}, huishi)
+        self.assertFalse(wrong["canStart"])
+        self.assertIn("当前是科举会试", wrong["summary"])
+        unknown = self.manager._parse_inspection("keju_huishi", {}, unknown_type)
+        self.assertFalse(unknown["canStart"])
+        self.assertIn("无法确认", unknown["summary"])
 
     def test_parser_accepts_zhuogui_nested_evidence_and_action(self):
         output = (

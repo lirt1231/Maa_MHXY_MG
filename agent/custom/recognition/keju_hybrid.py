@@ -47,6 +47,8 @@ OPTION_ROIS = {
     "D": [831, 404, 265, 96],
 }
 MAC_REFERENCE_SIZE = (923, 720)
+EXAM_TITLE_ROI = [528, 65, 244, 67]
+MAC_EXAM_TITLE_ROI = [350, 120, 230, 80]
 MAC_QUESTION_ROI = [335, 225, 470, 85]
 MAC_OPTION_ROIS = {
     "A": [340, 315, 225, 80],
@@ -126,6 +128,27 @@ def keju_rois(image):
             for choice, roi in option_rois.items()
         },
     )
+
+
+def keju_exam_title_roi(image):
+    image_height, image_width = image.shape[:2]
+    if image_width / image_height < 1.5:
+        reference_size = MAC_REFERENCE_SIZE
+        roi = MAC_EXAM_TITLE_ROI
+    else:
+        reference_size = (1280, 720)
+        roi = EXAM_TITLE_ROI
+    return scale_roi(roi, image_width, image_height, reference_size)
+
+
+def _exam_type_from_title(text):
+    normalized = re.sub(r"\s+", "", text or "")
+    matches = {
+        exam_type
+        for exam_type, label in {"xiangshi": "科举乡试", "huishi": "科举会试"}.items()
+        if label in normalized
+    }
+    return matches.pop() if len(matches) == 1 else None
 
 
 def _sorted_ocr_text(results, row_height_threshold=20):
@@ -304,6 +327,26 @@ class KejuHybridAnswer(CustomRecognition):
     def _analyze(self, context, argv, timings):
         with timings.track("screenshot"):
             image = _recognition_image(context, argv)
+        expected_exam_type = os.environ.get("MAA_KEJU_EXAM_TYPE", "xiangshi")
+        with timings.track("ocr"):
+            title = _ocr_region(
+                context,
+                image,
+                "科举考试类型-混合",
+                keju_exam_title_roi(image),
+            )
+        observed_exam_type = _exam_type_from_title(title)
+        self.last_exam_type = observed_exam_type
+        if observed_exam_type is None:
+            self.last_status = "unverified_exam_type"
+            return CustomRecognition.AnalyzeResult(
+                box=(0, 0, 0, 0), detail="未能从标题确认科举考试类型"
+            )
+        if observed_exam_type != expected_exam_type:
+            self.last_status = "wrong_exam_type"
+            return CustomRecognition.AnalyzeResult(
+                box=(0, 0, 0, 0), detail="当前科举考试类型与启动任务不匹配"
+            )
         question_roi, option_rois = keju_rois(image)
         with timings.track("ocr"):
             question = _ocr_region(
@@ -322,7 +365,7 @@ class KejuHybridAnswer(CustomRecognition):
             self.last_status = "waiting"
             self.last_question = question
             return CustomRecognition.AnalyzeResult(
-                box=(0, 0, 0, 0), detail="会试尚未出现正式题目"
+                box=(0, 0, 0, 0), detail="科举尚未出现正式题目"
             )
         round_number = int(round_match.group(1))
         record_only_waiting = (
@@ -370,7 +413,7 @@ class KejuHybridAnswer(CustomRecognition):
             self.last_question = question
             self.last_options = valid_options
             return CustomRecognition.AnalyzeResult(
-                box=(0, 0, 0, 0), detail="等待正式会试从第1题开始，题面已记录"
+                box=(0, 0, 0, 0), detail="等待科举正式第1题开始，题面已记录"
             )
         if is_answer_result:
             _record_waiting_capture(
