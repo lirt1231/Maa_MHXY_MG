@@ -66,6 +66,43 @@ class ClanSignInSceneTests(unittest.TestCase):
         )
         self.assertEqual(decision["status"], "open_welfare")
 
+    def test_scaled_welfare_page_uses_strict_ocr_header_context(self):
+        texts = [
+            text("·帮派·", (445, 85, 103, 34)),
+            text("帮派签到", (723, 385, 81, 24)),
+            text("签到", (750, 454, 59, 30)),
+        ]
+
+        decision = classify_clan_sign_in_scene(
+            texts,
+            {},
+            "enter",
+            (1020, 718),
+        )
+
+        self.assertEqual(decision, {"status": "sign_in", "box": [750, 454, 59, 30]})
+
+    def test_ocr_header_context_requires_title_section_and_expected_regions(self):
+        title = text("·帮派·", (445, 85, 103, 34))
+        section = text("帮派签到", (723, 385, 81, 24))
+        sign_in = text("签到", (750, 454, 59, 30))
+        cases = [
+            [section, sign_in],
+            [title, sign_in],
+            [title, text("帮派签到", (100, 100, 81, 24)), sign_in],
+        ]
+        for texts in cases:
+            with self.subTest(texts=texts):
+                self.assertEqual(
+                    classify_clan_sign_in_scene(
+                        texts,
+                        {},
+                        "enter",
+                        (1020, 718),
+                    )["status"],
+                    "unknown",
+                )
+
     def test_sign_in_is_phase_gated_and_dividend_is_never_an_action(self):
         self.assertEqual(
             classify_clan_sign_in_scene([text("签到")], {}, "clan")["status"],

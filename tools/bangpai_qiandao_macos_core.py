@@ -39,7 +39,30 @@ def classify_clan_sign_in_scene(
         return {"status": "no_clan"}
 
     clan_header = templates.get("clan_header")
-    header_valid = box_in_region(clan_header, image_size, max_y=0.3)
+    clan_title = find_text(texts, r"^[·•]?帮派[·•]?$")
+    sign_in_section = find_text(texts, r"^帮派签到$")
+    ocr_header_valid = (
+        clan_title
+        and sign_in_section
+        and box_in_region(
+            clan_title["box"],
+            image_size,
+            min_x=0.35,
+            max_x=0.65,
+            max_y=0.25,
+        )
+        and box_in_region(
+            sign_in_section["box"],
+            image_size,
+            min_x=0.6,
+            max_x=0.9,
+            min_y=0.45,
+            max_y=0.7,
+        )
+    )
+    header_valid = box_in_region(
+        clan_header, image_size, max_y=0.3
+    ) or bool(ocr_header_valid)
     completion = find_text(texts, r"今日已签到|签到成功|帮派签到成功|^已签到$")
     if completion and header_valid and phase in {"enter", "welfare", "verify"}:
         return {
