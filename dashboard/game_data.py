@@ -93,6 +93,24 @@ def parse_daily_task_data(output: str) -> dict:
     ocr_count = evidence.get("ocr_item_count")
     if isinstance(ocr_count, bool) or not isinstance(ocr_count, int) or ocr_count < 0:
         raise RuntimeError("日程采集结果包含无效的 OCR 计数")
+    if evidence.get("page_title") not in {"ocr", "template"}:
+        raise RuntimeError("日程采集结果缺少活动页面标题证据")
+    if evidence.get("daily_tab_detected") is not True:
+        raise RuntimeError("日程采集结果缺少日常活动页签证据")
+    task_roi = evidence.get("task_roi")
+    if not (
+        isinstance(task_roi, list)
+        and len(task_roi) == 4
+        and all(
+            not isinstance(value, bool)
+            and isinstance(value, (int, float))
+            and 0 <= value <= 1
+            for value in task_roi
+        )
+        and task_roi[0] < task_roi[2]
+        and task_roi[1] < task_roi[3]
+    ):
+        raise RuntimeError("日程采集结果缺少有效的任务列表区域证据")
     return payload
 
 

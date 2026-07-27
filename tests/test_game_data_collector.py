@@ -26,7 +26,13 @@ def valid_payload() -> dict:
                 "rewardStatus": "unknown",
             }]
         },
-        "evidence": {"image_size": [1020, 718], "ocr_item_count": 32},
+        "evidence": {
+            "image_size": [1020, 718],
+            "ocr_item_count": 32,
+            "page_title": "template",
+            "daily_tab_detected": True,
+            "task_roi": [0.2, 0.13, 0.96, 0.84],
+        },
     }
 
 
@@ -54,6 +60,12 @@ class DailyTaskDataParserTests(unittest.TestCase):
         invalid_evidence = valid_payload()
         invalid_evidence["evidence"]["ocr_item_count"] = True
         fixtures.append(invalid_evidence)
+        missing_page_evidence = valid_payload()
+        del missing_page_evidence["evidence"]["daily_tab_detected"]
+        fixtures.append(missing_page_evidence)
+        invalid_roi = valid_payload()
+        invalid_roi["evidence"]["task_roi"] = [0.9, 0.1, 0.2, 0.8]
+        fixtures.append(invalid_roi)
         for payload in fixtures:
             with self.subTest(payload=payload):
                 with self.assertRaises(RuntimeError):

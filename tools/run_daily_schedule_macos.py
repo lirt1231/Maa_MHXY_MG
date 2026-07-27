@@ -12,7 +12,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
-from daily_schedule_macos_core import parse_daily_schedule  # noqa: E402
+from daily_schedule_macos_core import (  # noqa: E402
+    daily_schedule_page_evidence,
+    parse_daily_schedule,
+)
 from macos_cancellation import CancellationGuard, CancellationRequested  # noqa: E402
 from macos_task_runtime import MacOSTaskRuntime  # noqa: E402
 
@@ -43,8 +46,17 @@ def _protocol_task(task: dict) -> dict:
 
 def collect_daily_schedule(guard: CancellationGuard) -> dict:
     runtime = MacOSTaskRuntime(guard)
-    scene = runtime.read_scene()
-    parsed_tasks = parse_daily_schedule(scene.texts)
+    scene = runtime.read_scene({
+        "activity_header": ["zonghe/huodong_jiemian_panduan.png"],
+    })
+    page_evidence = daily_schedule_page_evidence(
+        scene.texts, scene.image_size, scene.templates
+    )
+    if page_evidence is None:
+        raise RuntimeError("未识别到完整的日常活动页面，请打开活动-日常活动后重试")
+    parsed_tasks = parse_daily_schedule(
+        scene.texts, scene.image_size, scene.templates
+    )
     complete_parse = bool(parsed_tasks) and all(
         task["status"] != "unknown" for task in parsed_tasks
     )
@@ -57,6 +69,7 @@ def collect_daily_schedule(guard: CancellationGuard) -> dict:
         "evidence": {
             "image_size": list(scene.image_size),
             "ocr_item_count": len(scene.texts),
+            **page_evidence,
         },
     }
 
