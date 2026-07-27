@@ -60,7 +60,9 @@ def run(args, guard: CancellationGuard) -> int:
 
     for step in range(1, args.max_steps + 1):
         scene = runtime.read_scene(TEMPLATES)
-        decision = classify_welfare_scene(scene.texts, scene.templates, phase)
+        decision = classify_welfare_scene(
+            scene.texts, scene.templates, phase, scene.image_size
+        )
         status = decision["status"]
         log_event("scene", step=step, phase=phase, status=status)
         if args.inspect_scene or args.recognize_only:

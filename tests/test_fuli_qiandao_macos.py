@@ -80,6 +80,21 @@ class WelfareSceneClassificationTests(unittest.TestCase):
         )
         self.assertEqual(classify_welfare_scene([], {}, "enter")["status"], "unknown")
 
+    def test_direct_completed_page_requires_welfare_context(self):
+        self.assertEqual(
+            classify_welfare_scene([text("今日已签到")], {}, "enter")["status"],
+            "unknown",
+        )
+        self.assertEqual(
+            classify_welfare_scene(
+                [text("今日已签到")],
+                {"welfare_header": (300, 10, 437, 53)},
+                "enter",
+                (1020, 718),
+            )["status"],
+            "already_completed",
+        )
+
     def test_unrelated_completion_text_does_not_skip_welfare_entry(self):
         decision = classify_welfare_scene(
             [text("福利", (5, 110, 60, 50)), text("师门任务已完成")], {}, "enter"
@@ -89,6 +104,32 @@ class WelfareSceneClassificationTests(unittest.TestCase):
     def test_ocr_scratch_prompt_is_not_used_as_drag_boundary(self):
         decision = classify_welfare_scene([text("滑动刮奖")], {}, "scratch")
         self.assertEqual(decision["status"], "unknown")
+
+    def test_actionable_evidence_must_be_in_expected_regions(self):
+        image_size = (1020, 718)
+        cases = [
+            ([text("福利", (800, 100, 80, 40))], {}, "enter"),
+            ([text("打开刮刮乐", (20, 30, 160, 50))], {}, "welfare"),
+            ([], {"scratch": (850, 10, 160, 80)}, "scratch"),
+            ([text("获得奖励"), text("确定", (20, 30, 80, 40))], {}, "verify"),
+        ]
+        for texts, templates, phase in cases:
+            with self.subTest(phase=phase, texts=texts, templates=templates):
+                self.assertEqual(
+                    classify_welfare_scene(texts, templates, phase, image_size)["status"],
+                    "unknown",
+                )
+
+    def test_scratch_entry_is_not_reopened_after_scratching(self):
+        self.assertEqual(
+            classify_welfare_scene(
+                [text("打开刮刮乐", (820, 590, 160, 50))],
+                {},
+                "verify",
+                (1020, 718),
+            )["status"],
+            "unknown",
+        )
 
     def test_scratch_gestures_alternate_and_stay_inside_evidence_box(self):
         box = (100, 200, 400, 160)
@@ -147,7 +188,7 @@ class WelfareRunnerTests(unittest.TestCase):
     @patch("tools.run_fuli_qiandao_macos.MacOSTaskRuntime")
     def test_already_completed_emits_one_terminal_result(self, runtime_class):
         runtime_class.return_value.read_scene.side_effect = [
-            scene([text("福利")]),
+            scene([text("福利", (5, 110, 60, 50))]),
             scene([text("今日已签到")]),
         ]
         args = SimpleNamespace(inspect_scene=False, recognize_only=False, max_steps=2)
@@ -170,7 +211,7 @@ class WelfareRunnerTests(unittest.TestCase):
     def test_unknown_limit_requires_consecutive_unknown_scenes(self, runtime_class):
         runtime_class.return_value.read_scene.side_effect = [
             scene(),
-            scene([text("福利")]),
+            scene([text("福利", (5, 110, 60, 50))]),
             scene(),
             scene(),
             scene(),
