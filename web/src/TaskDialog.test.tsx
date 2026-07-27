@@ -33,6 +33,26 @@ const readyInspection: TaskInspection = {
 afterEach(cleanup);
 
 describe("TaskDialog", () => {
+  it("keeps the huishi dialog independent from the xiangshi task", () => {
+    const huishi: Task = {
+      ...task,
+      id: "keju_huishi",
+      name: "科举会试",
+      eyebrow: "限时会试",
+      description: "启动前必须手动打开科举会试正式答题页。",
+      steps: ["打开科举会试正式答题页"],
+      checklist: ["会试题目与四个选项可见"],
+    };
+    const view = render(<TaskDialog
+      task={huishi} busy={false} onClose={vi.fn()} onStart={vi.fn()} onInspect={vi.fn()}
+    />);
+
+    expect(view.getByRole("dialog", { name: "启动科举会试" })).toBeTruthy();
+    expect(view.getByText("启动前必须手动打开科举会试正式答题页。")).toBeTruthy();
+    expect(view.getByText("会试题目与四个选项可见")).toBeTruthy();
+    expect(view.queryByText("启动 科举乡试")).toBeNull();
+  });
+
   it("requires every preflight check before enabling start", () => {
     const view = render(<TaskDialog task={task} busy={false} onClose={() => undefined} onStart={vi.fn()} onInspect={vi.fn()} />);
     const start = view.getByText("确认并启动") as HTMLButtonElement;

@@ -1,7 +1,7 @@
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TaskPanel } from "./TaskPanel";
-import type { Run, SystemState } from "./types";
+import type { Run, SystemState, Task } from "./types";
 
 const system: SystemState = {
   platform: "darwin", gameRunning: true, windowFound: true,
@@ -20,6 +20,39 @@ function run(overrides: Partial<Run>): Run {
 afterEach(cleanup);
 
 describe("TaskPanel run outcomes", () => {
+  it("renders xiangshi and huishi as independent task cards", () => {
+    const keju: Task = {
+      id: "keju", name: "科举乡试", eyebrow: "每日乡试", summary: "完成乡试答题",
+      description: "打开乡试正式答题页", status: "experimental",
+      risk: { level: "low", label: "低风险", summary: "仅答题" },
+      steps: ["打开乡试答题页"], checklist: ["乡试题目可见"], warnings: [], parameters: [],
+    };
+    const huishi: Task = {
+      ...keju, id: "keju_huishi", name: "科举会试", eyebrow: "限时会试",
+      summary: "完成会试答题", description: "打开会试正式答题页",
+      steps: ["打开会试答题页"], checklist: ["会试题目可见"],
+    };
+    const onSelectTask = vi.fn();
+    const view = render(<TaskPanel
+      system={system} tasks={[keju, huishi]} runs={[]}
+      summary={{ total: 0, succeeded: 0, failed: 0, successRate: 0, averageDurationMs: 0 }}
+      logs={[]} busy={false} progress="等待任务" startingGame={false}
+      onStartGame={vi.fn()} onStop={vi.fn()} onSelectTask={onSelectTask}
+    />);
+
+    expect(view.getByRole("heading", { name: "科举乡试" })).toBeTruthy();
+    const huishiHeading = view.getByRole("heading", { name: "科举会试" });
+    expect(huishiHeading).toBeTruthy();
+    fireEvent.click(huishiHeading.closest("article")!.querySelector("button")!);
+    expect(onSelectTask).toHaveBeenCalledWith(expect.objectContaining({
+      id: "keju_huishi", name: "科举会试",
+    }));
+    fireEvent.click(view.getByRole("heading", { name: "科举乡试" }).closest("article")!.querySelector("button")!);
+    expect(onSelectTask).toHaveBeenLastCalledWith(expect.objectContaining({
+      id: "keju", name: "科举乡试",
+    }));
+  });
+
   it("shows persisted completion progress instead of a benefit placeholder", () => {
     const view = render(<TaskPanel system={system} tasks={[]} runs={[run({
       result: { task_id: "sanjieqiyuan", status: "limit_reached", questions: 10, clicks: 10, limit: 10 }
