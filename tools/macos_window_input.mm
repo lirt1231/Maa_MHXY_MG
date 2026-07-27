@@ -32,14 +32,13 @@ extern "C" uint32_t MaaMHXYFindWindow(const char* bundle_id_utf8, const char* wi
             : @"";
         NSArray<NSRunningApplication*>* applications =
             [NSRunningApplication runningApplicationsWithBundleIdentifier:bundle_id];
-        NSRunningApplication* application = nil;
+        NSMutableSet<NSNumber*>* process_ids = [NSMutableSet set];
         for (NSRunningApplication* candidate in applications) {
             if (!candidate.terminated) {
-                application = candidate;
-                break;
+                [process_ids addObject:@(candidate.processIdentifier)];
             }
         }
-        if (!application) {
+        if (process_ids.count == 0) {
             return 0;
         }
 
@@ -55,7 +54,7 @@ extern "C" uint32_t MaaMHXYFindWindow(const char* bundle_id_utf8, const char* wi
         for (NSDictionary* info in window_info) {
             NSNumber* owner_pid = info[(id)kCGWindowOwnerPID];
             NSNumber* layer = info[(id)kCGWindowLayer];
-            if (owner_pid.intValue != application.processIdentifier || layer.intValue != 0) {
+            if (![process_ids containsObject:owner_pid] || layer.intValue != 0) {
                 continue;
             }
             CGRect bounds = CGRectZero;
@@ -95,19 +94,9 @@ extern "C" int MaaMHXYClickWindow(
             : @"";
         NSArray<NSRunningApplication*>* applications =
             [NSRunningApplication runningApplicationsWithBundleIdentifier:bundle_id];
-        NSRunningApplication* application = nil;
-        for (NSRunningApplication* candidate in applications) {
-            if (!candidate.terminated) {
-                application = candidate;
-                break;
-            }
-        }
-        if (!application) {
+        if (applications.count == 0) {
             return -2;
         }
-
-        [application activateWithOptions:NSApplicationActivateAllWindows];
-        usleep(80000);
 
         CFArrayRef window_info_ref = CGWindowListCopyWindowInfo(
             kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
@@ -118,11 +107,20 @@ extern "C" int MaaMHXYClickWindow(
         NSArray* window_info = CFBridgingRelease(window_info_ref);
 
         CGRect best_bounds = CGRectZero;
+        NSRunningApplication* application = nil;
         double best_score = -1;
         for (NSDictionary* info in window_info) {
             NSNumber* owner_pid = info[(id)kCGWindowOwnerPID];
             NSNumber* layer = info[(id)kCGWindowLayer];
-            if (owner_pid.intValue != application.processIdentifier || layer.intValue != 0) {
+            NSRunningApplication* owner_application = nil;
+            for (NSRunningApplication* candidate in applications) {
+                if (!candidate.terminated
+                    && candidate.processIdentifier == owner_pid.intValue) {
+                    owner_application = candidate;
+                    break;
+                }
+            }
+            if (!owner_application || layer.intValue != 0) {
                 continue;
             }
 
@@ -138,11 +136,15 @@ extern "C" int MaaMHXYClickWindow(
             if (score > best_score) {
                 best_score = score;
                 best_bounds = bounds;
+                application = owner_application;
             }
         }
         if (best_score < 0) {
             return -4;
         }
+
+        [application activateWithOptions:NSApplicationActivateAllWindows];
+        usleep(80000);
 
         double normalized_x = std::clamp(source_x / source_width, 0.0, 1.0);
         double normalized_y = std::clamp(source_y / source_height, 0.0, 1.0);
@@ -227,18 +229,9 @@ extern "C" int MaaMHXYDragWindow(
             : @"";
         NSArray<NSRunningApplication*>* applications =
             [NSRunningApplication runningApplicationsWithBundleIdentifier:bundle_id];
-        NSRunningApplication* application = nil;
-        for (NSRunningApplication* candidate in applications) {
-            if (!candidate.terminated) {
-                application = candidate;
-                break;
-            }
-        }
-        if (!application) {
+        if (applications.count == 0) {
             return -2;
         }
-        [application activateWithOptions:NSApplicationActivateAllWindows];
-        usleep(80000);
 
         CFArrayRef window_info_ref = CGWindowListCopyWindowInfo(
             kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
@@ -248,11 +241,20 @@ extern "C" int MaaMHXYDragWindow(
         }
         NSArray* window_info = CFBridgingRelease(window_info_ref);
         CGRect best_bounds = CGRectZero;
+        NSRunningApplication* application = nil;
         double best_score = -1;
         for (NSDictionary* info in window_info) {
             NSNumber* owner_pid = info[(id)kCGWindowOwnerPID];
             NSNumber* layer = info[(id)kCGWindowLayer];
-            if (owner_pid.intValue != application.processIdentifier || layer.intValue != 0) {
+            NSRunningApplication* owner_application = nil;
+            for (NSRunningApplication* candidate in applications) {
+                if (!candidate.terminated
+                    && candidate.processIdentifier == owner_pid.intValue) {
+                    owner_application = candidate;
+                    break;
+                }
+            }
+            if (!owner_application || layer.intValue != 0) {
                 continue;
             }
             CGRect bounds = CGRectZero;
@@ -266,11 +268,15 @@ extern "C" int MaaMHXYDragWindow(
             if (score > best_score) {
                 best_score = score;
                 best_bounds = bounds;
+                application = owner_application;
             }
         }
         if (best_score < 0) {
             return -4;
         }
+
+        [application activateWithOptions:NSApplicationActivateAllWindows];
+        usleep(80000);
 
         auto map_point = [&](double x, double y) {
             constexpr double title_bar_height = 28.0;
