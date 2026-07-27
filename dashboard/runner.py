@@ -94,6 +94,7 @@ SCENE_LABELS = {
     "unknown": "未识别页面",
     "completed": "任务已完成",
     "already_completed": "今日已完成",
+    "scroll_daily": "日常活动列表",
     "no_clan": "未加入帮派",
 }
 
@@ -131,6 +132,7 @@ ACTION_LABELS = {
     "open_battle_menu": "打开战斗活动菜单",
     "click_join": "点击经过识别的参加按钮",
     "click_daily": "打开日常活动列表",
+    "scroll_daily": "向下浏览活动列表",
     "click_activity": "打开活动页面",
     "click_activity_toolbar": "点击经过识别的活动工具栏入口",
     "click_activity_template": "点击经过模板确认的活动入口",
@@ -394,7 +396,8 @@ class RunnerManager:
             manual = options.get("navigation") == "manual"
             actionable = {
                 "answering", "dismiss_known_popup", "close_bag_overlay",
-                "open_battle_menu", "click_join", "click_daily", "click_activity",
+                "open_battle_menu", "click_join", "click_daily", "scroll_daily",
+                "click_activity",
                 "click_activity_toolbar", "click_activity_template",
             }
             ready = scene == "answering" if manual else scene in actionable

@@ -32,12 +32,15 @@ from maa.pipeline import JOCR, JTemplateMatch  # noqa: E402
 from maa.resource import Resource  # noqa: E402
 from maa.tasker import Tasker  # noqa: E402
 from maa.toolkit import Toolkit  # noqa: E402
+from daily_schedule_macos_core import daily_schedule_page_evidence  # noqa: E402
 from macos_cancellation import CancellationGuard, CancellationRequested  # noqa: E402
 
 
 SYSTEM_CAPTURE_SIZE = (1020, 718)
 RESULT_PREFIX = "result_json="
 SUCCESS_RESULT_STATUSES = {"completed", "already_completed", "limit_reached"}
+MAX_NAVIGATION_INPUTS = 12
+MAX_REPEATED_NAVIGATION_ACTIONS = 2
 
 
 def emit_result(status: str, **payload) -> None:
@@ -206,6 +209,29 @@ def _center(item):
     return [x + width // 2, y + height // 2]
 
 
+def _same_activity_card(anchor, candidate, image_size):
+    """Require an action to be inside the target's card, not the other column."""
+    width, height = image_size
+    anchor_x, anchor_y = _center(anchor)
+    candidate_x, candidate_y = _center(candidate)
+    return (
+        anchor_x + width * 0.04 <= candidate_x <= anchor_x + width * 0.30
+        and anchor_y - height * 0.04 <= candidate_y <= anchor_y + height * 0.14
+    )
+
+
+def _navigation_action_signature(decision, image_size):
+    point = decision.get("click")
+    if not isinstance(point, (list, tuple)) or len(point) != 2:
+        return (decision["status"],)
+    width, height = image_size
+    return (
+        decision["status"],
+        round(point[0] / width, 2),
+        round(point[1] / height, 2),
+    )
+
+
 def classify_scene(scene):
     """Choose only actions that are justified by current OCR evidence."""
     width, height = scene["image_size"]
@@ -214,6 +240,8 @@ def classify_scene(scene):
     def matching(pattern):
         regex = re.compile(pattern)
         return [item for item in items if regex.search(item["text"])]
+
+    daily_page = daily_schedule_page_evidence(items, scene["image_size"])
 
     if matching(r"第\s*\d+\s*题"):
         return {"status": "answering"}
@@ -257,28 +285,30 @@ def classify_scene(scene):
             "click": [round(width * 0.025), round(height * 0.055)],
         }
 
-    sanjie = matching(r"三界奇缘")
+    sanjie = matching(r"三界奇缘") if daily_page else []
     if sanjie:
         item = sanjie[0]
-        center_y = _center(item)[1]
         same_row_done = [
             candidate
             for candidate in matching(r"已完成|完成")
-            if abs(_center(candidate)[1] - center_y) <= 70
+            if _same_activity_card(item, candidate, scene["image_size"])
         ]
         if same_row_done:
             return {"status": "already_completed"}
         same_row_join = [
             candidate
             for candidate in matching(r"^参加$")
-            if abs(_center(candidate)[1] - center_y) <= 80
+            if _same_activity_card(item, candidate, scene["image_size"])
         ]
         if same_row_join:
             return {
                 "status": "click_join",
                 "click": _center(same_row_join[0]),
             }
-        return {"status": "activity_item_without_action"}
+        return {
+            "status": "scroll_daily",
+            "reason": "target_action_not_visible",
+        }
 
     if daily_tabs:
         return {"status": "click_daily", "click": _center(daily_tabs[0])}
@@ -422,6 +452,8 @@ def navigate_to_exam(tasker, controller, capture, native_input, timeout, guard):
     daily_selected = False
     scroll_count = 0
     battle_return_attempts = 0
+    navigation_inputs = 0
+    action_counts = {}
     while time.monotonic() < deadline:
         guard.checkpoint()
         scene = read_scene(tasker, capture, guard)
@@ -452,11 +484,13 @@ def navigate_to_exam(tasker, controller, capture, native_input, timeout, guard):
                 battle_return_attempts = 2
             else:
                 raise RuntimeError("战斗快捷菜单打开后仍无法进入活动界面")
-        if status == "click_daily" and daily_selected:
+        if status == "scroll_daily" or (status == "click_daily" and daily_selected):
             if native_input is None:
                 raise RuntimeError("活动列表浏览要求 --input-method native")
             if scroll_count >= 5:
                 raise RuntimeError("浏览活动列表五次后仍未找到三界奇缘")
+            if navigation_inputs >= MAX_NAVIGATION_INPUTS:
+                raise RuntimeError("活动导航已达到输入上限，已停止以避免死循环")
             width, height = scene["image_size"]
             guard.perform_input(
                 native_input.drag,
@@ -465,10 +499,20 @@ def navigate_to_exam(tasker, controller, capture, native_input, timeout, guard):
                 scene["image_size"],
             )
             scroll_count += 1
+            navigation_inputs += 1
+            daily_selected = True
             print(f"navigation_scroll count={scroll_count}", flush=True)
             guard.wait(1.2)
             continue
         if "click" in decision:
+            signature = _navigation_action_signature(decision, scene["image_size"])
+            action_counts[signature] = action_counts.get(signature, 0) + 1
+            if action_counts[signature] > MAX_REPEATED_NAVIGATION_ACTIONS:
+                raise RuntimeError(
+                    f"检测到重复导航动作 {status}，已停止以避免死循环"
+                )
+            if navigation_inputs >= MAX_NAVIGATION_INPUTS:
+                raise RuntimeError("活动导航已达到输入上限，已停止以避免死循环")
             screen_point = perform_click(
                 controller,
                 native_input,
@@ -476,6 +520,7 @@ def navigate_to_exam(tasker, controller, capture, native_input, timeout, guard):
                 scene["image_size"],
                 guard,
             )
+            navigation_inputs += 1
             print(
                 f"navigation_click source={decision['click']} screen={screen_point}",
                 flush=True,

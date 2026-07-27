@@ -503,6 +503,22 @@ class RunnerInspectionTests(unittest.TestCase):
         self.assertEqual(result["sceneLabel"], "可领取帮派分红")
         self.assertEqual(result["proposedAction"], "领取当前可用的帮派分红")
 
+    def test_parser_allows_sanjie_activity_list_scroll(self):
+        output = (
+            'preflight_json={"image_size":[1020,718],'
+            '"decision":{"status":"scroll_daily",'
+            '"reason":"target_action_not_visible"},'
+            '"texts":[{"text":"三界奇缘"}],"templates":{}}'
+        )
+
+        result = self.manager._parse_inspection(
+            "sanjieqiyuan", {"navigation": "auto"}, output
+        )
+
+        self.assertTrue(result["canStart"])
+        self.assertEqual(result["sceneLabel"], "日常活动列表")
+        self.assertEqual(result["proposedAction"], "向下浏览活动列表")
+
     def test_parser_rejects_invalid_protocol_schema(self):
         invalid_payloads = [
             "[]",

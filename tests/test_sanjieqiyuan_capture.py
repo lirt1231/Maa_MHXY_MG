@@ -12,7 +12,9 @@ from tools.run_sanjieqiyuan_macos import (
     NativeMacOSInput,
     WindowCapture,
     advance_question_count,
+    classify_scene,
     main,
+    navigate_to_exam,
     verify_answering_completion,
 )
 from custom.recognition.reco_sjqy import sjqy_rois
@@ -165,6 +167,133 @@ class SanjieRoiTests(unittest.TestCase):
 
         self.assertEqual(answer, '["白姑娘"]')
         self.assertEqual(confidence, 100)
+
+
+class SanjieNavigationTests(unittest.TestCase):
+    image_size = [1020, 718]
+
+    @staticmethod
+    def item(text, x, y, width=90, height=24):
+        return {"text": text, "box": [x, y, width, height]}
+
+    def activity_scene(self, *items):
+        return {
+            "image_size": self.image_size,
+            "battle": False,
+            "battle_box": None,
+            "activity_box": None,
+            "texts": [
+                self.item("活动", 480, 35, 60),
+                self.item("日常活动", 90, 95, 100),
+                *items,
+            ],
+        }
+
+    def test_does_not_pair_sanjie_with_other_column_join_button(self):
+        scene = self.activity_scene(
+            self.item("参加", 500, 315, 70),
+            self.item("三界奇缘", 650, 260, 100),
+        )
+
+        decision = classify_scene(scene)
+
+        self.assertEqual(decision["status"], "scroll_daily")
+        self.assertEqual(decision["reason"], "target_action_not_visible")
+
+    def test_clicks_join_only_when_it_is_in_the_sanjie_card(self):
+        scene = self.activity_scene(
+            self.item("三界奇缘", 650, 260, 100),
+            self.item("参加", 805, 315, 70),
+        )
+
+        decision = classify_scene(scene)
+
+        self.assertEqual(decision["status"], "click_join")
+        self.assertEqual(decision["click"], [840, 327])
+
+    @patch("tools.run_sanjieqiyuan_macos.perform_click")
+    @patch("tools.run_sanjieqiyuan_macos.read_scene")
+    def test_scrolls_after_selecting_daily_tab(self, read_scene, perform_click):
+        read_scene.side_effect = [
+            {
+                "image_size": self.image_size,
+                "decision": {"status": "click_daily", "click": [140, 105]},
+            },
+            {
+                "image_size": self.image_size,
+                "decision": {
+                    "status": "scroll_daily",
+                    "reason": "target_action_not_visible",
+                },
+            },
+            {"image_size": self.image_size, "decision": {"status": "answering"}},
+        ]
+        perform_click.return_value = (140, 105)
+        native_input = Mock()
+        guard = Mock()
+        guard.perform_input.side_effect = lambda function, *args: function(*args)
+
+        status = navigate_to_exam(
+            Mock(), Mock(), Mock(), native_input, timeout=30, guard=guard
+        )
+
+        self.assertEqual(status, "answering")
+        native_input.drag.assert_called_once_with(
+            (632, 445), (632, 194), self.image_size
+        )
+
+    @patch("tools.run_sanjieqiyuan_macos.perform_click")
+    @patch("tools.run_sanjieqiyuan_macos.read_scene")
+    def test_direct_scroll_keeps_daily_list_selected(self, read_scene, perform_click):
+        read_scene.side_effect = [
+            {
+                "image_size": self.image_size,
+                "decision": {
+                    "status": "scroll_daily",
+                    "reason": "target_action_not_visible",
+                },
+            },
+            {
+                "image_size": self.image_size,
+                "decision": {"status": "click_daily", "click": [140, 105]},
+            },
+            {"image_size": self.image_size, "decision": {"status": "answering"}},
+        ]
+        native_input = Mock()
+        guard = Mock()
+        guard.perform_input.side_effect = lambda function, *args: function(*args)
+
+        status = navigate_to_exam(
+            Mock(), Mock(), Mock(), native_input, timeout=30, guard=guard
+        )
+
+        self.assertEqual(status, "answering")
+        self.assertEqual(native_input.drag.call_count, 2)
+        perform_click.assert_not_called()
+
+    @patch("tools.run_sanjieqiyuan_macos.perform_click")
+    @patch("tools.run_sanjieqiyuan_macos.read_scene")
+    def test_stops_repeating_navigation_cycle(self, read_scene, perform_click):
+        activity = {
+            "image_size": self.image_size,
+            "decision": {"status": "click_activity", "click": [280, 58]},
+        }
+        wrong_join = {
+            "image_size": self.image_size,
+            "decision": {"status": "click_join", "click": [534, 374]},
+        }
+        read_scene.side_effect = [
+            activity, wrong_join, activity, wrong_join, activity
+        ]
+        perform_click.return_value = (0, 0)
+        guard = Mock()
+
+        with self.assertRaisesRegex(RuntimeError, "重复导航动作.*死循环"):
+            navigate_to_exam(
+                Mock(), Mock(), Mock(), Mock(), timeout=30, guard=guard
+            )
+
+        self.assertEqual(perform_click.call_count, 4)
 
 
 class SanjieCompletionTests(unittest.TestCase):
