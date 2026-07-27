@@ -211,6 +211,31 @@ class SanjieNavigationTests(unittest.TestCase):
         self.assertEqual(decision["status"], "click_join")
         self.assertEqual(decision["click"], [840, 327])
 
+    def test_rejects_festival_activity_text_as_toolbar_entry(self):
+        scene = {
+            "image_size": self.image_size,
+            "battle": False,
+            "battle_box": None,
+            "activity_box": None,
+            "texts": [self.item("活动", 80, 120, 70)],
+        }
+
+        self.assertEqual(classify_scene(scene)["status"], "unknown")
+
+    def test_accepts_activity_text_in_top_toolbar(self):
+        scene = {
+            "image_size": self.image_size,
+            "battle": False,
+            "battle_box": None,
+            "activity_box": None,
+            "texts": [self.item("活动", 245, 45, 70)],
+        }
+
+        decision = classify_scene(scene)
+
+        self.assertEqual(decision["status"], "click_activity")
+        self.assertEqual(decision["click"], [280, 57])
+
     @patch("tools.run_sanjieqiyuan_macos.perform_click")
     @patch("tools.run_sanjieqiyuan_macos.read_scene")
     def test_scrolls_after_selecting_daily_tab(self, read_scene, perform_click):

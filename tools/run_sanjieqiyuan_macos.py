@@ -268,7 +268,10 @@ def classify_scene(scene):
     activity_buttons = [
         item
         for item in matching(r"^活动$")
-        if item["box"][1] < height * 0.35
+        if (
+            width * 0.20 <= _center(item)[0] <= width * 0.45
+            and _center(item)[1] <= height * 0.18
+        )
     ]
     battle_cancel = [
         item
