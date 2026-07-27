@@ -169,6 +169,27 @@ test("normalizes incomplete tasks and distinguishes partial snapshots", () => {
   expect(screen.getByText("最新尝试待确认，不可用于任务编排")).toBeTruthy();
 });
 
+test("does not expand legacy partial task rows without v2 evidence", () => {
+  const legacyPartial = {
+    ...gameData.items[0],
+    schemaVersion: 1,
+    status: "partial" as const,
+    data: { tasks: [{ name: "世界聊天误识别" }] },
+  };
+  render(<DataPanel {...panelProps} gameData={{
+    targetId: "local-primary",
+    items: [legacyPartial],
+    latestByCategory: { daily_tasks: legacyPartial },
+    latestAttemptByCategory: { daily_tasks: legacyPartial },
+    latestUsableByCategory: { daily_tasks: null },
+  }} />);
+  fireEvent.click(screen.getByRole("tab", { name: "今日任务" }));
+
+  expect(screen.getByText("部分识别")).toBeTruthy();
+  expect(screen.queryByText("世界聊天误识别")).toBeNull();
+  expect(screen.queryByText("最新尝试待确认，不可用于任务编排")).toBeNull();
+});
+
 test("keeps the latest usable resources after a failed attempt", () => {
   const failedResource = {
     ...gameSnapshotMeta,

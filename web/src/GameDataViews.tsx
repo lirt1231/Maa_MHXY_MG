@@ -132,7 +132,9 @@ export function DailyTasksView({
   onCapture: () => void;
 }) {
   const tasks = readDailyTasks(snapshot);
-  const pendingTasks = latestAttempt?.status === "partial" ? readDailyTasks(latestAttempt) : [];
+  const pendingTasks = latestAttempt?.status === "partial" && latestAttempt.schemaVersion >= 2
+    ? readDailyTasks(latestAttempt)
+    : [];
   return <section className="raw-data-section" role="tabpanel" id="data-panel-daily" aria-labelledby="data-tab-daily">
     <div className="panel-heading">
       <div><span className="eyebrow">DAILY TASKS</span><h2>今日任务</h2></div>
