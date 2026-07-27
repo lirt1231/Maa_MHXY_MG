@@ -46,6 +46,13 @@ def classify_clan_sign_in_scene(
             "status": "completed" if phase == "verify" else "already_completed"
         }
 
+    dividend = find_text(texts, r"^领取分红$")
+    dividend_valid = dividend and box_in_region(
+        dividend["box"], image_size, min_x=0.5, min_y=0.72
+    )
+    if dividend_valid and header_valid and phase == "verify":
+        return {"status": "completed"}
+
     sign_in = find_text(texts, r"^签到$")
     sign_in_valid = sign_in and box_in_region(
         sign_in["box"], image_size, min_x=0.5, min_y=0.4, max_y=0.85

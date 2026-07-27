@@ -82,6 +82,33 @@ class ClanSignInSceneTests(unittest.TestCase):
             "unknown",
         )
 
+    def test_dividend_is_completion_evidence_only_after_sign_in(self):
+        texts = [text("领取分红", (700, 610, 180, 50))]
+        templates = {"clan_header": (350, 0, 320, 70)}
+        image_size = (1020, 718)
+
+        self.assertEqual(
+            classify_clan_sign_in_scene(
+                texts, templates, "welfare", image_size
+            )["status"],
+            "clan_idle",
+        )
+        self.assertEqual(
+            classify_clan_sign_in_scene(
+                texts, templates, "verify", image_size
+            )["status"],
+            "completed",
+        )
+        self.assertEqual(
+            classify_clan_sign_in_scene(
+                [text("领取分红", (20, 30, 180, 50))],
+                templates,
+                "verify",
+                image_size,
+            )["status"],
+            "clan_idle",
+        )
+
     def test_completion_requires_welfare_context(self):
         self.assertEqual(
             classify_clan_sign_in_scene([text("今日已签到")], {}, "enter")["status"],
@@ -219,6 +246,37 @@ class ClanSignInRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "点击后仍未变化"):
             run(args, guard)
         self.assertEqual(runtime.click_box.call_count, 2)
+
+    @patch("tools.run_bangpai_qiandao_macos.MacOSTaskRuntime")
+    def test_dividend_after_sign_in_completes_without_claiming_it(self, runtime_class):
+        runtime = runtime_class.return_value
+        runtime.read_scene.side_effect = [
+            scene(
+                [text("签到", (700, 460, 150, 50))],
+                {"clan_header": (350, 0, 320, 70)},
+            ),
+            scene(
+                [text("领取分红", (700, 610, 180, 50))],
+                {"clan_header": (350, 0, 320, 70)},
+            ),
+        ]
+        args = SimpleNamespace(inspect_scene=False, recognize_only=False, max_steps=3)
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            self.assertEqual(run(args, Mock()), 0)
+
+        runtime.click_box.assert_called_once()
+        self.assertEqual(runtime.click_box.call_args.args[0], [700, 460, 150, 50])
+        self.assertEqual(
+            protocol_payloads(output.getvalue(), "result_json="),
+            [{
+                "task_id": "bangpai_qiandao",
+                "status": "completed",
+                "actions": 1,
+                "clicks": 1,
+            }],
+        )
 
     @patch("tools.run_bangpai_qiandao_macos.MacOSTaskRuntime")
     def test_read_only_modes_emit_only_preflight_protocol(self, runtime_class):
