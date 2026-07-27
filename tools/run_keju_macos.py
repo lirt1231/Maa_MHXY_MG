@@ -37,6 +37,8 @@ EXAM_LABELS = {
     "xiangshi": "乡试",
     "huishi": "会试",
 }
+MAX_WAITING_POLLS = 180
+MAX_SAME_QUESTION_POLLS = 8
 
 
 def task_result(status: str, *, exam_type: str = "xiangshi", **payload) -> dict:
@@ -335,6 +337,8 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
     last_question = None
     step = 0
     answered = 0
+    waiting_polls = 0
+    same_question_polls = 0
     while not should_end_loop(answered, args.max_steps):
         step += 1
         guard.checkpoint()
@@ -359,9 +363,16 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
                 continue
             question_key = stable_question_key(question)
             if question_key == last_question:
+                same_question_polls += 1
+                if same_question_polls >= MAX_SAME_QUESTION_POLLS:
+                    raise RuntimeError(
+                        "同一道科举题连续未变化，已停止以避免重复识别或点击"
+                    )
                 print("same_question_waiting=true", flush=True)
                 guard.wait(min(args.delay, 1.0))
                 continue
+            same_question_polls = 0
+            waiting_polls = 0
             if args.recognize_only:
                 print(
                     "action_json="
@@ -409,6 +420,9 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
         if status == "no_question":
             raise RuntimeError("科举页面未识别到题目或明确完成状态，已保留页面")
         if status == "waiting":
+            waiting_polls += 1
+            if waiting_polls >= MAX_WAITING_POLLS:
+                raise RuntimeError("科举页面长时间未出现可答题目，已安全停止")
             print("waiting_for_formal_question=true", flush=True)
             guard.wait(min(args.delay, 1.0))
             continue

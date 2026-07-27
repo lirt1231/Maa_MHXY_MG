@@ -361,7 +361,7 @@ class RunnerManager:
             ]
             if options["answerSource"] == "codex":
                 command.append("--use-codex")
-            if options["waitForRoundOne"]:
+            if options.get("waitForRoundOne", False):
                 command.append("--wait-for-round-one")
             return command
         if task_id == "zhuogui":

@@ -46,7 +46,7 @@ class TaskRegistryTests(unittest.TestCase):
         )
         self.assertEqual(
             validate_options("keju", {}),
-            {"maxSteps": 20, "answerSource": "configured", "waitForRoundOne": True},
+            {"maxSteps": 20, "answerSource": "configured"},
         )
         self.assertEqual(
             validate_options("keju_huishi", {}),

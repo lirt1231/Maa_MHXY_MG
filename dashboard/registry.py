@@ -86,12 +86,6 @@ TASKS = {
                     {"value": "codex", "label": "本地题库 + Codex 复核"},
                 ],
             },
-            {
-                "key": "waitForRoundOne",
-                "label": "等待正式第 1 题",
-                "type": "boolean",
-                "default": True,
-            },
         ],
     },
     "keju_huishi": {

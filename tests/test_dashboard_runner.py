@@ -252,19 +252,25 @@ class RunnerTaskContractTests(unittest.TestCase):
         self.assertEqual(len(command), 2)
 
     def test_imperial_exam_commands_keep_exam_types_separate(self):
-        options = {
+        xiangshi_options = {
+            "maxSteps": 20,
+            "answerSource": "configured",
+        }
+        huishi_options = {
             "maxSteps": 20,
             "answerSource": "configured",
             "waitForRoundOne": True,
         }
 
-        xiangshi = self.manager._command("keju", options)
-        huishi = self.manager._command("keju_huishi", options)
+        xiangshi = self.manager._command("keju", xiangshi_options)
+        huishi = self.manager._command("keju_huishi", huishi_options)
 
         self.assertIn("xiangshi", xiangshi)
         self.assertNotIn("huishi", xiangshi)
         self.assertIn("huishi", huishi)
         self.assertNotIn("xiangshi", huishi)
+        self.assertNotIn("--wait-for-round-one", xiangshi)
+        self.assertIn("--wait-for-round-one", huishi)
 
     def test_welfare_progress_and_failure_copy_are_specific(self):
         payload = self.manager._progress_payload(
