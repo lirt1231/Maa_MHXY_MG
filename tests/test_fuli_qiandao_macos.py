@@ -7,7 +7,10 @@ from unittest.mock import Mock, patch
 
 from tools.fuli_qiandao_macos_core import (
     classify_welfare_scene,
+    completed_scratch_page,
+    scratch_box_from_ocr,
     scratch_gestures,
+    welfare_entry_box,
 )
 import tools.run_fuli_qiandao_macos as welfare_runner
 from tools.run_fuli_qiandao_macos import run
@@ -37,7 +40,14 @@ def protocol_payloads(output, prefix):
 class WelfareSceneClassificationTests(unittest.TestCase):
     def test_main_screen_opens_only_recognized_welfare_entry(self):
         decision = classify_welfare_scene([text(" 福 利 ")], {}, "enter")
-        self.assertEqual(decision, {"status": "open_welfare", "box": [10, 20, 80, 30]})
+        self.assertEqual(decision, {"status": "open_welfare", "box": [10, 0, 80, 60]})
+
+    def test_welfare_entry_targets_icon_above_ocr_label(self):
+        label = [12, 128, 39, 21]
+        icon = welfare_entry_box(label, (1020, 718))
+
+        self.assertEqual(icon, [12, 86, 39, 42])
+        self.assertLess(icon[1] + icon[3] // 2, label[1])
 
     def test_welfare_page_opens_recognized_scratch_card(self):
         decision = classify_welfare_scene(
@@ -54,6 +64,87 @@ class WelfareSceneClassificationTests(unittest.TestCase):
             "scratch",
         )
         self.assertEqual(decision, {"status": "scratch_ready", "box": scratch_box})
+
+    def test_complete_scratch_page_context_derives_safe_boundary(self):
+        texts = [
+            text("梦幻刮刮乐", (464, 97, 123, 25)),
+            text("今日奖品", (605, 160, 127, 39)),
+            text("滑动刮奖", (578, 398, 189, 33)),
+            text("当前累计：2/7次", (450, 590, 141, 22)),
+        ]
+
+        decision = classify_welfare_scene(texts, {}, "scratch", (1020, 718))
+
+        self.assertEqual(
+            decision,
+            {"status": "scratch_ready", "box": [518, 348, 309, 118]},
+        )
+        for start, end in scratch_gestures(decision["box"]):
+            for x, y in (start, end):
+                self.assertGreaterEqual(x, 518)
+                self.assertLessEqual(x, 827)
+                self.assertGreaterEqual(y, 348)
+                self.assertLessEqual(y, 466)
+
+    def test_ocr_boundary_requires_all_scratch_page_evidence(self):
+        required = [
+            text("梦幻刮刮乐", (464, 97, 123, 25)),
+            text("今日奖品", (605, 160, 127, 39)),
+            text("滑动刮奖", (578, 398, 189, 33)),
+            text("当前累计：2/7次", (450, 590, 141, 22)),
+        ]
+        for missing_index in range(len(required)):
+            with self.subTest(missing=required[missing_index]["text"]):
+                texts = required[:missing_index] + required[missing_index + 1 :]
+                self.assertIsNone(scratch_box_from_ocr(texts, (1020, 718)))
+
+    def test_ocr_boundary_rejects_out_of_region_prompt(self):
+        texts = [
+            text("梦幻刮刮乐", (464, 97, 123, 25)),
+            text("今日奖品", (605, 160, 127, 39)),
+            text("滑动刮奖", (50, 50, 189, 33)),
+            text("当前累计：2/7次", (450, 590, 141, 22)),
+        ]
+
+        self.assertIsNone(scratch_box_from_ocr(texts, (1020, 718)))
+
+    def test_post_scratch_page_is_a_terminal_state(self):
+        texts = [
+            text("梦幻刮刮乐", (463, 94, 158, 29)),
+            text("今日奖品", (605, 160, 127, 39)),
+            text("刮奖满一定次数可", (450, 531, 145, 18)),
+            text("获得累计奖励", (449, 547, 112, 22)),
+            text("当前累计：3/7次", (450, 590, 141, 22)),
+        ]
+
+        self.assertTrue(completed_scratch_page(texts, (1020, 718)))
+        self.assertEqual(
+            classify_welfare_scene(texts, {}, "verify", (1020, 718))["status"],
+            "completed",
+        )
+        self.assertEqual(
+            classify_welfare_scene(texts, {}, "enter", (1020, 718))["status"],
+            "already_completed",
+        )
+
+    def test_post_scratch_state_requires_full_context_and_absent_prompt(self):
+        texts = [
+            text("梦幻刮刮乐", (463, 94, 158, 29)),
+            text("今日奖品", (605, 160, 127, 39)),
+            text("刮奖满一定次数可", (450, 531, 145, 18)),
+            text("获得累计奖励", (449, 547, 112, 22)),
+            text("当前累计：3/7次", (450, 590, 141, 22)),
+        ]
+        for missing_index in range(len(texts)):
+            with self.subTest(missing=texts[missing_index]["text"]):
+                incomplete = texts[:missing_index] + texts[missing_index + 1 :]
+                self.assertFalse(completed_scratch_page(incomplete, (1020, 718)))
+        self.assertFalse(
+            completed_scratch_page(
+                texts + [text("滑动刮奖", (578, 398, 189, 33))],
+                (1020, 718),
+            )
+        )
 
     def test_confirmation_is_limited_to_scratch_or_verify_phase(self):
         self.assertEqual(
@@ -164,7 +255,7 @@ class WelfareRunnerTests(unittest.TestCase):
             self.assertEqual(run(args, guard), 0)
 
         self.assertEqual(runtime.click_box.call_count, 3)
-        self.assertEqual(runtime.click_box.call_args_list[0].args[0], [5, 110, 60, 50])
+        self.assertEqual(runtime.click_box.call_args_list[0].args[0], [5, 10, 60, 100])
         self.assertEqual(runtime.click_box.call_args_list[1].args[0], [820, 590, 160, 50])
         self.assertEqual(runtime.click_box.call_args_list[2].args[0], [470, 520, 80, 40])
         self.assertEqual(runtime.drag.call_count, 5)
