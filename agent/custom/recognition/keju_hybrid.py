@@ -49,7 +49,8 @@ OPTION_ROIS = {
 MAC_REFERENCE_SIZE = (923, 720)
 EXAM_TITLE_ROI = [528, 65, 244, 67]
 MAC_EXAM_TITLE_ROI = [350, 120, 230, 80]
-MAC_QUESTION_ROI = [335, 225, 470, 85]
+MAC_EXAM_TITLE_FALLBACK_ROI = [270, 80, 380, 140]
+MAC_QUESTION_ROI = [335, 190, 470, 120]
 MAC_OPTION_ROIS = {
     "A": [340, 315, 225, 80],
     "B": [570, 315, 230, 80],
@@ -130,15 +131,23 @@ def keju_rois(image):
     )
 
 
-def keju_exam_title_roi(image):
+def keju_exam_title_rois(image):
     image_height, image_width = image.shape[:2]
     if image_width / image_height < 1.5:
         reference_size = MAC_REFERENCE_SIZE
-        roi = MAC_EXAM_TITLE_ROI
+        rois = [MAC_EXAM_TITLE_ROI, MAC_EXAM_TITLE_FALLBACK_ROI]
     else:
         reference_size = (1280, 720)
-        roi = EXAM_TITLE_ROI
-    return scale_roi(roi, image_width, image_height, reference_size)
+        rois = [EXAM_TITLE_ROI]
+    return [
+        scale_roi(roi, image_width, image_height, reference_size)
+        for roi in rois
+    ]
+
+
+def keju_exam_title_roi(image):
+    """Retain the primary ROI API for older callers and tests."""
+    return keju_exam_title_rois(image)[0]
 
 
 def _exam_type_from_title(text):
@@ -328,14 +337,18 @@ class KejuHybridAnswer(CustomRecognition):
         with timings.track("screenshot"):
             image = _recognition_image(context, argv)
         expected_exam_type = os.environ.get("MAA_KEJU_EXAM_TYPE", "xiangshi")
-        with timings.track("ocr"):
-            title = _ocr_region(
-                context,
-                image,
-                "科举考试类型-混合",
-                keju_exam_title_roi(image),
-            )
-        observed_exam_type = _exam_type_from_title(title)
+        observed_exam_type = None
+        for title_roi in keju_exam_title_rois(image):
+            with timings.track("ocr"):
+                title = _ocr_region(
+                    context,
+                    image,
+                    "科举考试类型-混合",
+                    title_roi,
+                )
+            observed_exam_type = _exam_type_from_title(title)
+            if observed_exam_type is not None:
+                break
         self.last_exam_type = observed_exam_type
         if observed_exam_type is None:
             self.last_status = "unverified_exam_type"
@@ -360,14 +373,11 @@ class KejuHybridAnswer(CustomRecognition):
         # 倒计时/活动说明页的装饰文字会落入同一 ROI。只有明确识别到
         # “第 N/M 题”时才允许查库或调用模型，避免等待阶段浪费请求，
         # 更重要的是杜绝把倒计时数字误当成选项后点击。
-        round_match = re.match(r"^第\s*(\d+)\s*/\s*\d+\s*题", question)
-        if not round_match:
-            self.last_status = "waiting"
-            self.last_question = question
-            return CustomRecognition.AnalyzeResult(
-                box=(0, 0, 0, 0), detail="科举尚未出现正式题目"
-            )
-        round_number = int(round_match.group(1))
+        round_match = re.search(r"第\s*(\d+)\s*/\s*\d+\s*题", question)
+        if round_match and round_match.start() > 0:
+            question = question[round_match.start():]
+            round_match = re.match(r"第\s*(\d+)\s*/\s*\d+\s*题", question)
+        round_number = int(round_match.group(1)) if round_match else None
         record_only_waiting = (
             os.environ.get("MAA_KEJU_REQUIRE_ROUND_ONE") == "1"
             and round_number != 1
@@ -384,6 +394,13 @@ class KejuHybridAnswer(CustomRecognition):
                 option_boxes[choice] = box
         valid_options = {choice: text for choice, text in options.items() if text}
         if len(valid_options) < 2:
+            if round_number is None:
+                self.last_status = "waiting"
+                self.last_question = question
+                self.last_options = valid_options
+                return CustomRecognition.AnalyzeResult(
+                    box=(0, 0, 0, 0), detail="科举尚未出现完整正式题目"
+                )
             if record_only_waiting:
                 _record_waiting_capture(
                     self,
@@ -432,8 +449,13 @@ class KejuHybridAnswer(CustomRecognition):
 
         # 一道题在提交后仍可能保留数秒活动态。去重必须发生在查库和
         # 模型请求之前，否则虽然外层不会重复点击，仍会浪费一次模型调用。
+        cache_key = round_number
+        if cache_key is None:
+            cache_key = "question:" + re.sub(
+                r"剩余时间\s*\d*|\s+", "", question
+            )
         round_answer_cache = getattr(self, "_round_answer_cache", {})
-        cached_decision = round_answer_cache.get(round_number)
+        cached_decision = round_answer_cache.get(cache_key)
         if cached_decision:
             cached_answer, cached_source = cached_decision
             if cached_answer in valid_options:
@@ -448,7 +470,7 @@ class KejuHybridAnswer(CustomRecognition):
                 self.last_click = (center_x, center_y)
                 self.last_image_size = (image.shape[1], image.shape[0])
                 logger.info(
-                    f"科举同轮复用：round={round_number}, answer={cached_answer}, "
+                    f"科举同题复用：key={cache_key}, answer={cached_answer}, "
                     f"source={cached_source}"
                 )
                 return CustomRecognition.AnalyzeResult(
@@ -613,7 +635,7 @@ class KejuHybridAnswer(CustomRecognition):
             self.last_status = "clicked"
 
         round_answer_cache = getattr(self, "_round_answer_cache", {})
-        round_answer_cache[round_number] = (final_answer, source)
+        round_answer_cache[cache_key] = (final_answer, source)
         self._round_answer_cache = round_answer_cache
 
         candidate_log = [

@@ -153,6 +153,74 @@ class HybridAnswerTests(unittest.TestCase):
         self.assertLessEqual(question_bottom, keju_hybrid.MAC_OPTION_ROIS["A"][1])
         self.assertGreaterEqual(keju_hybrid.MAC_QUESTION_ROI[3], 80)
 
+    def test_title_uses_expanded_fallback_before_rejecting_exam_type(self):
+        recognizer = object.__new__(keju_hybrid.KejuHybridAnswer)
+        image = np.ones((720, 923, 3), dtype=np.uint8)
+
+        with (
+            patch.dict("os.environ", {"MAA_KEJU_EXAM_TYPE": "xiangshi"}),
+            patch.object(
+                keju_hybrid,
+                "_ocr_region",
+                side_effect=["", "科举乡试", ""],
+            ),
+        ):
+            recognizer._analyze(
+                SimpleNamespace(),
+                SimpleNamespace(image=image),
+                keju_hybrid._StageTimings(),
+            )
+
+        self.assertEqual(recognizer.last_exam_type, "xiangshi")
+        self.assertEqual(recognizer.last_status, "no_question")
+
+    def test_formal_question_without_round_prefix_can_be_answered(self):
+        recognizer = object.__new__(keju_hybrid.KejuHybridAnswer)
+        image = np.ones((720, 923, 3), dtype=np.uint8)
+        context = SimpleNamespace(get_node_data=lambda _name: {"attach": {}})
+        option_results = iter([
+            ("A.泥鳅", [340, 315, 225, 80]),
+            ("B.鲤鱼", [570, 315, 230, 80]),
+            ("C.河豚", [340, 395, 225, 75]),
+            ("D.鲶鱼", [570, 395, 230, 75]),
+        ])
+        candidates = [{
+            "question": "身上滑腻腻喜欢钻河底张嘴吐泡泡可以测天气打一动物",
+            "answers": ["泥鳅"],
+            "similarity": 100,
+        }]
+
+        with (
+            patch.dict("os.environ", {
+                "MAA_KEJU_EXAM_TYPE": "xiangshi",
+                "MAA_KEJU_RECOGNIZE_ONLY": "1",
+            }),
+            patch.object(
+                keju_hybrid,
+                "_ocr_region",
+                side_effect=[
+                    "科举乡试",
+                    "身上滑腻腻喜欢钻河底张嘴吐泡泡可以测天气打一动物",
+                ],
+            ),
+            patch.object(
+                keju_hybrid,
+                "_ocr_region_with_box",
+                side_effect=lambda *_args: next(option_results),
+            ),
+            patch.object(keju_hybrid, "search_candidates", return_value=candidates),
+            patch.object(keju_hybrid, "search_knowledge", return_value=[]),
+        ):
+            recognizer._analyze(
+                context,
+                SimpleNamespace(image=image),
+                keju_hybrid._StageTimings(),
+            )
+
+        self.assertEqual(recognizer.last_status, "ready")
+        self.assertEqual(recognizer.last_answer, "A")
+        self.assertEqual(recognizer.last_options["A"], "泥鳅")
+
     def test_recognizer_prefers_explicit_argv_image(self):
         image = np.ones((20, 30, 3), dtype=np.uint8)
         context = SimpleNamespace(

@@ -149,6 +149,10 @@ class KejuMacOSRunnerStateTests(unittest.TestCase):
     def test_waiting_page_is_not_parsed_as_first_question(self):
         self.assertIsNone(parse_question_round("课堂复习 剩余时间 12"))
         self.assertEqual(parse_question_round("第 1 / 15 题剩余时间12题目"), (1, 15))
+        self.assertEqual(
+            parse_question_round("科举乡试 第 2 / 20 题剩余时间12题目"),
+            (2, 20),
+        )
 
     def test_same_round_has_a_stable_key_despite_timer_changes(self):
         first = "第1/15题剩余时间30我国古代信奉的火神是谁"

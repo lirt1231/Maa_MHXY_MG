@@ -122,7 +122,7 @@ def read_keychain_password(service, account):
 
 def stable_question_key(question: str) -> str:
     """Remove the live round/timer prefix so one question is clicked only once."""
-    round_match = re.match(r"^第\s*(\d+)\s*/\s*\d+\s*题", question or "")
+    round_match = re.search(r"第\s*(\d+)\s*/\s*\d+\s*题", question or "")
     if round_match:
         return f"round:{round_match.group(1)}"
     text = re.sub(r"^第\s*\d+\s*/\s*\d+\s*题", "", question or "")
@@ -132,7 +132,7 @@ def stable_question_key(question: str) -> str:
 
 def parse_question_round(question: str) -> tuple[int, int] | None:
     """Return the current and total question numbers for a formal round."""
-    match = re.match(r"^第\s*(\d+)\s*/\s*(\d+)\s*题", question or "")
+    match = re.search(r"第\s*(\d+)\s*/\s*(\d+)\s*题", question or "")
     if not match:
         return None
     return int(match.group(1)), int(match.group(2))
@@ -357,10 +357,6 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
         if status == "ready":
             question = recognizer.last_question
             question_round = parse_question_round(question)
-            if question_round is None:
-                print("non_question_page_waiting=true", flush=True)
-                guard.wait(min(args.delay, 1.0))
-                continue
             question_key = stable_question_key(question)
             if question_key == last_question:
                 same_question_polls += 1
@@ -401,19 +397,20 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
             answered += 1
             progress["answers"] = answered
             progress["clicks"] = answered
-            if question_round[0] == 1:
+            if question_round and question_round[0] == 1:
                 os.environ.pop("MAA_KEJU_REQUIRE_ROUND_ONE", None)
             if should_end_loop(answered, args.max_steps, question_round):
-                if question_round[0] < question_round[1]:
+                if question_round and question_round[0] < question_round[1]:
                     break
-                print("final_question_answered=true", flush=True)
-                return task_result(
-                    "completed",
-                    exam_type=args.exam_type,
-                    answers=answered,
-                    clicks=answered,
-                    limit=args.max_steps,
-                )
+                if question_round:
+                    print("final_question_answered=true", flush=True)
+                    return task_result(
+                        "completed",
+                        exam_type=args.exam_type,
+                        answers=answered,
+                        clicks=answered,
+                        limit=args.max_steps,
+                    )
             guard.wait(args.delay)
             continue
 
