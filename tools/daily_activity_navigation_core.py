@@ -119,6 +119,44 @@ def classify_daily_navigation(
     if activity_buttons:
         return {"status": "open_activity", "box": valid_box(activity_buttons[0])}
 
+    guide_buttons = find_items(
+        texts,
+        r"指引",
+        image_size,
+        {"min_x": 0.14, "max_x": 0.3, "max_y": 0.16},
+    )
+    ranking_buttons = find_items(
+        texts,
+        r"排行(?:榜)?",
+        image_size,
+        {"min_x": 0.25, "max_x": 0.43, "max_y": 0.16},
+    )
+    if guide_buttons and ranking_buttons:
+        guide_center = center(guide_buttons[0])
+        ranking_center = center(ranking_buttons[0])
+        image_width, image_height = image_size
+        if (
+            guide_center[0] < ranking_center[0]
+            and ranking_center[0] - guide_center[0] <= image_width * 0.18
+            and abs(ranking_center[1] - guide_center[1]) <= image_height * 0.04
+        ):
+            activity_center = [
+                round((guide_center[0] + ranking_center[0]) / 2),
+                round((guide_center[1] + ranking_center[1]) / 2),
+            ]
+            width = max(32, round(image_width * 0.05))
+            height = max(24, round(image_height * 0.045))
+            return {
+                "status": "open_activity",
+                "box": [
+                    activity_center[0] - width // 2,
+                    activity_center[1] - height // 2,
+                    width,
+                    height,
+                ],
+                "reason": "guide_ranking_anchors",
+            }
+
     activity_template = templates.get("activity_toolbar")
     if activity_template:
         item = {"box": activity_template}

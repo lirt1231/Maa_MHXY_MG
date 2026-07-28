@@ -22,6 +22,21 @@ def scene(texts=None, templates=None):
 
 
 class YunbiaoSceneTests(unittest.TestCase):
+    def test_main_toolbar_uses_neighbor_anchors_when_activity_ocr_is_missing(self):
+        decision = classify_yunbiao_scene(
+            [
+                text("指引", (199, 48, 34, 20)),
+                text("排行", (323, 49, 37, 19)),
+                text("泊活动", (83, 127, 54, 19)),
+            ],
+            {},
+            (1020, 718),
+            "enter",
+        )
+        self.assertEqual(decision["status"], "open_activity")
+        self.assertEqual(decision["reason"], "guide_ranking_anchors")
+        self.assertEqual(decision["box"], [254, 42, 51, 32])
+
     def test_challenge_page_opens_daily_before_other_actions(self):
         daily_tab = text("日常活动", (130, 161, 88, 27))
         decision = classify_yunbiao_scene(
