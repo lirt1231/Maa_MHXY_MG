@@ -23,7 +23,7 @@ class TaskRegistryTests(unittest.TestCase):
             set(TASKS),
             {
                 "sanjieqiyuan", "keju", "keju_huishi", "zhuogui",
-                "fuli_qiandao", "bangpai_qiandao", "baotu",
+                "fuli_qiandao", "bangpai_qiandao", "baotu", "yunbiao",
             },
         )
         self.assertTrue(all(task["checklist"] for task in task_list()))
@@ -41,6 +41,9 @@ class TaskRegistryTests(unittest.TestCase):
         self.assertEqual(validate_options("fuli_qiandao", {}), {})
         self.assertEqual(validate_options("bangpai_qiandao", {}), {})
         self.assertEqual(validate_options("baotu", {}), {})
+        self.assertEqual(validate_options("yunbiao", {}), {"rounds": 3})
+        with self.assertRaisesRegex(ValueError, "1–3"):
+            validate_options("yunbiao", {"rounds": 4})
         self.assertEqual(
             validate_options("sanjieqiyuan", {}),
             {"maxSteps": 10, "navigation": "auto"},

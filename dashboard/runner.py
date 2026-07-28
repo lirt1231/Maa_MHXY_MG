@@ -91,6 +91,16 @@ TASK_RESULT_SCHEMAS = {
             "already_completed": {"actions", "clicks"},
         },
     },
+    "yunbiao": {
+        "statuses": {"completed", "already_completed", "safe_stopped", "cancelled"},
+        "fields": {
+            "task_id", "status", "reason", "rounds", "target_rounds", "actions", "clicks",
+        },
+        "required": {
+            status: {"rounds", "target_rounds", "actions", "clicks"}
+            for status in {"completed", "already_completed"}
+        },
+    },
 }
 
 SCENE_LABELS = {
@@ -120,6 +130,11 @@ SCENE_LABELS = {
     "join_task": "宝图任务卡片",
     "accept_dialogue": "宝图任务领取对话",
     "continue_task": "宝图任务栏",
+    "select_normal": "普通镖领取对话",
+    "confirm_normal": "普通镖确认页",
+    "delivery_active": "普通运镖进行中",
+    "blocked_resource": "普通运镖条件不足",
+    "unsupported_delivery": "非普通镖选项",
 }
 
 ACTION_LABELS = {
@@ -165,6 +180,9 @@ ACTION_LABELS = {
     "join_task": "点击同一卡片内的宝图任务参加按钮",
     "accept_dialogue": "选择经过识别的“听听无妨”",
     "continue_task": "点击经过识别的宝图任务栏",
+    "select_normal": "选择经过识别的“押送普通镖银”",
+    "confirm_normal": "确认押送普通镖银",
+    "delivery_active": "等待本轮普通运镖结束",
 }
 
 
@@ -390,6 +408,13 @@ class RunnerManager:
             return [sys.executable, str(ROOT / "tools/run_bangpai_qiandao_macos.py")]
         if task_id == "baotu":
             return [sys.executable, str(ROOT / "tools/run_baotu_macos.py")]
+        if task_id == "yunbiao":
+            return [
+                sys.executable,
+                str(ROOT / "tools/run_yunbiao_macos.py"),
+                "--rounds",
+                str(options["rounds"]),
+            ]
         raise ValueError("不支持的任务")
 
     def _inspection_command(self, task_id: str, options: dict) -> list[str]:
@@ -401,6 +426,7 @@ class RunnerManager:
             "fuli_qiandao": "run_fuli_qiandao_macos.py",
             "bangpai_qiandao": "run_bangpai_qiandao_macos.py",
             "baotu": "run_baotu_macos.py",
+            "yunbiao": "run_yunbiao_macos.py",
         }
         command = [sys.executable, str(ROOT / "tools" / scripts[task_id]), "--inspect-scene"]
         if task_id == "sanjieqiyuan":
@@ -412,6 +438,8 @@ class RunnerManager:
             ])
         elif task_id == "zhuogui":
             command.extend(["--rounds", "1"])
+        elif task_id == "yunbiao":
+            command.extend(["--rounds", str(options.get("rounds", 3))])
         return command
 
     @staticmethod
@@ -466,6 +494,12 @@ class RunnerManager:
             ready = scene in {
                 "open_activity", "open_daily", "scroll_daily", "join_task",
                 "accept_dialogue", "continue_task", "battle", "auto_pathing",
+            }
+        elif task_id == "yunbiao":
+            ready = scene in {
+                "open_activity", "open_daily", "scroll_daily", "join_task",
+                "select_normal", "confirm_normal", "continue_task",
+                "delivery_active", "battle", "auto_pathing",
             }
 
         action_key = proposed if proposed else scene
@@ -629,6 +663,7 @@ class RunnerManager:
                 "fuli_qiandao": "福利签到完成",
                 "bangpai_qiandao": "帮派签到与分红领取完成",
                 "baotu": "宝图任务完成",
+                "yunbiao": "普通运镖完成",
             }[task_id]
         return None
 
@@ -767,6 +802,10 @@ class RunnerManager:
             payload["stage"] = "正在识别并推进宝图任务"
         elif task_id == "baotu" and line.startswith(RESULT_PREFIX):
             payload["stage"] = RunnerManager._bounded_task_result_stage(line, "宝图任务")
+        elif task_id == "yunbiao" and '"event": "scene"' in line:
+            payload["stage"] = "正在识别并推进普通运镖"
+        elif task_id == "yunbiao" and line.startswith(RESULT_PREFIX):
+            payload["stage"] = RunnerManager._bounded_task_result_stage(line, "普通运镖")
         return payload
 
     @staticmethod
@@ -811,5 +850,6 @@ class RunnerManager:
             "fuli_qiandao": "福利签到未能继续，请保持主界面或福利页面完整可见后重试。",
             "bangpai_qiandao": "帮派签到未能继续，请确认角色已加入帮派并保持相关页面完整可见。",
             "baotu": "宝图任务未能继续，请保持主界面、日常活动页或宝图任务过程完整可见。",
+            "yunbiao": "普通运镖未能继续，请检查活力、镖种和当前任务页面。",
         }
         return f"{hints[task_id]}（进程代码 {return_code}）"
