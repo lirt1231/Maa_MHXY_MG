@@ -15,6 +15,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   system: () => request<SystemState>("/api/system"),
   tasks: () => request<{ items: Task[] }>("/api/tasks"),
+  setTaskTodayStatus: (taskId: string, status: "completed" | "pending") =>
+    request<{ taskId: string; todayStatus: Task["todayStatus"] }>(
+      `/api/tasks/${taskId}/today-status`, {
+        method: "PATCH", body: JSON.stringify({ status })
+      }
+    ),
   runs: () => request<{ items: Run[]; summary: RunSummary }>("/api/runs"),
   gameData: () => request<GameDataResponse>("/api/game-data"),
   captureDailyTasks: () => request<GameDataSnapshot>(

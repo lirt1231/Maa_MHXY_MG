@@ -11,6 +11,8 @@ type Props = {
   system?: SystemState; tasks: Task[]; runs: Run[]; summary: RunSummary; logs: LiveEvent[];
   busy: boolean; progress: string; startingGame: boolean;
   onStartGame: () => void; onStop: () => void; onSelectTask: (task: Task) => void;
+  updatingTaskStatus?: string;
+  onSetTodayStatus?: (taskId: string, status: "completed" | "pending") => void;
 };
 
 function taskActionLabel(system: SystemState | undefined, busy: boolean) {
@@ -55,7 +57,7 @@ function runDetail(run: Run) {
   return null;
 }
 
-export function TaskPanel({ system, tasks, runs, summary, logs, busy, progress, startingGame, onStartGame, onStop, onSelectTask }: Props) {
+export function TaskPanel({ system, tasks, runs, summary, logs, busy, progress, startingGame, onStartGame, onStop, onSelectTask, updatingTaskStatus, onSetTodayStatus = () => undefined }: Props) {
   const current = system?.run;
   const missingPermission = Boolean(system && (!system.screenCapturePermission || !system.accessibilityPermission));
   const completedToday = tasks.filter((task) => task.todayStatus?.status === "completed").length;
@@ -91,6 +93,18 @@ export function TaskPanel({ system, tasks, runs, summary, logs, busy, progress, 
           <div className="task-card-statuses">
             <span className={`task-today-status ${isCompleted ? "completed" : "pending"}`}>{todayLabel}</span>
             {isRunning && <span className="task-today-status running">进行中</span>}
+            <label className="task-completion-toggle" title="手动修改今日完成状态">
+              <input
+                type="checkbox"
+                checked={isCompleted}
+                disabled={updatingTaskStatus !== undefined}
+                aria-label={`手动修改${task.name}今日完成状态`}
+                onChange={(event) => onSetTodayStatus(
+                  task.id, event.target.checked ? "completed" : "pending"
+                )}
+              />
+              <span>{updatingTaskStatus === task.id ? "保存中" : "完成"}</span>
+            </label>
           </div>
           <span className="eyebrow">{task.eyebrow}</span><h3>{task.name}</h3><p>{task.summary}</p>
           <div className="task-meta"><span className={`risk-label ${task.risk.level}`}>{task.risk.label} · {task.risk.summary}</span><span>◈ {task.parameters.length} 项运行参数 · ◉ 含启动前检查</span></div>

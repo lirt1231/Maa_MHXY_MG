@@ -69,6 +69,13 @@ class Database:
                     FOREIGN KEY(run_id) REFERENCES task_runs(id)
                 );
                 CREATE INDEX IF NOT EXISTS idx_run_events_run ON run_events(run_id, id);
+                CREATE TABLE IF NOT EXISTS task_completion_overrides (
+                    game_date TEXT NOT NULL,
+                    task_id TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('completed', 'pending')),
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(game_date, task_id)
+                );
                 CREATE TABLE IF NOT EXISTS metric_snapshots (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     captured_at TEXT NOT NULL,
@@ -218,6 +225,12 @@ class Database:
                 ORDER BY completed_at DESC""",
                 (start_utc.isoformat(), end_utc.isoformat()),
             ).fetchall()
+            overrides = db.execute(
+                """SELECT task_id, status, updated_at
+                FROM task_completion_overrides
+                WHERE game_date=?""",
+                (local_date.isoformat(),),
+            ).fetchall()
 
         completions: dict[str, dict[str, str | None]] = {}
         for row in rows:
@@ -235,7 +248,43 @@ class Database:
                 "completedAt": row["completed_at"],
                 "resultStatus": result_status,
             }
+        for row in overrides:
+            is_completed = row["status"] == "completed"
+            completions[row["task_id"]] = {
+                "status": row["status"],
+                "completedAt": row["updated_at"] if is_completed else None,
+                "resultStatus": None,
+                "source": "manual",
+            }
         return completions
+
+    def set_task_completion_override(
+        self,
+        task_id: str,
+        status: str,
+        local_date: date | None = None,
+    ) -> dict[str, str | None]:
+        if not isinstance(task_id, str) or not task_id.strip():
+            raise ValueError("任务 ID 不能为空")
+        if status not in {"completed", "pending"}:
+            raise ValueError("任务完成状态必须是 completed 或 pending")
+        game_date = local_date or datetime.now().astimezone().date()
+        updated_at = utc_now()
+        with self.connect() as db:
+            db.execute(
+                """INSERT INTO task_completion_overrides(
+                game_date, task_id, status, updated_at
+                ) VALUES(?,?,?,?)
+                ON CONFLICT(game_date, task_id) DO UPDATE SET
+                status=excluded.status, updated_at=excluded.updated_at""",
+                (game_date.isoformat(), task_id, status, updated_at),
+            )
+        return {
+            "status": status,
+            "completedAt": updated_at if status == "completed" else None,
+            "resultStatus": None,
+            "source": "manual",
+        }
 
     def events_after(self, event_id: int, limit: int = 300) -> list[dict]:
         with self.connect() as db:

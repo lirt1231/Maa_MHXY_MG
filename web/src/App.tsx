@@ -35,6 +35,7 @@ export function App() {
   const [capturingDailyTasks, setCapturingDailyTasks] = useState(false);
   const [correcting, setCorrecting] = useState(false);
   const [startingGame, setStartingGame] = useState(false);
+  const [updatingTaskStatus, setUpdatingTaskStatus] = useState<string>();
   const [dailyDismissed, setDailyDismissed] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -160,6 +161,22 @@ export function App() {
     finally { setStartingGame(false); }
   }
 
+  async function setTaskTodayStatus(taskId: string, status: "completed" | "pending") {
+    setUpdatingTaskStatus(taskId); setMessage("");
+    const taskName = tasks.find((task) => task.id === taskId)?.name || "任务";
+    try {
+      const result = await api.setTaskTodayStatus(taskId, status);
+      setTasks((currentTasks) => currentTasks.map((task) =>
+        task.id === taskId ? { ...task, todayStatus: result.todayStatus } : task
+      ));
+      setMessage(`${taskName}已手动标记为${status === "completed" ? "今日已完成" : "今日未完成"}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "修改任务状态失败");
+    } finally {
+      setUpdatingTaskStatus(undefined);
+    }
+  }
+
   const showReminder = Boolean(system && !system.metricCollectedToday && !dailyDismissed);
 
   return <main>
@@ -185,6 +202,7 @@ export function App() {
       {panel === "tasks" ? <TaskPanel
         system={system} tasks={tasks} runs={runs} summary={summary} logs={logs} busy={busy} progress={progress}
         startingGame={startingGame} onStartGame={startGame} onStop={stopTask} onSelectTask={setSelected}
+        updatingTaskStatus={updatingTaskStatus} onSetTodayStatus={setTaskTodayStatus}
       /> : <DataPanel
         system={system} metrics={metrics} gameData={gameData} metricKind={metricKind} rangeDays={metricRangeDays}
         busy={busy} capturing={capturing} capturingDailyTasks={capturingDailyTasks}

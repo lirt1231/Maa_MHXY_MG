@@ -24,6 +24,7 @@ export type Task = {
     status: "completed" | "pending";
     completedAt: string | null;
     resultStatus: "completed" | "already_completed" | null;
+    source?: "manual";
   };
 };
 

@@ -38,6 +38,10 @@ class InspectionRequest(BaseModel):
     options: dict[str, Any] = Field(default_factory=dict)
 
 
+class TaskTodayStatusUpdate(BaseModel):
+    status: Literal["completed", "pending"]
+
+
 class MetricCorrection(BaseModel):
     gold: int | None = Field(default=None, ge=0)
     level: int | None = Field(default=None, ge=1)
@@ -118,6 +122,15 @@ def create_app(database_path: Path | None = None) -> FastAPI:
                 "resultStatus": None,
             })
         return {"items": items}
+
+    @app.patch("/api/tasks/{task_id}/today-status")
+    def update_task_today_status(task_id: str, request: TaskTodayStatusUpdate):
+        if task_id not in {task["id"] for task in task_list()}:
+            raise HTTPException(status_code=404, detail="不支持的任务")
+        today_status = database.set_task_completion_override(
+            task_id, request.status
+        )
+        return {"taskId": task_id, "todayStatus": today_status}
 
     @app.post("/api/tasks/{task_id}/inspect")
     async def inspect_task(task_id: str, request: InspectionRequest):

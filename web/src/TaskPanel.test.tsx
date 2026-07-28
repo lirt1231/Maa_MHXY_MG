@@ -82,6 +82,59 @@ describe("TaskPanel run outcomes", () => {
     expect(view.getByRole("heading", { name: "科举乡试" }).closest("article")?.classList.contains("pending")).toBe(true);
   });
 
+  it("allows manually toggling today's completion status", () => {
+    const pending: Task = {
+      id: "yunbiao", name: "普通运镖", eyebrow: "每日运镖", summary: "完成普通运镖",
+      description: "完成普通运镖", status: "experimental",
+      risk: { level: "low", label: "低风险", summary: "普通运镖" },
+      steps: [], checklist: [], warnings: [], parameters: [],
+      todayStatus: { status: "pending", completedAt: null, resultStatus: null },
+    };
+    const completed: Task = {
+      ...pending, id: "shimen", name: "师门任务",
+      todayStatus: {
+        status: "completed", completedAt: "2026-07-28T03:00:00+00:00",
+        resultStatus: null, source: "manual",
+      },
+    };
+    const onSetTodayStatus = vi.fn();
+    const view = render(<TaskPanel
+      system={system} tasks={[pending, completed]} runs={[]}
+      summary={{ total: 0, succeeded: 0, failed: 0, successRate: 0, averageDurationMs: 0 }}
+      logs={[]} busy={false} progress="等待任务" startingGame={false}
+      onStartGame={vi.fn()} onStop={vi.fn()} onSelectTask={vi.fn()}
+      onSetTodayStatus={onSetTodayStatus}
+    />);
+
+    fireEvent.click(view.getByRole("checkbox", { name: "手动修改普通运镖今日完成状态" }));
+    expect(onSetTodayStatus).toHaveBeenCalledWith("yunbiao", "completed");
+    fireEvent.click(view.getByRole("checkbox", { name: "手动修改师门任务今日完成状态" }));
+    expect(onSetTodayStatus).toHaveBeenLastCalledWith("shimen", "pending");
+  });
+
+  it("disables completion controls while a status is being saved", () => {
+    const task: Task = {
+      id: "yunbiao", name: "普通运镖", eyebrow: "每日运镖", summary: "完成普通运镖",
+      description: "完成普通运镖", status: "experimental",
+      risk: { level: "low", label: "低风险", summary: "普通运镖" },
+      steps: [], checklist: [], warnings: [], parameters: [],
+      todayStatus: { status: "pending", completedAt: null, resultStatus: null },
+    };
+    const view = render(<TaskPanel
+      system={system} tasks={[task]} runs={[]}
+      summary={{ total: 0, succeeded: 0, failed: 0, successRate: 0, averageDurationMs: 0 }}
+      logs={[]} busy={false} progress="等待任务" startingGame={false}
+      onStartGame={vi.fn()} onStop={vi.fn()} onSelectTask={vi.fn()}
+      updatingTaskStatus="yunbiao" onSetTodayStatus={vi.fn()}
+    />);
+
+    const checkbox = view.getByRole("checkbox", {
+      name: "手动修改普通运镖今日完成状态",
+    }) as HTMLInputElement;
+    expect(checkbox.disabled).toBe(true);
+    expect(view.getByText("保存中")).toBeTruthy();
+  });
+
   it("does not let an active run override a completed-today status", () => {
     const task: Task = {
       id: "sanjieqiyuan", name: "三界奇缘", eyebrow: "每日答题", summary: "完成答题",
