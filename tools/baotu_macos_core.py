@@ -18,9 +18,22 @@ except ImportError:  # Direct execution through tools/run_baotu_macos.py.
     )
 
 
-def classify_baotu_scene(texts, templates, image_size):
+def classify_baotu_scene(
+    texts, templates, image_size, *, daily_tab_confirmed=False
+):
     if find_items(texts, r"宝图任务完成|今日宝图任务已完成|宝图任务全部完成"):
         return {"status": "completed"}
+
+    if not daily_tab_confirmed:
+        navigation = classify_daily_navigation(
+            texts,
+            templates,
+            image_size,
+            target_pattern=r"宝图任务",
+            daily_tab_confirmed=False,
+        )
+        if navigation["status"] == "open_daily":
+            return navigation
 
     dialogue = find_items(
         texts,
@@ -44,12 +57,23 @@ def classify_baotu_scene(texts, templates, image_size):
         return {"status": "wait", "reason": "battle"}
     if templates.get("auto_pathing"):
         return {"status": "wait", "reason": "auto_pathing"}
+    battle_cancel = find_items(
+        texts,
+        r"取消",
+        image_size,
+        {"min_x": 0.9, "min_y": 0.88},
+    )
+    if battle_cancel:
+        return {"status": "wait", "reason": "battle_ocr"}
+    if find_items(texts, r"自动寻路中?|寻路中"):
+        return {"status": "wait", "reason": "auto_pathing_ocr"}
 
     return classify_daily_navigation(
         texts,
         templates,
         image_size,
         target_pattern=r"宝图任务",
+        daily_tab_confirmed=daily_tab_confirmed,
     )
 
 

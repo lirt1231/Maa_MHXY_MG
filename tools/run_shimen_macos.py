@@ -64,6 +64,7 @@ def run(args, guard):
     navigation_inputs = 0
     unknown_polls = 0
     daily_reset_done = False
+    daily_tab_confirmed = False
     last_click_signature = None
     consecutive_same_clicks = 0
     recent_statuses = []
@@ -71,7 +72,10 @@ def run(args, guard):
     for step in range(1, args.max_steps + 1):
         scene = runtime.read_scene(TEMPLATES)
         decision = classify_shimen_scene(
-            scene.texts, scene.templates, scene.image_size
+            scene.texts,
+            scene.templates,
+            scene.image_size,
+            daily_tab_confirmed=daily_tab_confirmed,
         )
         status = decision["status"]
         recent_statuses.append(status)
@@ -105,6 +109,7 @@ def run(args, guard):
                 f"师门进入需要资产操作的分支，首版不会自动处理：{decision['reason']}"
             )
         if status in {"continue_task", "progress_task"}:
+            daily_tab_confirmed = False
             task_clicks += 1
             if task_clicks > MAX_TASK_CLICKS:
                 raise RuntimeError("师门推进点击达到上限，已停止以避免循环")
@@ -154,10 +159,11 @@ def run(args, guard):
             if consecutive_same_clicks > 2:
                 raise RuntimeError(f"师门连续重复执行 {status}，已安全停止")
             runtime.click_box(decision["box"], scene, f"师门任务：{status}")
+            daily_tab_confirmed = status == "open_daily"
             actions += 1
             clicks += 1
             unknown_polls = 0
-            guard.wait(2.0 if status == "join_task" else 1.0)
+            guard.wait(2.0 if status in {"open_daily", "join_task"} else 1.0)
             continue
         if status == "wait":
             last_click_signature = None

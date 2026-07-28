@@ -18,7 +18,20 @@ except ImportError:  # Direct execution through tools/run_yunbiao_macos.py.
     )
 
 
-def classify_yunbiao_scene(texts, templates, image_size, phase):
+def classify_yunbiao_scene(
+    texts, templates, image_size, phase, *, daily_tab_confirmed=False
+):
+    if not daily_tab_confirmed:
+        navigation = classify_daily_navigation(
+            texts,
+            templates,
+            image_size,
+            target_pattern=r"运镖任务|运镖",
+            daily_tab_confirmed=False,
+        )
+        if navigation["status"] == "open_daily":
+            return navigation
+
     blocked = find_items(
         texts,
         r"活力不足|活力不够|需要.*活力|押金不足|银币不足|无法押镖",
@@ -78,12 +91,23 @@ def classify_yunbiao_scene(texts, templates, image_size, phase):
         return {"status": "wait", "reason": "battle"}
     if templates.get("auto_pathing"):
         return {"status": "wait", "reason": "auto_pathing"}
+    battle_cancel = find_items(
+        texts,
+        r"取消",
+        image_size,
+        {"min_x": 0.9, "min_y": 0.88},
+    )
+    if battle_cancel:
+        return {"status": "wait", "reason": "battle_ocr"}
+    if find_items(texts, r"自动寻路中?|寻路中"):
+        return {"status": "wait", "reason": "auto_pathing_ocr"}
 
     return classify_daily_navigation(
         texts,
         templates,
         image_size,
         target_pattern=r"运镖任务|运镖",
+        daily_tab_confirmed=daily_tab_confirmed,
     )
 
 

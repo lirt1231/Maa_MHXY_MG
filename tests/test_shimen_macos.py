@@ -22,6 +22,21 @@ def scene(texts=None, templates=None):
 
 
 class ShimenSceneTests(unittest.TestCase):
+    def test_challenge_page_opens_daily_before_unrelated_progress_button(self):
+        daily_tab = text("日常活动", (130, 161, 88, 27))
+        decision = classify_shimen_scene(
+            [
+                text("活动", (474, 100, 71, 23)),
+                daily_tab,
+                text("挑战活动", (127, 217, 90, 27)),
+                text("去完成", (500, 410, 100, 30)),
+            ],
+            {},
+            (1020, 718),
+            daily_tab_confirmed=False,
+        )
+        self.assertEqual(decision, {"status": "open_daily", "box": daily_tab["box"]})
+
     def test_asset_branch_blocks_progress_button(self):
         decision = classify_shimen_scene(
             [

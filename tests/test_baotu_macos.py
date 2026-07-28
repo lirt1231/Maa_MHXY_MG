@@ -41,6 +41,7 @@ class DailyNavigationTests(unittest.TestCase):
             {},
             (1020, 718),
             target_pattern=r"宝图任务",
+            daily_tab_confirmed=True,
         )
 
         self.assertEqual(decision, {"status": "join_task", "box": correct["box"]})
@@ -62,6 +63,23 @@ class DailyNavigationTests(unittest.TestCase):
             target_pattern=r"宝图任务",
         )
         self.assertEqual(decision["status"], "open_activity")
+
+    def test_challenge_activity_page_must_open_daily_before_scanning(self):
+        daily_tab = text("日常活动", (130, 161, 88, 27))
+        decision = classify_daily_navigation(
+            [
+                text("活动", (474, 100, 71, 23)),
+                daily_tab,
+                text("挑战活动", (127, 217, 90, 27)),
+                text("宝图任务", (669, 248, 84, 26)),
+                text("参加", (838, 269, 47, 29)),
+            ],
+            {},
+            (1020, 718),
+            target_pattern=r"宝图任务",
+            daily_tab_confirmed=False,
+        )
+        self.assertEqual(decision, {"status": "open_daily", "box": daily_tab["box"]})
 
 
 class BaotuSceneTests(unittest.TestCase):
@@ -95,6 +113,12 @@ class BaotuSceneTests(unittest.TestCase):
             "wait",
         )
 
+    def test_current_battle_cancel_is_wait_only(self):
+        decision = classify_baotu_scene(
+            [text("取消", (961, 680, 44, 25))], {}, (1020, 718)
+        )
+        self.assertEqual(decision, {"status": "wait", "reason": "battle_ocr"})
+
 
 class BaotuRunnerTests(unittest.TestCase):
     @patch("tools.run_baotu_macos.MacOSTaskRuntime")
@@ -102,6 +126,7 @@ class BaotuRunnerTests(unittest.TestCase):
         runtime = runtime_class.return_value
         runtime.read_scene.side_effect = [
             scene([text("活动", (260, 45, 50, 22))]),
+            scene(daily_page(text("挑战活动", (120, 150, 100, 30)))),
             scene(daily_page(
                 text("宝图任务", (250, 180, 100, 25)),
                 text("参加", (500, 210, 60, 25)),
@@ -116,14 +141,17 @@ class BaotuRunnerTests(unittest.TestCase):
         with redirect_stdout(output):
             self.assertEqual(run(args, Mock()), 0)
 
-        self.assertEqual(runtime.click_box.call_count, 4)
+        self.assertEqual(runtime.click_box.call_count, 5)
+        clicked_boxes = [call.args[0] for call in runtime.click_box.call_args_list]
+        self.assertEqual(clicked_boxes[1], [80, 90, 100, 30])
+        self.assertEqual(clicked_boxes[2], [500, 210, 60, 25])
         payloads = [
             json.loads(line[len("result_json="):])
             for line in output.getvalue().splitlines()
             if line.startswith("result_json=")
         ]
         self.assertEqual(payloads[0]["status"], "completed")
-        self.assertEqual(payloads[0]["clicks"], 4)
+        self.assertEqual(payloads[0]["clicks"], 5)
 
     @patch("tools.run_baotu_macos.MacOSTaskRuntime")
     def test_unknown_scene_stops_without_clicking(self, runtime_class):

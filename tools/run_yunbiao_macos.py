@@ -70,12 +70,17 @@ def run(args, guard):
     task_clicks = 0
     unknown_polls = 0
     daily_reset_done = False
+    daily_tab_confirmed = False
     repeated = {}
 
     for step in range(1, args.max_steps + 1):
         scene = runtime.read_scene(TEMPLATES)
         decision = classify_yunbiao_scene(
-            scene.texts, scene.templates, scene.image_size, phase
+            scene.texts,
+            scene.templates,
+            scene.image_size,
+            phase,
+            daily_tab_confirmed=daily_tab_confirmed,
         )
         status = decision["status"]
         log_event(
@@ -124,6 +129,7 @@ def run(args, guard):
             guard.wait(2.0)
             continue
         if status == "select_normal":
+            daily_tab_confirmed = False
             if phase == "delivering":
                 completed_rounds += 1
                 if completed_rounds >= args.rounds:
@@ -150,6 +156,7 @@ def run(args, guard):
             guard.wait(1.0)
             continue
         if status == "confirm_normal":
+            daily_tab_confirmed = False
             runtime.click_box(decision["box"], scene, "确认押送普通镖银")
             accepted_rounds += 1
             actions += 1
@@ -159,6 +166,7 @@ def run(args, guard):
             guard.wait(2.0)
             continue
         if status == "continue_task":
+            daily_tab_confirmed = False
             task_clicks += 1
             if task_clicks > MAX_TASK_CLICKS:
                 raise RuntimeError("运镖任务栏点击达到上限，已停止以避免循环")
@@ -193,10 +201,11 @@ def run(args, guard):
             if repeated[signature] > 2:
                 raise RuntimeError(f"运镖任务重复执行 {status}，已安全停止")
             runtime.click_box(decision["box"], scene, f"运镖任务：{status}")
+            daily_tab_confirmed = status == "open_daily"
             actions += 1
             clicks += 1
             unknown_polls = 0
-            guard.wait(2.0 if status == "join_task" else 1.0)
+            guard.wait(2.0 if status in {"open_daily", "join_task"} else 1.0)
             continue
         if status == "wait":
             unknown_polls = 0

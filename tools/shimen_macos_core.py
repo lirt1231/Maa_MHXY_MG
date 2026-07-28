@@ -26,7 +26,9 @@ ASSET_BRANCH_PATTERN = (
 )
 
 
-def classify_shimen_scene(texts, templates, image_size):
+def classify_shimen_scene(
+    texts, templates, image_size, *, daily_tab_confirmed=False
+):
     if find_items(
         texts, r"师门任务完成|今日师门任务已完成|师门任务全部完成"
     ):
@@ -46,6 +48,17 @@ def classify_shimen_scene(texts, templates, image_size):
         return {"status": "wait", "reason": "battle_ocr"}
     if find_items(texts, r"自动寻路中?|寻路中"):
         return {"status": "wait", "reason": "auto_pathing_ocr"}
+
+    if not daily_tab_confirmed:
+        navigation = classify_daily_navigation(
+            texts,
+            templates,
+            image_size,
+            target_pattern=r"师门任务",
+            daily_tab_confirmed=False,
+        )
+        if navigation["status"] == "open_daily":
+            return navigation
 
     asset_branch = find_items(texts, ASSET_BRANCH_PATTERN)
     if asset_branch:
@@ -82,6 +95,7 @@ def classify_shimen_scene(texts, templates, image_size):
         templates,
         image_size,
         target_pattern=r"师门任务",
+        daily_tab_confirmed=daily_tab_confirmed,
     )
 
 

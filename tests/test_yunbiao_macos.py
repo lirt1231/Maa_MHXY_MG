@@ -22,6 +22,21 @@ def scene(texts=None, templates=None):
 
 
 class YunbiaoSceneTests(unittest.TestCase):
+    def test_challenge_page_opens_daily_before_other_actions(self):
+        daily_tab = text("日常活动", (130, 161, 88, 27))
+        decision = classify_yunbiao_scene(
+            [
+                text("活动", (474, 100, 71, 23)),
+                daily_tab,
+                text("挑战活动", (127, 217, 90, 27)),
+            ],
+            {},
+            (1020, 718),
+            "enter",
+            daily_tab_confirmed=False,
+        )
+        self.assertEqual(decision, {"status": "open_daily", "box": daily_tab["box"]})
+
     def test_only_exact_normal_delivery_is_actionable(self):
         normal = classify_yunbiao_scene(
             [text("押送普通镖银", (760, 300, 160, 28))], {}, (1020, 718), "enter"
@@ -58,6 +73,15 @@ class YunbiaoSceneTests(unittest.TestCase):
             [text("活力不足")], {}, (1020, 718), "enter"
         )
         self.assertEqual(blocked["status"], "blocked_resource")
+
+    def test_current_battle_cancel_is_wait_only(self):
+        decision = classify_yunbiao_scene(
+            [text("取消", (961, 680, 44, 25))],
+            {},
+            (1020, 718),
+            "await_delivery",
+        )
+        self.assertEqual(decision, {"status": "wait", "reason": "battle_ocr"})
 
 
 class YunbiaoRunnerTests(unittest.TestCase):

@@ -64,12 +64,16 @@ def run(args, guard):
     task_clicks = 0
     unknown_polls = 0
     daily_reset_done = False
+    daily_tab_confirmed = False
     repeated = {}
 
     for step in range(1, args.max_steps + 1):
         scene = runtime.read_scene(TEMPLATES)
         decision = classify_baotu_scene(
-            scene.texts, scene.templates, scene.image_size
+            scene.texts,
+            scene.templates,
+            scene.image_size,
+            daily_tab_confirmed=daily_tab_confirmed,
         )
         status = decision["status"]
         log_event("scene", step=step, status=status, reason=decision.get("reason"))
@@ -93,6 +97,7 @@ def run(args, guard):
             emit_result(status, actions=actions, clicks=clicks)
             return 0
         if status == "continue_task":
+            daily_tab_confirmed = False
             task_clicks += 1
             if task_clicks > MAX_TASK_CLICKS:
                 raise RuntimeError("宝图任务栏点击达到上限，已停止以避免循环")
@@ -100,7 +105,7 @@ def run(args, guard):
             actions += 1
             clicks += 1
             unknown_polls = 0
-            guard.wait(2.0)
+            guard.wait(7.0)
             continue
         if status == "scroll_daily":
             navigation_inputs += 1
@@ -127,10 +132,11 @@ def run(args, guard):
             if repeated[signature] > 2:
                 raise RuntimeError(f"宝图任务重复执行 {status}，已安全停止")
             runtime.click_box(decision["box"], scene, f"宝图任务：{status}")
+            daily_tab_confirmed = status == "open_daily"
             actions += 1
             clicks += 1
             unknown_polls = 0
-            guard.wait(2.0 if status == "join_task" else 1.0)
+            guard.wait(2.0 if status in {"open_daily", "join_task"} else 1.0)
             continue
         if status == "wait":
             unknown_polls = 0

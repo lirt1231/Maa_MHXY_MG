@@ -72,9 +72,19 @@ def classify_daily_navigation(
     image_size,
     *,
     target_pattern,
+    daily_tab_confirmed=False,
 ):
     """Return one bounded navigation action backed by fresh OCR/template evidence."""
     daily_page = daily_schedule_page_evidence(texts, image_size, templates)
+    daily_tabs = find_items(
+        texts,
+        r"日常活动",
+        image_size,
+        {"min_x": 0.03, "max_x": 0.36, "min_y": 0.07, "max_y": 0.34},
+    )
+    if daily_tabs and not daily_tab_confirmed:
+        return {"status": "open_daily", "box": valid_box(daily_tabs[0])}
+
     targets = find_items(texts, target_pattern)
     if daily_page and targets:
         target = targets[0]
@@ -97,14 +107,8 @@ def classify_daily_navigation(
     if daily_page:
         return {"status": "scroll_daily", "reason": "target_not_visible"}
 
-    daily_tabs = find_items(
-        texts,
-        r"日常活动",
-        image_size,
-        {"min_x": 0.03, "max_x": 0.36, "min_y": 0.07, "max_y": 0.34},
-    )
     if daily_tabs:
-        return {"status": "open_daily", "box": valid_box(daily_tabs[0])}
+        return {"status": "unknown", "reason": "daily_tab_confirmed_without_page"}
 
     activity_buttons = find_items(
         texts,
