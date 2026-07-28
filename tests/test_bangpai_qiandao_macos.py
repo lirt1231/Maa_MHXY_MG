@@ -52,6 +52,40 @@ class ClanSignInSceneTests(unittest.TestCase):
             "unknown",
         )
 
+    def test_expands_live_main_menu_from_strict_ocr_evidence(self):
+        texts = [
+            text("任务", (869, 107, 42, 25)),
+            text("队伍", (970, 106, 45, 25)),
+            text("包裹", (971, 620, 33, 16)),
+            text("+", (966, 658, 43, 46)),
+        ]
+
+        self.assertEqual(
+            classify_clan_sign_in_scene(texts, {}, "enter", (1020, 718)),
+            {"status": "expand_menu", "box": [966, 658, 43, 46]},
+        )
+
+    def test_ocr_plus_requires_main_screen_anchors_and_entry_phase(self):
+        plus = text("+", (966, 658, 43, 46))
+        anchors = [
+            text("任务", (869, 107, 42, 25)),
+            text("队伍", (970, 106, 45, 25)),
+        ]
+        cases = [
+            ([plus], "enter"),
+            ([*anchors, text("+", (100, 100, 43, 46))], "enter"),
+            ([*anchors, plus], "welfare"),
+        ]
+
+        for texts, phase in cases:
+            with self.subTest(texts=texts, phase=phase):
+                self.assertEqual(
+                    classify_clan_sign_in_scene(
+                        texts, {}, phase, (1020, 718)
+                    )["status"],
+                    "unknown",
+                )
+
     def test_opens_recognized_clan_entry(self):
         decision = classify_clan_sign_in_scene(
             [text(" 帮 派 ", (800, 620, 70, 60))], {}, "menu"
@@ -74,6 +108,39 @@ class ClanSignInSceneTests(unittest.TestCase):
             "clan",
         )
         self.assertEqual(decision["status"], "open_welfare")
+
+    def test_opens_live_clan_welfare_from_strict_ocr_navigation(self):
+        texts = [
+            text("·帮派·", (445, 86, 103, 34)),
+            text("信息", (903, 204, 23, 44)),
+            text("成员", (901, 307, 26, 45)),
+            text("福利", (901, 412, 25, 44)),
+            text("活动", (899, 516, 28, 44)),
+        ]
+
+        self.assertEqual(
+            classify_clan_sign_in_scene(texts, {}, "clan", (1020, 718)),
+            {"status": "open_welfare", "box": [901, 412, 25, 44]},
+        )
+
+    def test_ocr_welfare_requires_title_and_multiple_navigation_anchors(self):
+        title = text("·帮派·", (445, 86, 103, 34))
+        welfare = text("福利", (901, 412, 25, 44))
+        member = text("成员", (901, 307, 26, 45))
+        cases = [
+            [welfare, member],
+            [title, welfare],
+            [title, member, text("福利", (100, 100, 25, 44))],
+        ]
+
+        for texts in cases:
+            with self.subTest(texts=texts):
+                self.assertNotEqual(
+                    classify_clan_sign_in_scene(
+                        texts, {}, "clan", (1020, 718)
+                    )["status"],
+                    "open_welfare",
+                )
 
     def test_scaled_welfare_page_uses_strict_ocr_header_context(self):
         texts = [
@@ -193,6 +260,32 @@ class ClanSignInSceneTests(unittest.TestCase):
                 {"clan_header": (350, 0, 320, 70)},
                 "verify_sign_in",
             )["status"],
+            "sign_in_confirmed",
+        )
+
+    def test_sign_in_completion_waits_for_dividend_terminal_evidence(self):
+        transient = welfare_texts(text("签到成功", (749, 458, 61, 23)))
+        unavailable = welfare_texts(
+            text("已签到", (749, 458, 61, 23)),
+            text("下周揭晓", (745, 538, 88, 22)),
+        )
+
+        self.assertEqual(
+            classify_clan_sign_in_scene(
+                transient, {}, "verify_sign_in", (1020, 718)
+            )["status"],
+            "sign_in_confirmed",
+        )
+        self.assertEqual(
+            classify_clan_sign_in_scene(
+                transient, {}, "check_dividend", (1020, 718)
+            )["status"],
+            "sign_in_confirmed",
+        )
+        self.assertEqual(
+            classify_clan_sign_in_scene(
+                unavailable, {}, "check_dividend", (1020, 718)
+            )["status"],
             "completed",
         )
 
@@ -239,6 +332,10 @@ class ClanSignInRunnerTests(unittest.TestCase):
                 [text("签到成功")],
                 {"clan_header": (350, 0, 320, 70)},
             ),
+            scene(welfare_texts(
+                text("已签到", (749, 458, 61, 23)),
+                text("下周揭晓", (745, 538, 88, 22)),
+            )),
         ]
         guard = Mock()
         args = SimpleNamespace(inspect_scene=False, recognize_only=False, max_steps=8)

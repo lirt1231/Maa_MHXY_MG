@@ -121,6 +121,8 @@ def run(args, guard: CancellationGuard) -> int:
             actions += 1
             clicks += 1
             phase = "verify_sign_in"
+        elif status == "sign_in_confirmed":
+            phase = "check_dividend"
         elif status == "claim_dividend":
             dividend_attempts += 1
             if dividend_attempts > 1:

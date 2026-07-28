@@ -40,17 +40,17 @@ def classify_clan_sign_in_scene(
 
     clan_header = templates.get("clan_header")
     clan_title = find_text(texts, r"^[·•]?帮派[·•]?$")
+    clan_title_valid = clan_title and box_in_region(
+        clan_title["box"],
+        image_size,
+        min_x=0.35,
+        max_x=0.65,
+        max_y=0.25,
+    )
     sign_in_section = find_text(texts, r"^帮派签到$")
     ocr_header_valid = (
-        clan_title
+        clan_title_valid
         and sign_in_section
-        and box_in_region(
-            clan_title["box"],
-            image_size,
-            min_x=0.35,
-            max_x=0.65,
-            max_y=0.25,
-        )
         and box_in_region(
             sign_in_section["box"],
             image_size,
@@ -95,6 +95,19 @@ def classify_clan_sign_in_scene(
         min_y=0.72,
         max_y=0.95,
     )
+    dividend_unavailable = find_text(texts, r"^下周揭晓$|^暂无分红$|^暂不可领$")
+    dividend_unavailable_valid = (
+        dividend_context_valid
+        and dividend_unavailable
+        and box_in_region(
+            dividend_unavailable["box"],
+            image_size,
+            min_x=0.6,
+            max_x=0.9,
+            min_y=0.65,
+            max_y=0.9,
+        )
+    )
 
     confirmation = find_text(texts, r"^领取$")
     if (
@@ -119,7 +132,12 @@ def classify_clan_sign_in_scene(
         return {"status": "sign_in", "box": sign_in["box"]}
 
     if dividend_valid and phase in {
-        "enter", "welfare", "verify_sign_in", "dividend_confirm", "verify_dividend"
+        "enter",
+        "welfare",
+        "verify_sign_in",
+        "check_dividend",
+        "dividend_confirm",
+        "verify_dividend",
     }:
         return {"status": "claim_dividend", "box": dividend["box"]}
 
@@ -130,7 +148,11 @@ def classify_clan_sign_in_scene(
         if phase == "verify_dividend" and dividend_context_valid and not dividend:
             return {"status": "completed"}
         if phase == "verify_sign_in":
-            return {"status": "completed"}
+            return {"status": "sign_in_confirmed"}
+        if phase == "check_dividend":
+            if dividend_claimed_valid or dividend_unavailable_valid:
+                return {"status": "completed"}
+            return {"status": "sign_in_confirmed"}
         if phase in {"enter", "welfare"}:
             return {"status": "already_completed"}
 
@@ -138,8 +160,41 @@ def classify_clan_sign_in_scene(
     welfare_valid = box_in_region(
         clan_welfare, image_size, min_x=0.7, min_y=0.35, max_y=0.85
     )
-    if header_valid and welfare_valid and phase in {"enter", "clan"}:
-        return {"status": "open_welfare", "box": clan_welfare}
+    welfare_text = find_text(texts, r"^福利$")
+    clan_nav_anchors = [
+        find_text(texts, r"^信息$"),
+        find_text(texts, r"^成员$"),
+        welfare_text,
+        find_text(texts, r"^活动$"),
+    ]
+    clan_nav_regions = (
+        {"min_x": 0.85, "min_y": 0.2, "max_y": 0.5},
+        {"min_x": 0.85, "min_y": 0.3, "max_y": 0.6},
+        {"min_x": 0.85, "min_y": 0.45, "max_y": 0.75},
+        {"min_x": 0.85, "min_y": 0.6, "max_y": 0.85},
+    )
+    visible_clan_nav = sum(
+        bool(anchor)
+        and box_in_region(anchor["box"], image_size, **region)
+        for anchor, region in zip(clan_nav_anchors, clan_nav_regions)
+    )
+    ocr_welfare = (
+        welfare_text
+        if clan_title_valid
+        and welfare_text
+        and visible_clan_nav >= 2
+        and box_in_region(
+            welfare_text["box"], image_size, min_x=0.85, min_y=0.45, max_y=0.75
+        )
+        else None
+    )
+    welfare_box = (
+        clan_welfare
+        if header_valid and welfare_valid
+        else (ocr_welfare["box"] if ocr_welfare else None)
+    )
+    if welfare_box and phase in {"enter", "clan"}:
+        return {"status": "open_welfare", "box": welfare_box}
     if header_valid:
         return {"status": "clan_idle"}
 
@@ -159,6 +214,34 @@ def classify_clan_sign_in_scene(
         return {"status": "open_clan", "box": clan_text["box"]}
 
     expand_menu = templates.get("expand_menu")
+    expand_menu_text = find_text(texts, r"^\+$")
+    main_screen_anchors = [
+        find_text(texts, r"^任务$"),
+        find_text(texts, r"^队伍$"),
+        find_text(texts, r"^包裹$"),
+    ]
+    anchor_regions = (
+        {"min_x": 0.75, "max_y": 0.3},
+        {"min_x": 0.9, "max_y": 0.3},
+        {"min_x": 0.9, "min_y": 0.75},
+    )
+    visible_main_anchors = sum(
+        bool(anchor)
+        and box_in_region(anchor["box"], image_size, **region)
+        for anchor, region in zip(main_screen_anchors, anchor_regions)
+    )
+    ocr_expand_menu = (
+        expand_menu_text
+        if expand_menu_text
+        and visible_main_anchors >= 2
+        and box_in_region(
+            expand_menu_text["box"], image_size, min_x=0.9, min_y=0.85
+        )
+        else None
+    )
+    expand_menu = expand_menu or (
+        ocr_expand_menu["box"] if ocr_expand_menu else None
+    )
     if (
         expand_menu
         and phase == "enter"
