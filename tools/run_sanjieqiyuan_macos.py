@@ -32,6 +32,7 @@ from maa.pipeline import JOCR, JTemplateMatch  # noqa: E402
 from maa.resource import Resource  # noqa: E402
 from maa.tasker import Tasker  # noqa: E402
 from maa.toolkit import Toolkit  # noqa: E402
+from daily_activity_scroll import DailyActivityScrollAction  # noqa: E402
 from daily_schedule_macos_core import daily_schedule_page_evidence  # noqa: E402
 from macos_cancellation import CancellationGuard, CancellationRequested  # noqa: E402
 
@@ -322,6 +323,9 @@ def classify_scene(scene, *, daily_tab_confirmed=False):
             "reason": "target_action_not_visible",
         }
 
+    if daily_page:
+        return {"status": "scroll_daily", "reason": "target_not_visible"}
+
     if daily_tabs:
         return {"status": "click_daily", "click": _center(daily_tabs[0])}
 
@@ -462,7 +466,7 @@ def navigate_to_exam(tasker, controller, capture, native_input, timeout, guard):
     """Navigate by fresh OCR evidence until answer, completion, or a safe stop."""
     deadline = time.monotonic() + timeout
     daily_selected = False
-    scroll_count = 0
+    daily_scroller = DailyActivityScrollAction()
     battle_return_attempts = 0
     navigation_inputs = 0
     action_counts = {}
@@ -504,23 +508,20 @@ def navigate_to_exam(tasker, controller, capture, native_input, timeout, guard):
         if status == "scroll_daily" or (status == "click_daily" and daily_selected):
             if native_input is None:
                 raise RuntimeError("活动列表浏览要求 --input-method native")
-            if scroll_count >= 5:
-                raise RuntimeError("浏览活动列表五次后仍未找到三界奇缘")
-            if navigation_inputs >= MAX_NAVIGATION_INPUTS:
-                raise RuntimeError("活动导航已达到输入上限，已停止以避免死循环")
-            width, height = scene["image_size"]
-            scroll_end_y = 0.52 if status == "scroll_daily" else 0.27
+            step = daily_scroller.plan(scene.get("texts", []), scene["image_size"])
             guard.perform_input(
                 native_input.drag,
-                (round(width * 0.62), round(height * 0.62)),
-                (round(width * 0.62), round(height * scroll_end_y)),
+                step.start,
+                step.end,
                 scene["image_size"],
             )
-            scroll_count += 1
-            navigation_inputs += 1
             daily_selected = True
-            print(f"navigation_scroll count={scroll_count}", flush=True)
-            guard.wait(1.2)
+            print(
+                f"navigation_scroll direction={step.direction} "
+                f"count={step.index} reason={step.reason}",
+                flush=True,
+            )
+            guard.wait(1.0)
             continue
         if "click" in decision:
             signature = _navigation_action_signature(decision, scene["image_size"])
@@ -545,6 +546,7 @@ def navigate_to_exam(tasker, controller, capture, native_input, timeout, guard):
             )
             if status == "click_daily":
                 daily_selected = True
+                daily_scroller.reset()
             guard.wait(1.2)
             continue
         raise RuntimeError(

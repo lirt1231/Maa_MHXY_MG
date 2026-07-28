@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
 from macos_cancellation import CancellationGuard, CancellationRequested  # noqa: E402
+from daily_activity_scroll import DailyActivityScrollAction  # noqa: E402
 from macos_task_runtime import MacOSTaskRuntime, log_event  # noqa: E402
 from shimen_macos_core import classify_shimen_scene  # noqa: E402
 
@@ -63,8 +64,8 @@ def run(args, guard):
     task_clicks = 0
     navigation_inputs = 0
     unknown_polls = 0
-    daily_reset_done = False
     daily_tab_confirmed = False
+    daily_scroller = DailyActivityScrollAction()
     last_click_signature = None
     consecutive_same_clicks = 0
     recent_statuses = []
@@ -129,18 +130,7 @@ def run(args, guard):
             guard.wait(7.0 if status == "continue_task" else 2.0)
             continue
         if status == "scroll_daily":
-            navigation_inputs += 1
-            if navigation_inputs > MAX_NAVIGATION_INPUTS:
-                raise RuntimeError("师门活动导航达到输入上限，已安全停止")
-            width, height = scene.image_size
-            if not daily_reset_done:
-                start = (round(width * 0.62), round(height * 0.34))
-                end = (round(width * 0.62), round(height * 0.66))
-                daily_reset_done = True
-            else:
-                start = (round(width * 0.62), round(height * 0.65))
-                end = (round(width * 0.62), round(height * 0.34))
-            runtime.drag(start, end, scene, "浏览日常活动列表")
+            daily_scroller.perform(runtime, scene, "浏览日常活动列表")
             actions += 1
             last_click_signature = None
             consecutive_same_clicks = 0
@@ -159,6 +149,8 @@ def run(args, guard):
             if consecutive_same_clicks > 2:
                 raise RuntimeError(f"师门连续重复执行 {status}，已安全停止")
             runtime.click_box(decision["box"], scene, f"师门任务：{status}")
+            if status == "open_daily":
+                daily_scroller.reset()
             daily_tab_confirmed = status == "open_daily"
             actions += 1
             clicks += 1

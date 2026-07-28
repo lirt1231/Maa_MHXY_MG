@@ -292,7 +292,7 @@ class SanjieNavigationTests(unittest.TestCase):
 
         self.assertEqual(status, "answering")
         native_input.drag.assert_called_once_with(
-            (632, 445), (632, 373), self.image_size
+            (632, 431), (632, 352), self.image_size
         )
 
     @patch("tools.run_sanjieqiyuan_macos.perform_click")
