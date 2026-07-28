@@ -14,7 +14,8 @@ const task: Task = {
   steps: ["打开答题页"],
   checklist: ["窗口完整可见", "题目与选项可见"],
   warnings: ["低置信度时停止"],
-  parameters: [{ key: "maxSteps", label: "最多答题数", type: "integer", default: 20, minimum: 1, maximum: 30 }]
+  parameters: [{ key: "maxSteps", label: "最多答题数", type: "integer", default: 20, minimum: 1, maximum: 30 }],
+  todayStatus: { status: "pending", completedAt: null, resultStatus: null },
 };
 
 const readyInspection: TaskInspection = {

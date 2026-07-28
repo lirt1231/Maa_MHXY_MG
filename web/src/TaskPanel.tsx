@@ -58,6 +58,7 @@ function runDetail(run: Run) {
 export function TaskPanel({ system, tasks, runs, summary, logs, busy, progress, startingGame, onStartGame, onStop, onSelectTask }: Props) {
   const current = system?.run;
   const missingPermission = Boolean(system && (!system.screenCapturePermission || !system.accessibilityPermission));
+  const completedToday = tasks.filter((task) => task.todayStatus?.status === "completed").length;
   return <div className="panel-page task-panel-page">
     <section className="hero-panel">
       <div><span className="eyebrow">TASK CONTROL · 127.0.0.1</span><h1>{busy ? current?.taskName : "自动化就绪"}</h1><p>{busy ? progress : "选择一个已适配任务开始。运行期间请保持游戏窗口完整可见。"}</p></div>
@@ -79,12 +80,23 @@ export function TaskPanel({ system, tasks, runs, summary, logs, busy, progress, 
     </section>
 
     <section className="task-section">
-      <div className="section-heading"><div><span className="eyebrow">VERIFIED ON MACOS</span><h2>已适配任务</h2></div><span className="section-note">首版白名单 · {tasks.length} 项</span></div>
-      <div className="task-grid">{tasks.map((task, index) => <article className="task-card" key={task.id}>
-        <div className="task-number">{String(index + 1).padStart(2, "0")}</div><span className="eyebrow">{task.eyebrow}</span><h3>{task.name}</h3><p>{task.summary}</p>
-        <div className="task-meta"><span className={`risk-label ${task.risk.level}`}>{task.risk.label} · {task.risk.summary}</span><span>◈ {task.parameters.length} 项运行参数 · ◉ 含启动前检查</span></div>
-        <button className="task-launch" disabled={busy || !system?.available} onClick={() => onSelectTask(task)}><span>{taskActionLabel(system, busy)}</span><b>→</b></button>
-      </article>)}</div>
+      <div className="section-heading"><div><span className="eyebrow">VERIFIED ON MACOS</span><h2>已适配任务</h2></div><span className="section-note">今日完成 {completedToday} / {tasks.length}</span></div>
+      <div className="task-grid">{tasks.map((task, index) => {
+        const isCompleted = task.todayStatus?.status === "completed";
+        const isRunning = busy && current?.taskId === task.id;
+        const todayLabel = isCompleted ? "今日已完成" : "今日未完成";
+        const cardState = isCompleted ? "completed" : isRunning ? "running" : "pending";
+        return <article className={`task-card ${cardState}`} key={task.id}>
+          <div className="task-number">{String(index + 1).padStart(2, "0")}</div>
+          <div className="task-card-statuses">
+            <span className={`task-today-status ${isCompleted ? "completed" : "pending"}`}>{todayLabel}</span>
+            {isRunning && <span className="task-today-status running">进行中</span>}
+          </div>
+          <span className="eyebrow">{task.eyebrow}</span><h3>{task.name}</h3><p>{task.summary}</p>
+          <div className="task-meta"><span className={`risk-label ${task.risk.level}`}>{task.risk.label} · {task.risk.summary}</span><span>◈ {task.parameters.length} 项运行参数 · ◉ 含启动前检查</span></div>
+          <button className="task-launch" disabled={busy || !system?.available} onClick={() => onSelectTask(task)}><span>{taskActionLabel(system, busy)}</span><b>→</b></button>
+        </article>;
+      })}</div>
     </section>
 
     <section className="dashboard-row lower">

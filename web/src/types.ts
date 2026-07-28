@@ -20,6 +20,11 @@ export type Task = {
   checklist: string[];
   warnings: string[];
   parameters: TaskParameter[];
+  todayStatus: {
+    status: "completed" | "pending";
+    completedAt: string | null;
+    resultStatus: "completed" | "already_completed" | null;
+  };
 };
 
 export type TaskInspection = {

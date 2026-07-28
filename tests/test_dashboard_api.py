@@ -1,5 +1,7 @@
+import json
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -37,6 +39,45 @@ class DashboardApiTests(unittest.TestCase):
                 for item in response.json()["items"]
             )
         )
+        self.assertTrue(all(item["todayStatus"] == {
+            "status": "pending", "completedAt": None, "resultStatus": None,
+        } for item in response.json()["items"]))
+
+    def test_task_api_marks_only_completed_runs_today(self):
+        database = self.client.app.state.database
+        started_at = datetime.now(timezone.utc).isoformat()
+        with database.connect() as db:
+            for run_id, task_id, run_status, result_status in (
+                ("done", "keju", "succeeded", "completed"),
+                ("already", "fuli_qiandao", "succeeded", "already_completed"),
+                ("stopped", "baotu", "failed", "safe_stopped"),
+                ("limited", "yunbiao", "succeeded", "limit_reached"),
+            ):
+                db.execute(
+                    """INSERT INTO task_runs(
+                    id, task_id, task_name, status, options_json, started_at,
+                    finished_at, result_json
+                    ) VALUES(?,?,?,?,?,?,?,?)""",
+                    (
+                        run_id, task_id, task_id, run_status, "{}", started_at,
+                        started_at, json.dumps({"status": result_status}),
+                    ),
+                )
+
+        response = self.client.get("/api/tasks")
+
+        self.assertEqual(response.status_code, 200)
+        statuses = {
+            item["id"]: item["todayStatus"] for item in response.json()["items"]
+        }
+        self.assertEqual(statuses["keju"], {
+            "status": "completed",
+            "completedAt": started_at,
+            "resultStatus": "completed",
+        })
+        self.assertEqual(statuses["fuli_qiandao"]["resultStatus"], "already_completed")
+        self.assertEqual(statuses["baotu"]["status"], "pending")
+        self.assertEqual(statuses["yunbiao"]["status"], "pending")
 
     def test_start_requires_checklist_confirmation(self):
         response = self.client.post(

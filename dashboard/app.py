@@ -109,7 +109,15 @@ def create_app(database_path: Path | None = None) -> FastAPI:
 
     @app.get("/api/tasks")
     def tasks():
-        return {"items": task_list()}
+        completions = database.today_task_completions()
+        items = task_list()
+        for task in items:
+            task["todayStatus"] = completions.get(task["id"], {
+                "status": "pending",
+                "completedAt": None,
+                "resultStatus": None,
+            })
+        return {"items": items}
 
     @app.post("/api/tasks/{task_id}/inspect")
     async def inspect_task(task_id: str, request: InspectionRequest):

@@ -44,7 +44,47 @@ export function App() {
     setSystem(systemData); setTasks(taskData.items); setRuns(runData.items); setSummary(runData.summary); setMetrics(metricData); setGameData(gameDataResponse);
   }, [metricKind, metricRangeDays]);
 
-  useEffect(() => { refresh().catch((error) => setMessage(error.message)); }, [refresh]);
+  useEffect(() => {
+    let midnightTimer: number | undefined;
+    let foregroundTimer: number | undefined;
+    let refreshInFlight = false;
+
+    const requestRefresh = (showError = false) => {
+      if (refreshInFlight) return;
+      refreshInFlight = true;
+      refresh()
+        .catch((error) => { if (showError) setMessage(error.message); })
+        .finally(() => { refreshInFlight = false; });
+    };
+
+    const scheduleMidnightRefresh = () => {
+      const now = new Date();
+      const nextMidnight = new Date(now);
+      nextMidnight.setDate(nextMidnight.getDate() + 1);
+      nextMidnight.setHours(0, 0, 0, 0);
+      midnightTimer = window.setTimeout(() => {
+        requestRefresh();
+        scheduleMidnightRefresh();
+      }, nextMidnight.getTime() - now.getTime());
+    };
+
+    const refreshWhenForegrounded = () => {
+      if (document.visibilityState !== "visible") return;
+      if (foregroundTimer !== undefined) window.clearTimeout(foregroundTimer);
+      foregroundTimer = window.setTimeout(requestRefresh, 100);
+    };
+
+    requestRefresh(true);
+    scheduleMidnightRefresh();
+    document.addEventListener("visibilitychange", refreshWhenForegrounded);
+    window.addEventListener("focus", refreshWhenForegrounded);
+    return () => {
+      if (midnightTimer !== undefined) window.clearTimeout(midnightTimer);
+      if (foregroundTimer !== undefined) window.clearTimeout(foregroundTimer);
+      document.removeEventListener("visibilitychange", refreshWhenForegrounded);
+      window.removeEventListener("focus", refreshWhenForegrounded);
+    };
+  }, [refresh]);
   useEffect(() => {
     const onHashChange = () => setPanel(panelFromHash());
     window.addEventListener("hashchange", onHashChange);

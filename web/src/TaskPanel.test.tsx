@@ -26,6 +26,7 @@ describe("TaskPanel run outcomes", () => {
       description: "打开乡试正式答题页", status: "experimental",
       risk: { level: "low", label: "低风险", summary: "仅答题" },
       steps: ["打开乡试答题页"], checklist: ["乡试题目可见"], warnings: [], parameters: [],
+      todayStatus: { status: "pending", completedAt: null, resultStatus: null },
     };
     const huishi: Task = {
       ...keju, id: "keju_huishi", name: "科举会试", eyebrow: "限时会试",
@@ -51,6 +52,77 @@ describe("TaskPanel run outcomes", () => {
     expect(onSelectTask).toHaveBeenLastCalledWith(expect.objectContaining({
       id: "keju", name: "科举乡试",
     }));
+  });
+
+  it("marks completed and pending tasks and summarizes today's completion", () => {
+    const pending: Task = {
+      id: "keju", name: "科举乡试", eyebrow: "每日乡试", summary: "完成乡试答题",
+      description: "打开乡试正式答题页", status: "experimental",
+      risk: { level: "low", label: "低风险", summary: "仅答题" },
+      steps: [], checklist: [], warnings: [], parameters: [],
+      todayStatus: { status: "pending", completedAt: null, resultStatus: null },
+    };
+    const completed: Task = {
+      ...pending, id: "sanjieqiyuan", name: "三界奇缘",
+      todayStatus: {
+        status: "completed", completedAt: "2026-07-28T03:00:00+00:00", resultStatus: "completed",
+      },
+    };
+    const view = render(<TaskPanel
+      system={system} tasks={[completed, pending]} runs={[]}
+      summary={{ total: 0, succeeded: 0, failed: 0, successRate: 0, averageDurationMs: 0 }}
+      logs={[]} busy={false} progress="等待任务" startingGame={false}
+      onStartGame={vi.fn()} onStop={vi.fn()} onSelectTask={vi.fn()}
+    />);
+
+    expect(view.getByText("今日完成 1 / 2")).toBeTruthy();
+    expect(view.getByText("今日已完成")).toBeTruthy();
+    expect(view.getByText("今日未完成")).toBeTruthy();
+    expect(view.getByRole("heading", { name: "三界奇缘" }).closest("article")?.classList.contains("completed")).toBe(true);
+    expect(view.getByRole("heading", { name: "科举乡试" }).closest("article")?.classList.contains("pending")).toBe(true);
+  });
+
+  it("does not let an active run override a completed-today status", () => {
+    const task: Task = {
+      id: "sanjieqiyuan", name: "三界奇缘", eyebrow: "每日答题", summary: "完成答题",
+      description: "完成答题", status: "experimental",
+      risk: { level: "low", label: "低风险", summary: "仅答题" },
+      steps: [], checklist: [], warnings: [], parameters: [],
+      todayStatus: { status: "completed", completedAt: "2026-07-28T03:00:00+00:00", resultStatus: "completed" },
+    };
+    const activeSystem = { ...system, run: run({ status: "running" }) };
+    const view = render(<TaskPanel
+      system={activeSystem} tasks={[task]} runs={[]}
+      summary={{ total: 0, succeeded: 0, failed: 0, successRate: 0, averageDurationMs: 0 }}
+      logs={[]} busy progress="自动化运行中" startingGame={false}
+      onStartGame={vi.fn()} onStop={vi.fn()} onSelectTask={vi.fn()}
+    />);
+
+    expect(view.getByText("今日完成 1 / 1")).toBeTruthy();
+    expect(view.getByText("今日已完成")).toBeTruthy();
+    expect(view.getByText("进行中")).toBeTruthy();
+  });
+
+  it("marks the active pending task as running", () => {
+    const task: Task = {
+      id: "sanjieqiyuan", name: "三界奇缘", eyebrow: "每日答题", summary: "完成答题",
+      description: "完成答题", status: "experimental",
+      risk: { level: "low", label: "低风险", summary: "仅答题" },
+      steps: [], checklist: [], warnings: [], parameters: [],
+      todayStatus: { status: "pending", completedAt: null, resultStatus: null },
+    };
+    const activeSystem = { ...system, run: run({ status: "running" }) };
+    const view = render(<TaskPanel
+      system={activeSystem} tasks={[task]} runs={[]}
+      summary={{ total: 0, succeeded: 0, failed: 0, successRate: 0, averageDurationMs: 0 }}
+      logs={[]} busy progress="自动化运行中" startingGame={false}
+      onStartGame={vi.fn()} onStop={vi.fn()} onSelectTask={vi.fn()}
+    />);
+
+    expect(view.getByText("今日完成 0 / 1")).toBeTruthy();
+    expect(view.getByText("今日未完成")).toBeTruthy();
+    expect(view.getByText("进行中")).toBeTruthy();
+    expect(view.getByRole("heading", { level: 3, name: "三界奇缘" }).closest("article")?.classList.contains("running")).toBe(true);
   });
 
   it("shows persisted completion progress instead of a benefit placeholder", () => {

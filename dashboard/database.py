@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from pathlib import Path
 from typing import Any
 
@@ -55,6 +55,9 @@ class Database:
                     result_json TEXT,
                     benefit_status TEXT NOT NULL DEFAULT 'not_captured'
                 );
+                DROP INDEX IF EXISTS idx_task_runs_started_task;
+                CREATE INDEX IF NOT EXISTS idx_task_runs_completed_task
+                ON task_runs(COALESCE(finished_at, started_at), task_id);
                 CREATE TABLE IF NOT EXISTS run_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     run_id TEXT NOT NULL,
@@ -179,6 +182,60 @@ class Database:
         with self.connect() as db:
             rows = db.execute("SELECT * FROM task_runs ORDER BY started_at DESC LIMIT ?", (limit,)).fetchall()
         return [self._run_row(row) for row in rows]
+
+    def today_task_completions(
+        self,
+        local_date: date | None = None,
+        local_timezone: tzinfo | None = None,
+    ) -> dict[str, dict[str, str | None]]:
+        if local_date is None:
+            local_date = (
+                datetime.now(local_timezone).date()
+                if local_timezone is not None
+                else datetime.now().astimezone().date()
+            )
+        next_date = local_date + timedelta(days=1)
+        if local_timezone is None:
+            # Naive datetimes are interpreted using the machine timezone, including DST.
+            start_utc = datetime.combine(local_date, time.min).astimezone(UTC)
+            end_utc = datetime.combine(next_date, time.min).astimezone(UTC)
+        else:
+            start_utc = datetime.combine(
+                local_date, time.min, tzinfo=local_timezone
+            ).astimezone(UTC)
+            end_utc = datetime.combine(
+                next_date, time.min, tzinfo=local_timezone
+            ).astimezone(UTC)
+
+        with self.connect() as db:
+            rows = db.execute(
+                """SELECT task_id, started_at, finished_at, result_json,
+                COALESCE(finished_at, started_at) completed_at
+                FROM task_runs
+                WHERE status='succeeded'
+                AND COALESCE(finished_at, started_at)>=?
+                AND COALESCE(finished_at, started_at)<?
+                ORDER BY completed_at DESC""",
+                (start_utc.isoformat(), end_utc.isoformat()),
+            ).fetchall()
+
+        completions: dict[str, dict[str, str | None]] = {}
+        for row in rows:
+            if row["task_id"] in completions or not row["result_json"]:
+                continue
+            try:
+                result = json.loads(row["result_json"])
+            except (json.JSONDecodeError, TypeError):
+                continue
+            result_status = result.get("status") if isinstance(result, dict) else None
+            if result_status not in {"completed", "already_completed"}:
+                continue
+            completions[row["task_id"]] = {
+                "status": "completed",
+                "completedAt": row["completed_at"],
+                "resultStatus": result_status,
+            }
+        return completions
 
     def events_after(self, event_id: int, limit: int = 300) -> list[dict]:
         with self.connect() as db:

@@ -1,7 +1,8 @@
+import json
+import sqlite3
 import tempfile
 import unittest
-import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -165,6 +166,130 @@ class DatabaseTests(unittest.TestCase):
         restored = self.database.recent_runs(1)[0]
         self.assertEqual(restored["result"], result)
 
+    def test_today_task_completions_use_structured_success_results(self):
+        rows = (
+            (
+                "completed", "keju", "succeeded", "2026-07-27T15:30:00+00:00",
+                "2026-07-27T16:00:00+00:00", "completed",
+            ),
+            (
+                "already", "fuli_qiandao", "succeeded", "2026-07-28T01:00:00+00:00",
+                "2026-07-28T01:05:00+00:00", "already_completed",
+            ),
+            (
+                "safe", "baotu", "failed", "2026-07-28T02:00:00+00:00",
+                "2026-07-28T02:05:00+00:00", "safe_stopped",
+            ),
+            (
+                "limit", "yunbiao", "succeeded", "2026-07-28T03:00:00+00:00",
+                "2026-07-28T03:05:00+00:00", "limit_reached",
+            ),
+            (
+                "cancelled", "shimen", "cancelled", "2026-07-28T04:00:00+00:00",
+                "2026-07-28T04:05:00+00:00", "cancelled",
+            ),
+            (
+                "old", "sanjieqiyuan", "succeeded", "2026-07-27T15:00:00+00:00",
+                "2026-07-27T15:59:59+00:00", "completed",
+            ),
+            (
+                "next", "zhuogui", "succeeded", "2026-07-28T15:30:00+00:00",
+                "2026-07-28T16:00:00+00:00", "completed",
+            ),
+        )
+        with self.database.connect() as db:
+            for (
+                run_id, task_id, status, started_at, finished_at, result_status
+            ) in rows:
+                db.execute(
+                    """INSERT INTO task_runs(
+                    id, task_id, task_name, status, options_json, started_at,
+                    finished_at, result_json
+                    ) VALUES(?,?,?,?,?,?,?,?)""",
+                    (
+                        run_id,
+                        task_id,
+                        task_id,
+                        status,
+                        "{}",
+                        started_at,
+                        finished_at,
+                        json.dumps({"status": result_status}),
+                    ),
+                )
+
+        completions = self.database.today_task_completions(
+            date(2026, 7, 28), timezone(timedelta(hours=8))
+        )
+
+        self.assertEqual(set(completions), {"keju", "fuli_qiandao"})
+        self.assertEqual(completions["keju"], {
+            "status": "completed",
+            "completedAt": "2026-07-27T16:00:00+00:00",
+            "resultStatus": "completed",
+        })
+        self.assertEqual(completions["fuli_qiandao"]["resultStatus"], "already_completed")
+
+    def test_today_task_completion_survives_later_failure_and_bad_json(self):
+        with self.database.connect() as db:
+            for values in (
+                (
+                    "success", "keju", "succeeded", "2026-07-28T01:00:00+00:00",
+                    '{"status":"completed"}',
+                ),
+                (
+                    "later-safe-stop", "keju", "failed", "2026-07-28T02:00:00+00:00",
+                    '{"status":"safe_stopped"}',
+                ),
+                (
+                    "bad-json", "baotu", "succeeded", "2026-07-28T03:00:00+00:00",
+                    "not-json",
+                ),
+            ):
+                run_id, task_id, status, started_at, result_json = values
+                db.execute(
+                    """INSERT INTO task_runs(
+                    id, task_id, task_name, status, options_json, started_at, result_json
+                    ) VALUES(?,?,?,?,?,?,?)""",
+                    (
+                        run_id, task_id, task_id, status, "{}", started_at,
+                        result_json,
+                    ),
+                )
+
+        completions = self.database.today_task_completions(
+            date(2026, 7, 28), timezone.utc
+        )
+
+        self.assertEqual(set(completions), {"keju"})
+        self.assertEqual(completions["keju"]["resultStatus"], "completed")
+
+    def test_today_task_completion_derives_date_from_injected_timezone(self):
+        local_timezone = timezone(timedelta(hours=8))
+        with self.database.connect() as db:
+            db.execute(
+                """INSERT INTO task_runs(
+                id, task_id, task_name, status, options_json, started_at,
+                finished_at, result_json
+                ) VALUES(?,?,?,?,?,?,?,?)""",
+                (
+                    "timezone", "keju", "科举乡试", "succeeded", "{}",
+                    "2026-07-27T16:20:00+00:00", "2026-07-27T16:30:00+00:00",
+                    '{"status":"completed"}',
+                ),
+            )
+
+        with patch("dashboard.database.datetime", wraps=datetime) as mocked_datetime:
+            mocked_datetime.now.return_value = datetime(
+                2026, 7, 28, 0, 30, tzinfo=local_timezone
+            )
+            completions = self.database.today_task_completions(
+                local_timezone=local_timezone
+            )
+
+        mocked_datetime.now.assert_called_once_with(local_timezone)
+        self.assertEqual(set(completions), {"keju"})
+
     def test_existing_database_is_migrated_for_structured_results(self):
         path = Path(self.temp.name) / "legacy.sqlite3"
         with sqlite3.connect(path) as db:
@@ -179,11 +304,14 @@ class DatabaseTests(unittest.TestCase):
         migrated = Database(path)
         with migrated.connect() as db:
             columns = {row["name"] for row in db.execute("PRAGMA table_info(task_runs)")}
+            indexes = {row["name"] for row in db.execute("PRAGMA index_list(task_runs)")}
             game_data_columns = {
                 row["name"]
                 for row in db.execute("PRAGMA table_info(game_data_snapshots)")
             }
         self.assertIn("result_json", columns)
+        self.assertIn("idx_task_runs_completed_task", indexes)
+        self.assertNotIn("idx_task_runs_started_task", indexes)
         self.assertEqual(game_data_columns, {
             "id",
             "captured_at",
