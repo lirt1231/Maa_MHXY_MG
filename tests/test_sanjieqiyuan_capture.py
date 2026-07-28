@@ -220,6 +220,25 @@ class SanjieNavigationTests(unittest.TestCase):
         self.assertEqual(decision["status"], "click_join")
         self.assertEqual(decision["click"], [840, 327])
 
+    def test_confirmed_daily_tab_recovers_when_stylized_title_is_missed(self):
+        scene = {
+            "image_size": self.image_size,
+            "battle": False,
+            "battle_box": None,
+            "activity_box": None,
+            "texts": [
+                self.item("日常活动", 120, 174, 106),
+                self.item("三界奇缘", 650, 560, 100),
+                self.item("参加", 805, 615, 70),
+            ],
+        }
+
+        self.assertEqual(classify_scene(scene)["status"], "click_daily")
+        self.assertEqual(
+            classify_scene(scene, daily_tab_confirmed=True),
+            {"status": "click_join", "click": [840, 627]},
+        )
+
     def test_rejects_festival_activity_text_as_toolbar_entry(self):
         scene = {
             "image_size": self.image_size,

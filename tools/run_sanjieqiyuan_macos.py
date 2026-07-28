@@ -153,7 +153,7 @@ def recognition_detail(
     return detail.nodes[-1].recognition
 
 
-def read_scene(tasker, capture, guard):
+def read_scene(tasker, capture, guard, *, daily_tab_confirmed=False):
     """Read the current client scene without causing any input."""
     image = capture.capture(guard)
     height, width = image.shape[:2]
@@ -200,7 +200,9 @@ def read_scene(tasker, capture, guard):
         else None,
         "texts": texts,
     }
-    scene["decision"] = classify_scene(scene)
+    scene["decision"] = classify_scene(
+        scene, daily_tab_confirmed=daily_tab_confirmed
+    )
     return scene
 
 
@@ -232,7 +234,7 @@ def _navigation_action_signature(decision, image_size):
     )
 
 
-def classify_scene(scene):
+def classify_scene(scene, *, daily_tab_confirmed=False):
     """Choose only actions that are justified by current OCR evidence."""
     width, height = scene["image_size"]
     items = scene["texts"]
@@ -240,8 +242,6 @@ def classify_scene(scene):
     def matching(pattern):
         regex = re.compile(pattern)
         return [item for item in items if regex.search(item["text"])]
-
-    daily_page = daily_schedule_page_evidence(items, scene["image_size"])
 
     if matching(r"第\s*\d+\s*题"):
         return {"status": "answering"}
@@ -265,6 +265,15 @@ def classify_scene(scene):
         }
 
     daily_tabs = matching(r"日常活动")
+    daily_page = daily_schedule_page_evidence(items, scene["image_size"])
+    if daily_tab_confirmed and daily_tabs:
+        # Some themes make the stylized 活动 title unreadable to OCR. Once this
+        # runner clicked 日常活动, the still-visible tab is sufficient stateful
+        # evidence to inspect task cards without clicking the tab again.
+        daily_page = daily_page or {
+            "page_title": "confirmed_navigation",
+            "daily_tab_detected": True,
+        }
     activity_buttons = [
         item
         for item in matching(r"^活动$")
@@ -459,7 +468,12 @@ def navigate_to_exam(tasker, controller, capture, native_input, timeout, guard):
     action_counts = {}
     while time.monotonic() < deadline:
         guard.checkpoint()
-        scene = read_scene(tasker, capture, guard)
+        scene = read_scene(
+            tasker,
+            capture,
+            guard,
+            daily_tab_confirmed=daily_selected,
+        )
         decision = scene["decision"]
         status = decision["status"]
         print(
