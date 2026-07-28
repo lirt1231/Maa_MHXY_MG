@@ -83,6 +83,14 @@ TASK_RESULT_SCHEMAS = {
             "already_completed": {"actions", "clicks"},
         },
     },
+    "baotu": {
+        "statuses": {"completed", "already_completed", "safe_stopped", "cancelled"},
+        "fields": {"task_id", "status", "reason", "actions", "clicks"},
+        "required": {
+            "completed": {"actions", "clicks"},
+            "already_completed": {"actions", "clicks"},
+        },
+    },
 }
 
 SCENE_LABELS = {
@@ -107,6 +115,11 @@ SCENE_LABELS = {
     "already_completed": "今日已完成",
     "scroll_daily": "日常活动列表",
     "no_clan": "未加入帮派",
+    "open_activity": "活动入口",
+    "open_daily": "日常活动入口",
+    "join_task": "宝图任务卡片",
+    "accept_dialogue": "宝图任务领取对话",
+    "continue_task": "宝图任务栏",
 }
 
 ACTION_LABELS = {
@@ -147,6 +160,11 @@ ACTION_LABELS = {
     "click_activity": "打开活动页面",
     "click_activity_toolbar": "点击经过识别的活动工具栏入口",
     "click_activity_template": "点击经过模板确认的活动入口",
+    "open_activity": "打开活动页面",
+    "open_daily": "打开日常活动列表",
+    "join_task": "点击同一卡片内的宝图任务参加按钮",
+    "accept_dialogue": "选择经过识别的“听听无妨”",
+    "continue_task": "点击经过识别的宝图任务栏",
 }
 
 
@@ -370,6 +388,8 @@ class RunnerManager:
             return [sys.executable, str(ROOT / "tools/run_fuli_qiandao_macos.py")]
         if task_id == "bangpai_qiandao":
             return [sys.executable, str(ROOT / "tools/run_bangpai_qiandao_macos.py")]
+        if task_id == "baotu":
+            return [sys.executable, str(ROOT / "tools/run_baotu_macos.py")]
         raise ValueError("不支持的任务")
 
     def _inspection_command(self, task_id: str, options: dict) -> list[str]:
@@ -380,6 +400,7 @@ class RunnerManager:
             "zhuogui": "run_zhuogui_macos.py",
             "fuli_qiandao": "run_fuli_qiandao_macos.py",
             "bangpai_qiandao": "run_bangpai_qiandao_macos.py",
+            "baotu": "run_baotu_macos.py",
         }
         command = [sys.executable, str(ROOT / "tools" / scripts[task_id]), "--inspect-scene"]
         if task_id == "sanjieqiyuan":
@@ -440,6 +461,11 @@ class RunnerManager:
             ready = scene in {
                 "expand_menu", "open_clan", "open_welfare", "sign_in",
                 "claim_dividend", "confirm_dividend",
+            }
+        elif task_id == "baotu":
+            ready = scene in {
+                "open_activity", "open_daily", "scroll_daily", "join_task",
+                "accept_dialogue", "continue_task", "battle", "auto_pathing",
             }
 
         action_key = proposed if proposed else scene
@@ -602,6 +628,7 @@ class RunnerManager:
                 "zhuogui": "捉鬼任务已完成目标轮数",
                 "fuli_qiandao": "福利签到完成",
                 "bangpai_qiandao": "帮派签到与分红领取完成",
+                "baotu": "宝图任务完成",
             }[task_id]
         return None
 
@@ -736,7 +763,24 @@ class RunnerManager:
             payload["stage"] = "正在识别帮派签到与分红页面"
         elif task_id == "bangpai_qiandao" and line.startswith(RESULT_PREFIX):
             payload["stage"] = RunnerManager._sign_in_result_stage(line, clan=True)
+        elif task_id == "baotu" and '"event": "scene"' in line:
+            payload["stage"] = "正在识别并推进宝图任务"
+        elif task_id == "baotu" and line.startswith(RESULT_PREFIX):
+            payload["stage"] = RunnerManager._bounded_task_result_stage(line, "宝图任务")
         return payload
+
+    @staticmethod
+    def _bounded_task_result_stage(line: str, label: str) -> str:
+        try:
+            status = json.loads(line[len(RESULT_PREFIX):]).get("status")
+        except (json.JSONDecodeError, AttributeError):
+            return f"{label}正在结束"
+        return {
+            "completed": f"{label}完成",
+            "already_completed": f"{label}今日已完成",
+            "safe_stopped": f"{label}已安全停止",
+            "cancelled": f"{label}已取消",
+        }.get(status, f"{label}正在结束")
 
     @staticmethod
     def _sign_in_result_stage(line: str, *, clan: bool) -> str:
@@ -766,5 +810,6 @@ class RunnerManager:
             "zhuogui": "捉鬼流程已停止，请检查组队状态、弹窗和当前游戏页面。",
             "fuli_qiandao": "福利签到未能继续，请保持主界面或福利页面完整可见后重试。",
             "bangpai_qiandao": "帮派签到未能继续，请确认角色已加入帮派并保持相关页面完整可见。",
+            "baotu": "宝图任务未能继续，请保持主界面、日常活动页或宝图任务过程完整可见。",
         }
         return f"{hints[task_id]}（进程代码 {return_code}）"

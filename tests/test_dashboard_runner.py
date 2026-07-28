@@ -251,6 +251,11 @@ class RunnerTaskContractTests(unittest.TestCase):
         self.assertTrue(command[-1].endswith("tools/run_bangpai_qiandao_macos.py"))
         self.assertEqual(len(command), 2)
 
+    def test_treasure_map_uses_dedicated_safe_runner(self):
+        command = self.manager._command("baotu", {})
+        self.assertTrue(command[-1].endswith("tools/run_baotu_macos.py"))
+        self.assertEqual(len(command), 2)
+
     def test_imperial_exam_commands_keep_exam_types_separate(self):
         xiangshi_options = {
             "maxSteps": 20,
@@ -369,6 +374,7 @@ class RunnerTaskContractTests(unittest.TestCase):
             "zhuogui": {"status": "completed", "rounds": 2, "target_rounds": 2, "steps": 24},
             "fuli_qiandao": {"status": "already_completed", "actions": 0, "clicks": 0},
             "bangpai_qiandao": {"status": "completed", "actions": 1, "clicks": 1},
+            "baotu": {"status": "completed", "actions": 8, "clicks": 6},
         }
         for task_id, payload in fixtures.items():
             with self.subTest(task_id=task_id):
@@ -421,6 +427,7 @@ class RunnerTaskContractTests(unittest.TestCase):
             ("zhuogui", {"rounds": 2}, {"status": "completed", "rounds": 2, "target_rounds": 2, "steps": 24}),
             ("fuli_qiandao", {}, {"status": "completed", "actions": 5, "clicks": 3}),
             ("bangpai_qiandao", {}, {"status": "already_completed", "actions": 0, "clicks": 0}),
+            ("baotu", {}, {"status": "completed", "actions": 8, "clicks": 6}),
         ]
         for task_id, options, payload in fixtures:
             with self.subTest(task_id=task_id):
@@ -457,6 +464,7 @@ class RunnerInspectionTests(unittest.TestCase):
             "zhuogui": ["run_zhuogui_macos.py", "--inspect-scene", "--rounds", "1"],
             "fuli_qiandao": ["run_fuli_qiandao_macos.py", "--inspect-scene"],
             "bangpai_qiandao": ["run_bangpai_qiandao_macos.py", "--inspect-scene"],
+            "baotu": ["run_baotu_macos.py", "--inspect-scene"],
         }
         for task_id, suffix in expected.items():
             with self.subTest(task_id=task_id):
@@ -551,6 +559,17 @@ class RunnerInspectionTests(unittest.TestCase):
         self.assertTrue(result["canStart"])
         self.assertEqual(result["sceneLabel"], "可领取帮派分红")
         self.assertEqual(result["proposedAction"], "领取当前可用的帮派分红")
+
+    def test_parser_accepts_treasure_map_daily_navigation(self):
+        output = (
+            'preflight_json={"image_size":[1020,718],'
+            '"decision":{"status":"join_task","box":[500,210,60,25]},'
+            '"texts":[{"text":"宝图任务"},{"text":"参加"}],"templates":{}}'
+        )
+        result = self.manager._parse_inspection("baotu", {}, output)
+        self.assertTrue(result["canStart"])
+        self.assertEqual(result["sceneLabel"], "宝图任务卡片")
+        self.assertIn("宝图任务", result["proposedAction"])
 
     def test_parser_allows_sanjie_activity_list_scroll(self):
         output = (
