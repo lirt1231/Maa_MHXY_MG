@@ -27,7 +27,7 @@ ASSET_BRANCH_PATTERN = (
 
 
 def classify_shimen_scene(texts, templates, image_size):
-    if templates.get("completion") or find_items(
+    if find_items(
         texts, r"师门任务完成|今日师门任务已完成|师门任务全部完成"
     ):
         return {"status": "completed"}
@@ -36,6 +36,16 @@ def classify_shimen_scene(texts, templates, image_size):
         return {"status": "wait", "reason": "battle"}
     if templates.get("auto_pathing"):
         return {"status": "wait", "reason": "auto_pathing"}
+    battle_cancel = find_items(
+        texts,
+        r"取消",
+        image_size,
+        {"min_x": 0.9, "min_y": 0.88},
+    )
+    if battle_cancel:
+        return {"status": "wait", "reason": "battle_ocr"}
+    if find_items(texts, r"自动寻路中?|寻路中"):
+        return {"status": "wait", "reason": "auto_pathing_ocr"}
 
     asset_branch = find_items(texts, ASSET_BRANCH_PATTERN)
     if asset_branch:
@@ -53,11 +63,17 @@ def classify_shimen_scene(texts, templates, image_size):
     if progress_buttons:
         return {"status": "progress_task", "box": valid_box(progress_buttons[0])}
 
-    sidebar_tasks = [
+    sidebar_instructions = [
         item
-        for item in find_items(texts, r"师门任务|师门-.*")
+        for item in find_items(texts, r"向师父领取历练任务|继续师门历练任务")
         if in_region(item, image_size, min_x=0.78, min_y=0.1, max_y=0.78)
     ]
+    sidebar_details = [
+        item
+        for item in find_items(texts, r"师门任务|师门[-－].*|师门历练[-－].*")
+        if in_region(item, image_size, min_x=0.78, min_y=0.1, max_y=0.78)
+    ]
+    sidebar_tasks = sidebar_instructions + sidebar_details
     if sidebar_tasks:
         return {"status": "continue_task", "box": valid_box(sidebar_tasks[0])}
 

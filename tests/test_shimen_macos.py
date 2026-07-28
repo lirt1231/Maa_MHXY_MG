@@ -48,6 +48,18 @@ class ShimenSceneTests(unittest.TestCase):
         )
         self.assertEqual(chat["status"], "unknown")
 
+    def test_current_sect_training_sidebar_is_actionable(self):
+        decision = classify_shimen_scene(
+            [
+                text("师门历练", (831, 153, 73, 20)),
+                text("向师父领取历练任务", (830, 180, 147, 18)),
+            ],
+            {},
+            (1020, 718),
+        )
+        self.assertEqual(decision["status"], "continue_task")
+        self.assertEqual(decision["box"], [830, 180, 147, 18])
+
     def test_battle_waits_even_if_standard_item_label_is_visible(self):
         decision = classify_shimen_scene(
             [text("药品", (900, 600, 70, 25))],
@@ -56,11 +68,28 @@ class ShimenSceneTests(unittest.TestCase):
         )
         self.assertEqual(decision["status"], "wait")
 
+    def test_current_battle_cancel_is_wait_only(self):
+        decision = classify_shimen_scene(
+            [text("取消", (961, 680, 44, 25))], {}, (1020, 718)
+        )
+        self.assertEqual(decision, {"status": "wait", "reason": "battle_ocr"})
+
     def test_completion_has_priority_over_background_text(self):
         decision = classify_shimen_scene(
             [text("师门任务完成"), text("购买药品")], {}, (1020, 718)
         )
         self.assertEqual(decision["status"], "completed")
+
+    def test_legacy_completion_template_cannot_finish_subtask_page(self):
+        decision = classify_shimen_scene(
+            [
+                text("已完成", (615, 413, 52, 20)),
+                text("去完成", (750, 414, 66, 27)),
+            ],
+            {"completion": (413, 509, 500, 196)},
+            (1020, 718),
+        )
+        self.assertEqual(decision["status"], "progress_task")
 
 
 class ShimenRunnerTests(unittest.TestCase):
@@ -99,6 +128,26 @@ class ShimenRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "连续重复"):
             run(args, Mock())
         self.assertEqual(runtime.click_box.call_count, 2)
+
+    @patch("tools.run_shimen_macos.MacOSTaskRuntime")
+    def test_repeated_five_step_navigation_cycle_stops_early(self, runtime_class):
+        runtime = runtime_class.return_value
+        decisions = [
+            {"status": "progress_task", "box": [500, 410, 100, 30]},
+            {"status": "continue_task", "box": [830, 180, 130, 28]},
+            {"status": "open_activity", "box": [260, 45, 50, 22]},
+            {"status": "open_daily", "box": [80, 90, 100, 30]},
+            {"status": "join_task", "box": [500, 210, 60, 25]},
+        ] * 2
+        runtime.read_scene.return_value = scene()
+        args = SimpleNamespace(inspect_scene=False, recognize_only=False, max_steps=12)
+
+        with patch(
+            "tools.run_shimen_macos.classify_shimen_scene", side_effect=decisions
+        ):
+            with self.assertRaisesRegex(RuntimeError, "五步页面序列"):
+                run(args, Mock())
+        self.assertEqual(runtime.click_box.call_count, 9)
 
 
 if __name__ == "__main__":

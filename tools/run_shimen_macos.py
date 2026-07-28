@@ -20,7 +20,6 @@ from shimen_macos_core import classify_shimen_scene  # noqa: E402
 TEMPLATES = {
     "activity_toolbar": ["zonghe/huodong1.png", "zonghe/huodong2.png"],
     "activity_header": ["zonghe/huodong_jiemian_panduan.png"],
-    "completion": ["shimen/shimenwancheng2.png", "shimen/shimenwancheng.png"],
     "battle": ["zhandou/zidong.png", "zhandou/quxiao.png"],
     "auto_pathing": [
         "zonghe/zidongxunlu1.png",
@@ -67,6 +66,7 @@ def run(args, guard):
     daily_reset_done = False
     last_click_signature = None
     consecutive_same_clicks = 0
+    recent_statuses = []
 
     for step in range(1, args.max_steps + 1):
         scene = runtime.read_scene(TEMPLATES)
@@ -74,6 +74,12 @@ def run(args, guard):
             scene.texts, scene.templates, scene.image_size
         )
         status = decision["status"]
+        recent_statuses.append(status)
+        recent_statuses = recent_statuses[-10:]
+        if len(recent_statuses) == 10 and recent_statuses[:5] == recent_statuses[5:]:
+            raise RuntimeError(
+                "师门重复相同的五步页面序列，已停止以避免导航循环"
+            )
         log_event("scene", step=step, status=status, reason=decision.get("reason"))
         if args.inspect_scene or args.recognize_only:
             print(
@@ -115,7 +121,7 @@ def run(args, guard):
             actions += 1
             clicks += 1
             unknown_polls = 0
-            guard.wait(2.0)
+            guard.wait(7.0 if status == "continue_task" else 2.0)
             continue
         if status == "scroll_daily":
             navigation_inputs += 1
