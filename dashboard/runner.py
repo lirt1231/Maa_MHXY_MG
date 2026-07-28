@@ -101,6 +101,14 @@ TASK_RESULT_SCHEMAS = {
             for status in {"completed", "already_completed"}
         },
     },
+    "shimen": {
+        "statuses": {"completed", "already_completed", "safe_stopped", "cancelled"},
+        "fields": {"task_id", "status", "reason", "actions", "clicks"},
+        "required": {
+            "completed": {"actions", "clicks"},
+            "already_completed": {"actions", "clicks"},
+        },
+    },
 }
 
 SCENE_LABELS = {
@@ -127,14 +135,16 @@ SCENE_LABELS = {
     "no_clan": "未加入帮派",
     "open_activity": "活动入口",
     "open_daily": "日常活动入口",
-    "join_task": "宝图任务卡片",
+    "join_task": "日常任务卡片",
     "accept_dialogue": "宝图任务领取对话",
-    "continue_task": "宝图任务栏",
+    "continue_task": "当前任务栏",
     "select_normal": "普通镖领取对话",
     "confirm_normal": "普通镖确认页",
     "delivery_active": "普通运镖进行中",
     "blocked_resource": "普通运镖条件不足",
     "unsupported_delivery": "非普通镖选项",
+    "progress_task": "师门任务推进页",
+    "unsupported_asset_branch": "师门资产操作分支",
 }
 
 ACTION_LABELS = {
@@ -177,12 +187,13 @@ ACTION_LABELS = {
     "click_activity_template": "点击经过模板确认的活动入口",
     "open_activity": "打开活动页面",
     "open_daily": "打开日常活动列表",
-    "join_task": "点击同一卡片内的宝图任务参加按钮",
+    "join_task": "点击同一卡片内的任务参加按钮",
     "accept_dialogue": "选择经过识别的“听听无妨”",
-    "continue_task": "点击经过识别的宝图任务栏",
+    "continue_task": "点击经过识别的任务栏",
     "select_normal": "选择经过识别的“押送普通镖银”",
     "confirm_normal": "确认押送普通镖银",
     "delivery_active": "等待本轮普通运镖结束",
+    "progress_task": "点击经过识别的“去完成”或“继续任务”",
 }
 
 
@@ -415,6 +426,8 @@ class RunnerManager:
                 "--rounds",
                 str(options["rounds"]),
             ]
+        if task_id == "shimen":
+            return [sys.executable, str(ROOT / "tools/run_shimen_macos.py")]
         raise ValueError("不支持的任务")
 
     def _inspection_command(self, task_id: str, options: dict) -> list[str]:
@@ -427,6 +440,7 @@ class RunnerManager:
             "bangpai_qiandao": "run_bangpai_qiandao_macos.py",
             "baotu": "run_baotu_macos.py",
             "yunbiao": "run_yunbiao_macos.py",
+            "shimen": "run_shimen_macos.py",
         }
         command = [sys.executable, str(ROOT / "tools" / scripts[task_id]), "--inspect-scene"]
         if task_id == "sanjieqiyuan":
@@ -501,6 +515,11 @@ class RunnerManager:
                 "select_normal", "confirm_normal", "continue_task",
                 "delivery_active", "battle", "auto_pathing",
             }
+        elif task_id == "shimen":
+            ready = scene in {
+                "open_activity", "open_daily", "scroll_daily", "join_task",
+                "continue_task", "progress_task", "battle", "auto_pathing",
+            }
 
         action_key = proposed if proposed else scene
         expected_exam_type = {
@@ -537,6 +556,9 @@ class RunnerManager:
         elif scene == "waiting_for_question":
             summary = "科举尚未进入正式题目"
             reason = "等待正式题目出现后重新检测"
+        elif scene == "unsupported_asset_branch":
+            summary = "当前师门分支需要资产操作，自动化不会继续"
+            reason = f"请手动处理后重新检测；识别内容：{decision.get('reason', '未知')}"
         else:
             summary = "当前画面不支持直接启动此任务"
             reason = "请按任务说明切换到主界面或指定页面后重新检测"
@@ -566,6 +588,15 @@ class RunnerManager:
         action_label = ACTION_LABELS.get(action_key)
         if task_id == "bangpai_qiandao" and action_key == "open_welfare":
             action_label = "打开帮派福利页面"
+        task_action_overrides = {
+            ("baotu", "join_task"): "点击同一卡片内的宝图任务参加按钮",
+            ("baotu", "continue_task"): "点击经过识别的宝图任务栏",
+            ("yunbiao", "join_task"): "点击同一卡片内的运镖参加按钮",
+            ("yunbiao", "continue_task"): "点击经过识别的运镖任务栏",
+            ("shimen", "join_task"): "点击同一卡片内的师门任务参加按钮",
+            ("shimen", "continue_task"): "点击经过识别的师门任务栏",
+        }
+        action_label = task_action_overrides.get((task_id, action_key), action_label)
         return {
             "taskId": task_id,
             "status": "ready" if ready else "unsupported",
@@ -664,6 +695,7 @@ class RunnerManager:
                 "bangpai_qiandao": "帮派签到与分红领取完成",
                 "baotu": "宝图任务完成",
                 "yunbiao": "普通运镖完成",
+                "shimen": "师门任务完成",
             }[task_id]
         return None
 
@@ -806,6 +838,10 @@ class RunnerManager:
             payload["stage"] = "正在识别并推进普通运镖"
         elif task_id == "yunbiao" and line.startswith(RESULT_PREFIX):
             payload["stage"] = RunnerManager._bounded_task_result_stage(line, "普通运镖")
+        elif task_id == "shimen" and '"event": "scene"' in line:
+            payload["stage"] = "正在识别并推进低风险师门任务"
+        elif task_id == "shimen" and line.startswith(RESULT_PREFIX):
+            payload["stage"] = RunnerManager._bounded_task_result_stage(line, "师门任务")
         return payload
 
     @staticmethod
@@ -851,5 +887,6 @@ class RunnerManager:
             "bangpai_qiandao": "帮派签到未能继续，请确认角色已加入帮派并保持相关页面完整可见。",
             "baotu": "宝图任务未能继续，请保持主界面、日常活动页或宝图任务过程完整可见。",
             "yunbiao": "普通运镖未能继续，请检查活力、镖种和当前任务页面。",
+            "shimen": "师门任务未能继续，请查看是否进入购买、提交或其他资产操作分支。",
         }
         return f"{hints[task_id]}（进程代码 {return_code}）"

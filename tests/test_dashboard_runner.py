@@ -261,6 +261,11 @@ class RunnerTaskContractTests(unittest.TestCase):
         self.assertTrue(command[1].endswith("tools/run_yunbiao_macos.py"))
         self.assertEqual(command[2:], ["--rounds", "3"])
 
+    def test_sect_task_uses_low_risk_runner(self):
+        command = self.manager._command("shimen", {})
+        self.assertTrue(command[-1].endswith("tools/run_shimen_macos.py"))
+        self.assertEqual(len(command), 2)
+
     def test_imperial_exam_commands_keep_exam_types_separate(self):
         xiangshi_options = {
             "maxSteps": 20,
@@ -384,6 +389,7 @@ class RunnerTaskContractTests(unittest.TestCase):
                 "status": "completed", "rounds": 3, "target_rounds": 3,
                 "actions": 8, "clicks": 6,
             },
+            "shimen": {"status": "completed", "actions": 20, "clicks": 20},
         }
         for task_id, payload in fixtures.items():
             with self.subTest(task_id=task_id):
@@ -441,6 +447,7 @@ class RunnerTaskContractTests(unittest.TestCase):
                 "yunbiao", {"rounds": 3},
                 {"status": "completed", "rounds": 3, "target_rounds": 3, "actions": 8, "clicks": 6},
             ),
+            ("shimen", {}, {"status": "completed", "actions": 20, "clicks": 20}),
         ]
         for task_id, options, payload in fixtures:
             with self.subTest(task_id=task_id):
@@ -479,6 +486,7 @@ class RunnerInspectionTests(unittest.TestCase):
             "bangpai_qiandao": ["run_bangpai_qiandao_macos.py", "--inspect-scene"],
             "baotu": ["run_baotu_macos.py", "--inspect-scene"],
             "yunbiao": ["run_yunbiao_macos.py", "--inspect-scene", "--rounds", "3"],
+            "shimen": ["run_shimen_macos.py", "--inspect-scene"],
         }
         for task_id, suffix in expected.items():
             with self.subTest(task_id=task_id):
@@ -582,7 +590,7 @@ class RunnerInspectionTests(unittest.TestCase):
         )
         result = self.manager._parse_inspection("baotu", {}, output)
         self.assertTrue(result["canStart"])
-        self.assertEqual(result["sceneLabel"], "宝图任务卡片")
+        self.assertEqual(result["sceneLabel"], "日常任务卡片")
         self.assertIn("宝图任务", result["proposedAction"])
 
     def test_parser_accepts_active_ordinary_escort(self):
@@ -595,6 +603,17 @@ class RunnerInspectionTests(unittest.TestCase):
         self.assertTrue(result["canStart"])
         self.assertEqual(result["sceneLabel"], "普通运镖进行中")
         self.assertIn("等待", result["proposedAction"])
+
+    def test_parser_reports_sect_asset_branch_as_unsupported(self):
+        output = (
+            'preflight_json={"image_size":[1020,718],'
+            '"decision":{"status":"unsupported_asset_branch","reason":"购买一件装备"},'
+            '"texts":[{"text":"购买一件装备"}],"templates":{}}'
+        )
+        result = self.manager._parse_inspection("shimen", {}, output)
+        self.assertFalse(result["canStart"])
+        self.assertIn("资产操作", result["summary"])
+        self.assertIn("购买一件装备", result["reason"])
 
     def test_parser_allows_sanjie_activity_list_scroll(self):
         output = (

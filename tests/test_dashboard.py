@@ -23,7 +23,7 @@ class TaskRegistryTests(unittest.TestCase):
             set(TASKS),
             {
                 "sanjieqiyuan", "keju", "keju_huishi", "zhuogui",
-                "fuli_qiandao", "bangpai_qiandao", "baotu", "yunbiao",
+                "fuli_qiandao", "bangpai_qiandao", "baotu", "yunbiao", "shimen",
             },
         )
         self.assertTrue(all(task["checklist"] for task in task_list()))
@@ -44,6 +44,12 @@ class TaskRegistryTests(unittest.TestCase):
         self.assertEqual(validate_options("yunbiao", {}), {"rounds": 3})
         with self.assertRaisesRegex(ValueError, "1–3"):
             validate_options("yunbiao", {"rounds": 4})
+        self.assertEqual(validate_options("shimen", {}), {})
+
+    def test_sect_task_discloses_and_blocks_asset_branches(self):
+        task = TASKS["shimen"]
+        self.assertIn("资产操作一律保留现场", task["summary"])
+        self.assertTrue(any("不购买" in warning for warning in task["warnings"]))
         self.assertEqual(
             validate_options("sanjieqiyuan", {}),
             {"maxSteps": 10, "navigation": "auto"},

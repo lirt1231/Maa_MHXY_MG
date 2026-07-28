@@ -1,0 +1,105 @@
+import io
+import json
+import unittest
+from contextlib import redirect_stdout
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
+
+from tools.run_shimen_macos import run
+from tools.shimen_macos_core import classify_shimen_scene
+
+
+def text(value, box=(10, 20, 80, 24)):
+    return {"text": value, "box": list(box)}
+
+
+def scene(texts=None, templates=None):
+    return SimpleNamespace(
+        image_size=(1020, 718),
+        texts=texts or [],
+        templates=templates or {},
+    )
+
+
+class ShimenSceneTests(unittest.TestCase):
+    def test_asset_branch_blocks_progress_button(self):
+        decision = classify_shimen_scene(
+            [
+                text("购买一件装备交给师父", (350, 220, 300, 30)),
+                text("去完成", (500, 410, 100, 30)),
+            ],
+            {},
+            (1020, 718),
+        )
+        self.assertEqual(decision["status"], "unsupported_asset_branch")
+        self.assertIn("购买", decision["reason"])
+
+    def test_progress_and_sidebar_require_expected_regions(self):
+        progress = classify_shimen_scene(
+            [text("去完成", (500, 410, 100, 30))], {}, (1020, 718)
+        )
+        self.assertEqual(progress["status"], "progress_task")
+        sidebar = classify_shimen_scene(
+            [text("师门-巡逻", (830, 180, 130, 28))], {}, (1020, 718)
+        )
+        self.assertEqual(sidebar["status"], "continue_task")
+        chat = classify_shimen_scene(
+            [text("师门-巡逻", (100, 650, 130, 28))], {}, (1020, 718)
+        )
+        self.assertEqual(chat["status"], "unknown")
+
+    def test_battle_waits_even_if_standard_item_label_is_visible(self):
+        decision = classify_shimen_scene(
+            [text("药品", (900, 600, 70, 25))],
+            {"battle": (1, 2, 3, 4)},
+            (1020, 718),
+        )
+        self.assertEqual(decision["status"], "wait")
+
+    def test_completion_has_priority_over_background_text(self):
+        decision = classify_shimen_scene(
+            [text("师门任务完成"), text("购买药品")], {}, (1020, 718)
+        )
+        self.assertEqual(decision["status"], "completed")
+
+
+class ShimenRunnerTests(unittest.TestCase):
+    @patch("tools.run_shimen_macos.MacOSTaskRuntime")
+    def test_low_risk_flow_completes_with_evidence_only(self, runtime_class):
+        runtime = runtime_class.return_value
+        runtime.read_scene.side_effect = [
+            scene([text("师门任务", (830, 180, 130, 28))]),
+            scene([text("继续任务", (500, 410, 100, 30))]),
+            scene([], {"auto_pathing": (1, 2, 3, 4)}),
+            scene([], {"battle": (1, 2, 3, 4)}),
+            scene([text("师门任务完成", (420, 180, 180, 30))]),
+        ]
+        args = SimpleNamespace(inspect_scene=False, recognize_only=False, max_steps=8)
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            self.assertEqual(run(args, Mock()), 0)
+
+        self.assertEqual(runtime.click_box.call_count, 2)
+        result = next(
+            json.loads(line[len("result_json="):])
+            for line in output.getvalue().splitlines()
+            if line.startswith("result_json=")
+        )
+        self.assertEqual(result["status"], "completed")
+
+    @patch("tools.run_shimen_macos.MacOSTaskRuntime")
+    def test_repeated_same_task_click_stops_at_two_clicks(self, runtime_class):
+        runtime = runtime_class.return_value
+        runtime.read_scene.return_value = scene(
+            [text("师门-巡逻", (830, 180, 130, 28))]
+        )
+        args = SimpleNamespace(inspect_scene=False, recognize_only=False, max_steps=5)
+
+        with self.assertRaisesRegex(RuntimeError, "连续重复"):
+            run(args, Mock())
+        self.assertEqual(runtime.click_box.call_count, 2)
+
+
+if __name__ == "__main__":
+    unittest.main()
