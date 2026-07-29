@@ -86,7 +86,10 @@ def classify_daily_navigation(
         return {"status": "open_daily", "box": valid_box(daily_tabs[0])}
 
     targets = find_items(texts, target_pattern)
-    if daily_page and targets:
+    confirmed_daily_page = bool(daily_page) or bool(
+        daily_tab_confirmed and daily_tabs
+    )
+    if confirmed_daily_page and targets:
         target = targets[0]
         completed = [
             item
@@ -107,8 +110,11 @@ def classify_daily_navigation(
     if daily_page:
         return {"status": "scroll_daily", "reason": "target_not_visible"}
 
+    if daily_tab_confirmed and daily_tabs:
+        return {"status": "wait", "reason": "daily_page_loading"}
+
     if daily_tabs:
-        return {"status": "unknown", "reason": "daily_tab_confirmed_without_page"}
+        return {"status": "unknown", "reason": "daily_tab_without_page"}
 
     activity_buttons = find_items(
         texts,

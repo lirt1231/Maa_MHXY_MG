@@ -5,7 +5,7 @@ from contextlib import redirect_stdout
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from tools.run_shimen_macos import run
+from tools.run_shimen_macos import MAX_DAILY_LOADING_POLLS, run
 from tools.shimen_macos_core import classify_shimen_scene
 
 
@@ -163,6 +163,32 @@ class ShimenRunnerTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "五步页面序列"):
                 run(args, Mock())
         self.assertEqual(runtime.click_box.call_count, 9)
+
+    @patch("tools.run_shimen_macos.MacOSTaskRuntime")
+    def test_reselects_daily_tab_after_bounded_loading_wait(self, runtime_class):
+        runtime = runtime_class.return_value
+        daily_tab = text("日常活动", (130, 174, 88, 25))
+        full_page = [
+            text("活动", (471, 114, 198, 32)),
+            daily_tab,
+            text("师门任务", (670, 173, 83, 22)),
+            text("参加", (839, 193, 46, 24)),
+        ]
+        runtime.read_scene.side_effect = [
+            scene([daily_tab]),
+            *[scene([daily_tab]) for _ in range(MAX_DAILY_LOADING_POLLS)],
+            scene(full_page),
+            scene(full_page),
+            scene([text("师门任务完成", (420, 180, 180, 30))]),
+        ]
+        args = SimpleNamespace(
+            inspect_scene=False,
+            recognize_only=False,
+            max_steps=MAX_DAILY_LOADING_POLLS + 5,
+        )
+
+        self.assertEqual(run(args, Mock()), 0)
+        self.assertEqual(runtime.click_box.call_count, 3)
 
 
 if __name__ == "__main__":

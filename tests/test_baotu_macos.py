@@ -81,6 +81,32 @@ class DailyNavigationTests(unittest.TestCase):
         )
         self.assertEqual(decision, {"status": "open_daily", "box": daily_tab["box"]})
 
+    def test_confirmed_daily_tab_recovers_when_activity_title_is_missed(self):
+        daily_tab = text("日常活动", (130, 161, 88, 27))
+        target = text("师门任务", (670, 173, 83, 22))
+        join = text("参加", (839, 193, 46, 24))
+        decision = classify_daily_navigation(
+            [daily_tab, target, join],
+            {},
+            (1020, 718),
+            target_pattern=r"师门任务",
+            daily_tab_confirmed=True,
+        )
+        self.assertEqual(decision, {"status": "join_task", "box": join["box"]})
+
+    def test_confirmed_daily_tab_waits_while_content_is_loading(self):
+        decision = classify_daily_navigation(
+            [text("日常活动", (130, 161, 88, 27))],
+            {},
+            (1020, 718),
+            target_pattern=r"师门任务",
+            daily_tab_confirmed=True,
+        )
+        self.assertEqual(
+            decision,
+            {"status": "wait", "reason": "daily_page_loading"},
+        )
+
 
 class BaotuSceneTests(unittest.TestCase):
     def test_sidebar_task_and_dialogue_use_expected_regions(self):

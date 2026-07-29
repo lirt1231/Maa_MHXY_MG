@@ -34,6 +34,8 @@ RESULT_STATUSES = {"completed", "already_completed", "safe_stopped", "cancelled"
 NAVIGATION_CLICK_STATUSES = {"open_activity", "open_daily", "join_task"}
 MAX_NAVIGATION_INPUTS = 14
 MAX_TASK_CLICKS = 40
+MAX_DAILY_LOADING_POLLS = 8
+MAX_DAILY_RESELECTS = 2
 
 
 def emit_result(status, **payload):
@@ -64,6 +66,8 @@ def run(args, guard):
     task_clicks = 0
     navigation_inputs = 0
     unknown_polls = 0
+    daily_loading_polls = 0
+    daily_reselects = 0
     daily_tab_confirmed = False
     daily_scroller = DailyActivityScrollAction()
     last_click_signature = None
@@ -111,6 +115,8 @@ def run(args, guard):
             )
         if status in {"continue_task", "progress_task"}:
             daily_tab_confirmed = False
+            daily_loading_polls = 0
+            daily_reselects = 0
             task_clicks += 1
             if task_clicks > MAX_TASK_CLICKS:
                 raise RuntimeError("师门推进点击达到上限，已停止以避免循环")
@@ -130,6 +136,8 @@ def run(args, guard):
             guard.wait(7.0 if status == "continue_task" else 2.0)
             continue
         if status == "scroll_daily":
+            daily_loading_polls = 0
+            daily_reselects = 0
             daily_scroller.perform(runtime, scene, "浏览日常活动列表")
             actions += 1
             last_click_signature = None
@@ -151,7 +159,10 @@ def run(args, guard):
             runtime.click_box(decision["box"], scene, f"师门任务：{status}")
             if status == "open_daily":
                 daily_scroller.reset()
+                daily_loading_polls = 0
             daily_tab_confirmed = status == "open_daily"
+            if status == "join_task":
+                daily_reselects = 0
             actions += 1
             clicks += 1
             unknown_polls = 0
@@ -161,12 +172,35 @@ def run(args, guard):
             last_click_signature = None
             consecutive_same_clicks = 0
             unknown_polls = 0
+            if decision.get("reason") == "daily_page_loading":
+                daily_loading_polls += 1
+                if daily_loading_polls >= MAX_DAILY_LOADING_POLLS:
+                    if daily_reselects >= MAX_DAILY_RESELECTS:
+                        raise RuntimeError(
+                            "师门日常活动页两次重新选择后仍未加载，已安全停止"
+                        )
+                    daily_tab_confirmed = False
+                    daily_loading_polls = 0
+                    daily_reselects += 1
+                    log_event(
+                        "daily_reselect",
+                        attempt=daily_reselects,
+                        reason="daily_page_loading_timeout",
+                    )
+                guard.wait(1.0)
+                continue
+            daily_loading_polls = 0
             guard.wait(2.0)
             continue
 
         last_click_signature = None
         consecutive_same_clicks = 0
         unknown_polls += 1
+        log_event(
+            "unknown_evidence",
+            reason=decision.get("reason"),
+            texts=[item.get("text", "")[:80] for item in scene.texts[:24]],
+        )
         if unknown_polls >= 5:
             raise RuntimeError("连续五次无法识别师门任务页面，已停止以避免无证据点击")
         guard.wait(1.0)
