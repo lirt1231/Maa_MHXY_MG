@@ -94,6 +94,11 @@ def remaining_answer_candidates(candidates, selected_answers):
         if re.sub(r"\s+", "", candidate).strip() not in selected
     ]
 
+
+def stable_question_key(value):
+    """Ignore the changing multi-select counter but retain the question number."""
+    return re.sub(r"[（(]\s*\d+\s*/\s*\d+\s*[）)]", "", value or "").strip()
+
 @register_custom_recognition("reco2")
 class reco2_sjqy(CustomRecognition):
     def analyze(
@@ -316,7 +321,7 @@ class sjqy_tiku_V3(CustomRecognition):
         for item in sorted_results:
             if item.text!='':
                 ext+=item.text
-        question_key = ext.strip()
+        question_key = stable_question_key(ext)
         pattern = r'第\d+题：|[（(]\d+/\d+[）)]'
         def clean_string(s):
             return re.sub(pattern, '', s).strip()
@@ -352,7 +357,12 @@ class sjqy_tiku_V3(CustomRecognition):
                         image1,
                         pipeline_override={"三界奇缘答案位置": {"roi" : answer_roi,
                                                             "expected":remaining_candidates,
-                                                            "recognition": "OCR"
+                                                            "recognition": "OCR",
+                                                            "threshold": 0.7,
+                                                            "replace": [
+                                                                ["屍", "尸"],
+                                                                ["殭", "僵"]
+                                                            ]
                                                             }
                                             }
                         )

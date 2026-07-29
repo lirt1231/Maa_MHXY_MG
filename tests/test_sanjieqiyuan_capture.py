@@ -22,6 +22,7 @@ from custom.recognition.reco_sjqy import (
     parse_answer_candidates,
     remaining_answer_candidates,
     sjqy_rois,
+    stable_question_key,
 )
 from custom.recognition.searchAnswer import get_question_bank, search_answer
 
@@ -160,6 +161,13 @@ class SanjieRoiTests(unittest.TestCase):
             ["千年僵尸"],
         )
 
+    def test_multi_select_counter_does_not_change_question_identity(self):
+        first = stable_question_key("第9题：找出3只地府恶鬼（1/3）")
+        second = stable_question_key("第9题：找出3只地府恶鬼（2/3）")
+
+        self.assertEqual(first, second)
+        self.assertEqual(first, "第9题：找出3只地府恶鬼")
+
     def test_macos_question_roi_covers_both_wrapped_lines(self):
         image = np.ones((718, 1020, 3), dtype=np.uint8)
 
@@ -199,7 +207,8 @@ class SanjieAnswerRecognitionTests(unittest.TestCase):
     )
     @patch("tools.run_sanjieqiyuan_macos.recognition_detail")
     def test_multi_select_skips_answer_already_clicked(self, recognition_detail, _search):
-        question_text = "第9题：找出3只地府恶鬼（9/10）"
+        question_text = "第9题：找出3只地府恶鬼（2/3）"
+        question_key = "第9题：找出3只地府恶鬼"
         question_result = self.ocr_result(question_text, (330, 130, 300, 40))
         question_detail = SimpleNamespace(
             hit=True,
@@ -216,6 +225,8 @@ class SanjieAnswerRecognitionTests(unittest.TestCase):
             if params.roi[1] < 200:
                 return question_detail
             self.assertEqual(params.expected, ["孤魂野鬼", "千年僵尸"])
+            self.assertEqual(params.threshold, 0.7)
+            self.assertEqual(params.replace, [["屍", "尸"], ["殭", "僵"]])
             return answer_detail
 
         recognition_detail.side_effect = recognize
@@ -223,7 +234,7 @@ class SanjieAnswerRecognitionTests(unittest.TestCase):
             Mock(),
             np.ones((718, 1020, 3), dtype=np.uint8),
             Mock(),
-            question_text,
+            question_key,
             {"吸血鬼"},
         )
 
@@ -236,7 +247,8 @@ class SanjieAnswerRecognitionTests(unittest.TestCase):
     )
     @patch("tools.run_sanjieqiyuan_macos.recognition_detail")
     def test_multi_select_waits_after_all_answers_clicked(self, recognition_detail, _search):
-        question_text = "第9题：找出3只地府恶鬼（9/10）"
+        question_text = "第9题：找出3只地府恶鬼（3/3）"
+        question_key = "第9题：找出3只地府恶鬼"
         recognition_detail.return_value = SimpleNamespace(
             hit=True,
             filtered_results=[
@@ -248,7 +260,7 @@ class SanjieAnswerRecognitionTests(unittest.TestCase):
             Mock(),
             np.ones((718, 1020, 3), dtype=np.uint8),
             Mock(),
-            question_text,
+            question_key,
             {"吸血鬼", "孤魂野鬼", "千年僵尸"},
         )
 

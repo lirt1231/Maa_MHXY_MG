@@ -402,6 +402,7 @@ def recognize_answer(
         parse_answer_candidates,
         remaining_answer_candidates,
         sjqy_rois,
+        stable_question_key,
     )
     from custom.recognition.searchAnswer import SearchQuestions
 
@@ -430,8 +431,9 @@ def recognize_answer(
         question_detail.filtered_results,
         key=lambda item: (round(item.box[1] / 10), item.box[0]),
     )
-    question_key = "".join(item.text for item in results if item.text).strip()
-    question = re.sub(r"第\d+题：|[（(]\d+/\d+[）)]", "", question_key).strip()
+    question_text = "".join(item.text for item in results if item.text).strip()
+    question_key = stable_question_key(question_text)
+    question = re.sub(r"第\d+题：|[（(]\d+/\d+[）)]", "", question_text).strip()
     answers, confidence, _ = SearchQuestions(question)
     candidates = parse_answer_candidates(answers)
     if confidence < 80:
@@ -456,7 +458,12 @@ def recognize_answer(
     answer_detail = recognition_detail(
         tasker,
         "OCR",
-        JOCR(expected=remaining_candidates, roi=tuple(answer_roi)),
+        JOCR(
+            expected=remaining_candidates,
+            roi=tuple(answer_roi),
+            threshold=0.7,
+            replace=[["屍", "尸"], ["殭", "僵"]],
+        ),
         image,
         guard,
     )
@@ -822,7 +829,6 @@ def run(guard: CancellationGuard, args=None) -> int:
     current_question = None
     selected_question_key = None
     selected_answers = set()
-    selected_clicks = set()
     completed_questions = 0
     click_count = 0
     unchanged_polls = 0
@@ -874,7 +880,6 @@ def run(guard: CancellationGuard, args=None) -> int:
             if question_key != selected_question_key:
                 selected_question_key = question_key
                 selected_answers = set()
-                selected_clicks = set()
             current_question, completed_questions = advance_question_count(
                 current_question,
                 question,
@@ -886,10 +891,9 @@ def run(guard: CancellationGuard, args=None) -> int:
                 result["click"],
                 result["image_size"],
             )
-            click_signature = (round(click_point[0]), round(click_point[1]))
-            if click_signature in selected_clicks:
+            if result["answer"] in selected_answers:
                 raise RuntimeError(
-                    f"检测到同一道题重复点击同一选项：{question}，已安全停止"
+                    f"检测到同一道题重复选择同一答案：{question}，已安全停止"
                 )
             screen_point = guard.perform_input(
                 native_input.click,
@@ -897,7 +901,6 @@ def run(guard: CancellationGuard, args=None) -> int:
                 result["image_size"],
             )
             selected_answers.add(result["answer"])
-            selected_clicks.add(click_signature)
             click_count += 1
             print(
                 f"native_click source={result['click']} "
