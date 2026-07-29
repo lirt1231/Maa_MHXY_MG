@@ -13,6 +13,7 @@ from typing import Callable
 from .database import Database, utc_now
 from .events import EventBroker
 from .registry import TASKS, validate_options
+from .user_progress import user_progress
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -742,11 +743,23 @@ class RunnerManager:
                 )
                 process = self._process
             assert process.stdout is not None
+            last_progress_message = None
             for line in process.stdout:
                 message = line.strip()
                 if message:
                     output_lines.append(message)
-                    self._emit("info", "log", message, self._progress_payload(run["taskId"], message))
+                    progress = user_progress(run["taskId"], message)
+                    if progress and progress["message"] != last_progress_message:
+                        with self._lock:
+                            if self._current and self._current["id"] == run["id"]:
+                                self._current["stage"] = progress["payload"]["stage"]
+                        self._emit(
+                            progress["level"],
+                            "log",
+                            progress["message"],
+                            progress["payload"],
+                        )
+                        last_progress_message = progress["message"]
             return_code = process.wait()
             with self._lock:
                 stopped = self._stop_requested

@@ -115,8 +115,8 @@ export function TaskPanel({ system, tasks, runs, summary, logs, busy, progress, 
 
     <section className="dashboard-row lower">
       <article className="panel log-panel">
-        <div className="panel-heading"><div><span className="eyebrow">LIVE FEED</span><h2>实时运行日志</h2></div><span className={`live-indicator ${busy ? "on" : ""}`}>{busy ? "LIVE" : "IDLE"}</span></div>
-        <div className="log-window">{logs.length ? logs.map((log, index) => <div className={`log-line ${log.level}`} key={`${log.createdAt}-${index}`}><time>{new Date(log.createdAt).toLocaleTimeString("zh-CN", { hour12: false })}</time><span>{log.message}</span></div>) : <div className="log-empty">启动任务后，这里会显示识别与操作进度。</div>}</div>
+        <div className="panel-heading"><div><span className="eyebrow">执行进度</span><h2>任务动态</h2></div><span className={`live-indicator ${busy ? "on" : ""}`}>{busy ? "运行中" : "待命"}</span></div>
+        <div className="log-window">{logs.length ? logs.map((log, index) => <div className={`log-line ${log.level}`} key={`${log.createdAt}-${index}`}><time>{new Date(log.createdAt).toLocaleTimeString("zh-CN", { hour12: false })}</time><span>{log.message}</span></div>) : <div className="log-empty">任务启动后，这里会显示当前进度和需要留意的事项。</div>}</div>
       </article>
       <article className="panel history-panel">
         <div className="panel-heading"><div><span className="eyebrow">RECENT RUNS</span><h2>最近运行</h2></div></div>

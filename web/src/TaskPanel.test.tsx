@@ -20,6 +20,21 @@ function run(overrides: Partial<Run>): Run {
 afterEach(cleanup);
 
 describe("TaskPanel run outcomes", () => {
+  it("uses user-facing wording for live task progress", () => {
+    const view = render(<TaskPanel
+      system={system} tasks={[]} runs={[]}
+      summary={{ total: 0, succeeded: 0, failed: 0, successRate: 0, averageDurationMs: 0 }}
+      logs={[]} busy progress="等待任务" startingGame={false}
+      onStartGame={vi.fn()} onStop={vi.fn()} onSelectTask={vi.fn()}
+    />);
+
+    expect(view.getByText("任务动态")).toBeTruthy();
+    expect(view.getByText("执行进度")).toBeTruthy();
+    expect(view.container.querySelector(".live-indicator")?.textContent).toBe("运行中");
+    expect(view.queryByText("实时运行日志")).toBeNull();
+    expect(view.queryByText("LIVE")).toBeNull();
+  });
+
   it("renders xiangshi and huishi as independent task cards", () => {
     const keju: Task = {
       id: "keju", name: "科举乡试", eyebrow: "每日乡试", summary: "完成乡试答题",
