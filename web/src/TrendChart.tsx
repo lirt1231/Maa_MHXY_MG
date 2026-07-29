@@ -7,6 +7,13 @@ import type { Metrics } from "./types";
 
 echarts.use([LineChart, GridComponent, TooltipComponent, CanvasRenderer]);
 
+export function trendLineDataOptions(points: Metrics["points"]) {
+  return {
+    connectNulls: true,
+    data: points.map((item) => item.status === "success" ? item.value : null),
+  };
+}
+
 export function TrendChart({ data }: { data?: Metrics }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -35,10 +42,9 @@ export function TrendChart({ data }: { data?: Metrics }) {
       series: [{
         type: "line",
         smooth: true,
-        connectNulls: false,
+        ...trendLineDataOptions(points),
         showSymbol: points.length < 12,
         symbolSize: 7,
-        data: points.map((item) => item.status === "success" ? item.value : null),
         lineStyle: { color: "#e9b949", width: 3 },
         itemStyle: { color: "#f6cd68", borderColor: "#080b12", borderWidth: 2 },
         areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
