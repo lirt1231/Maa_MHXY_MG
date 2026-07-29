@@ -22,6 +22,20 @@ def scene(texts=None, templates=None):
 
 
 class YunbiaoSceneTests(unittest.TestCase):
+    def test_current_zero_remaining_dialogue_is_completed(self):
+        decision = classify_yunbiao_scene(
+            [
+                text("郑镖头", (395, 397, 55, 19)),
+                text("本日剩余运普通镖次数0次。", (399, 339, 214, 18)),
+                text("获得了90000", (446, 243, 101, 25)),
+            ],
+            {},
+            (1020, 718),
+            "delivering",
+        )
+
+        self.assertEqual(decision["status"], "completed")
+
     def test_main_toolbar_uses_neighbor_anchors_when_activity_ocr_is_missing(self):
         decision = classify_yunbiao_scene(
             [
@@ -100,6 +114,40 @@ class YunbiaoSceneTests(unittest.TestCase):
 
 
 class YunbiaoRunnerTests(unittest.TestCase):
+    @patch("tools.run_yunbiao_macos.MacOSTaskRuntime")
+    def test_zero_remaining_dialogue_completes_accepted_final_round(
+        self, runtime_class
+    ):
+        runtime = runtime_class.return_value
+        normal = scene([text("押送普通镖银", (760, 300, 160, 28))])
+        confirm = scene([text("确定", (480, 390, 80, 30))])
+        active = scene([text("距离运镖完成：42秒", (120, 20, 180, 25))])
+        completed = scene(
+            [text("本日剩余运普通镖次数0次。", (399, 339, 214, 18))]
+        )
+        runtime.read_scene.side_effect = [
+            normal, confirm, active,
+            normal, confirm, active,
+            normal, confirm, active,
+            completed,
+        ]
+        args = SimpleNamespace(
+            inspect_scene=False, recognize_only=False, rounds=3, max_steps=15
+        )
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            self.assertEqual(run(args, Mock()), 0)
+
+        result = next(
+            json.loads(line[len("result_json="):])
+            for line in output.getvalue().splitlines()
+            if line.startswith("result_json=")
+        )
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["rounds"], 3)
+        self.assertEqual(result["target_rounds"], 3)
+
     @patch("tools.run_yunbiao_macos.MacOSTaskRuntime")
     def test_three_rounds_require_delivery_evidence_before_completion(self, runtime_class):
         runtime = runtime_class.return_value

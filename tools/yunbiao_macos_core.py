@@ -39,7 +39,13 @@ def classify_yunbiao_scene(
     if blocked:
         return {"status": "blocked_resource", "reason": blocked[0]["text"]}
 
-    completed = find_items(texts, r"运镖任务完成|今日运镖已完成|本日运镖次数已用完")
+    completed = find_items(
+        texts,
+        (
+            r"运镖任务完成|今日运镖已完成|本日运镖次数已用完|"
+            r"本日剩余(?:运普通镖|普通运镖|普通镖)次数[:：]?0次[。.]?"
+        ),
+    )
     if completed:
         return {"status": "completed"}
 
