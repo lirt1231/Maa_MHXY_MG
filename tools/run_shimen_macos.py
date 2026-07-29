@@ -113,7 +113,12 @@ def run(args, guard):
             raise RuntimeError(
                 f"师门进入需要资产操作的分支，首版不会自动处理：{decision['reason']}"
             )
-        if status in {"continue_task", "progress_task"}:
+        if status in {
+            "accept_task_dialogue",
+            "start_task",
+            "continue_task",
+            "progress_task",
+        }:
             daily_tab_confirmed = False
             daily_loading_polls = 0
             daily_reselects = 0
@@ -128,12 +133,17 @@ def run(args, guard):
                 consecutive_same_clicks = 1
             if consecutive_same_clicks > 2:
                 raise RuntimeError(f"师门连续重复执行 {status}，已安全停止")
-            reason = "继续右侧师门任务" if status == "continue_task" else "执行师门去完成按钮"
-            runtime.click_box(decision["box"], scene, reason)
+            reasons = {
+                "accept_task_dialogue": "接取师门 NPC 对话任务",
+                "start_task": "点击右侧师门任务正式开始",
+                "continue_task": "继续右侧师门任务",
+                "progress_task": "执行师门去完成按钮",
+            }
+            runtime.click_box(decision["box"], scene, reasons[status])
             actions += 1
             clicks += 1
             unknown_polls = 0
-            guard.wait(7.0 if status == "continue_task" else 2.0)
+            guard.wait(7.0 if status in {"start_task", "continue_task"} else 2.0)
             continue
         if status == "scroll_daily":
             daily_loading_polls = 0

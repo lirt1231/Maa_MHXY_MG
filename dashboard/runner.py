@@ -137,6 +137,8 @@ SCENE_LABELS = {
     "open_daily": "日常活动入口",
     "join_task": "日常任务卡片",
     "accept_dialogue": "宝图任务领取对话",
+    "accept_task_dialogue": "师门任务领取对话",
+    "start_task": "师门任务待启动",
     "continue_task": "当前任务栏",
     "select_normal": "普通镖领取对话",
     "confirm_normal": "普通镖确认页",
@@ -189,6 +191,8 @@ ACTION_LABELS = {
     "open_daily": "打开日常活动列表",
     "join_task": "点击同一卡片内的任务参加按钮",
     "accept_dialogue": "选择经过识别的“听听无妨”",
+    "accept_task_dialogue": "选择经过识别的师门 NPC 任务",
+    "start_task": "点击右侧师门任务正式开始",
     "continue_task": "点击经过识别的任务栏",
     "select_normal": "选择经过识别的“押送普通镖银”",
     "confirm_normal": "确认押送普通镖银",
@@ -518,7 +522,8 @@ class RunnerManager:
         elif task_id == "shimen":
             ready = scene in {
                 "open_activity", "open_daily", "scroll_daily", "join_task",
-                "continue_task", "progress_task", "battle", "auto_pathing",
+                "accept_task_dialogue", "start_task", "continue_task",
+                "progress_task", "battle", "auto_pathing",
             }
 
         action_key = proposed if proposed else scene
@@ -594,6 +599,8 @@ class RunnerManager:
             ("yunbiao", "join_task"): "点击同一卡片内的运镖参加按钮",
             ("yunbiao", "continue_task"): "点击经过识别的运镖任务栏",
             ("shimen", "join_task"): "点击同一卡片内的师门任务参加按钮",
+            ("shimen", "accept_task_dialogue"): "选择经过识别的师门 NPC 任务",
+            ("shimen", "start_task"): "点击右侧师门任务正式开始",
             ("shimen", "continue_task"): "点击经过识别的师门任务栏",
         }
         action_label = task_action_overrides.get((task_id, action_key), action_label)

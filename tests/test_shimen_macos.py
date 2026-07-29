@@ -72,8 +72,34 @@ class ShimenSceneTests(unittest.TestCase):
             {},
             (1020, 718),
         )
-        self.assertEqual(decision["status"], "continue_task")
+        self.assertEqual(decision["status"], "start_task")
         self.assertEqual(decision["box"], [830, 180, 147, 18])
+
+    def test_current_item_collection_dialogue_precedes_sidebar_start(self):
+        decision = classify_shimen_scene(
+            [
+                text("师门集物", (831, 142, 74, 18)),
+                text("向师父领取集物任务", (831, 167, 145, 15)),
+                text("请选择要做的事：", (773, 475, 145, 18)),
+                text("师门集物-玄妙法术", (773, 519, 184, 22)),
+            ],
+            {},
+            (1020, 718),
+        )
+        self.assertEqual(decision["status"], "accept_task_dialogue")
+        self.assertEqual(decision["box"], [773, 519, 184, 22])
+
+    def test_current_item_collection_sidebar_starts_after_dialogue(self):
+        decision = classify_shimen_scene(
+            [
+                text("师门集物", (831, 142, 74, 18)),
+                text("向师父领取集物任务", (831, 167, 145, 15)),
+            ],
+            {},
+            (1020, 718),
+        )
+        self.assertEqual(decision["status"], "start_task")
+        self.assertEqual(decision["box"], [831, 167, 145, 15])
 
     def test_battle_waits_even_if_standard_item_label_is_visible(self):
         decision = classify_shimen_scene(
@@ -108,6 +134,38 @@ class ShimenSceneTests(unittest.TestCase):
 
 
 class ShimenRunnerTests(unittest.TestCase):
+    @patch("tools.run_shimen_macos.MacOSTaskRuntime")
+    def test_accepts_dialogue_then_clicks_sidebar_to_start(self, runtime_class):
+        runtime = runtime_class.return_value
+        runtime.read_scene.side_effect = [
+            scene(
+                [
+                    text("师门集物", (831, 142, 74, 18)),
+                    text("向师父领取集物任务", (831, 167, 145, 15)),
+                    text("师门集物-玄妙法术", (773, 519, 184, 22)),
+                ]
+            ),
+            scene(
+                [
+                    text("师门集物", (831, 142, 74, 18)),
+                    text("向师父领取集物任务", (831, 167, 145, 15)),
+                ]
+            ),
+            scene([], {"auto_pathing": (1, 2, 3, 4)}),
+            scene([text("师门任务完成", (420, 180, 180, 30))]),
+        ]
+        args = SimpleNamespace(inspect_scene=False, recognize_only=False, max_steps=6)
+
+        self.assertEqual(run(args, Mock()), 0)
+
+        self.assertEqual(runtime.click_box.call_count, 2)
+        self.assertEqual(
+            runtime.click_box.call_args_list[0].args[0], [773, 519, 184, 22]
+        )
+        self.assertEqual(
+            runtime.click_box.call_args_list[1].args[0], [831, 167, 145, 15]
+        )
+
     @patch("tools.run_shimen_macos.MacOSTaskRuntime")
     def test_low_risk_flow_completes_with_evidence_only(self, runtime_class):
         runtime = runtime_class.return_value

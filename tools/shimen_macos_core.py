@@ -76,19 +76,49 @@ def classify_shimen_scene(
     if progress_buttons:
         return {"status": "progress_task", "box": valid_box(progress_buttons[0])}
 
+    task_dialogue_options = [
+        item
+        for item in find_items(texts, r"师门.+[-－].+")
+        if in_region(
+            item,
+            image_size,
+            min_x=0.68,
+            min_y=0.55,
+            max_y=0.85,
+        )
+    ]
+    if task_dialogue_options:
+        return {
+            "status": "accept_task_dialogue",
+            "box": valid_box(task_dialogue_options[0]),
+        }
+
     sidebar_instructions = [
         item
-        for item in find_items(texts, r"向师父领取历练任务|继续师门历练任务")
-        if in_region(item, image_size, min_x=0.78, min_y=0.1, max_y=0.78)
+        for item in find_items(texts, r"向师父领取.{0,12}任务")
+        if in_region(item, image_size, min_x=0.78, min_y=0.1, max_y=0.48)
     ]
+    if sidebar_instructions:
+        return {"status": "start_task", "box": valid_box(sidebar_instructions[0])}
+
+    sidebar_continue_instructions = [
+        item
+        for item in find_items(texts, r"继续师门.{0,12}任务")
+        if in_region(item, image_size, min_x=0.78, min_y=0.1, max_y=0.48)
+    ]
+    if sidebar_continue_instructions:
+        return {
+            "status": "continue_task",
+            "box": valid_box(sidebar_continue_instructions[0]),
+        }
+
     sidebar_details = [
         item
-        for item in find_items(texts, r"师门任务|师门[-－].*|师门历练[-－].*")
-        if in_region(item, image_size, min_x=0.78, min_y=0.1, max_y=0.78)
+        for item in find_items(texts, r"师门任务|师门.{0,24}")
+        if in_region(item, image_size, min_x=0.78, min_y=0.1, max_y=0.48)
     ]
-    sidebar_tasks = sidebar_instructions + sidebar_details
-    if sidebar_tasks:
-        return {"status": "continue_task", "box": valid_box(sidebar_tasks[0])}
+    if sidebar_details:
+        return {"status": "continue_task", "box": valid_box(sidebar_details[0])}
 
     return classify_daily_navigation(
         texts,
