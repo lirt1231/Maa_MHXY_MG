@@ -37,17 +37,90 @@ class ShimenSceneTests(unittest.TestCase):
         )
         self.assertEqual(decision, {"status": "open_daily", "box": daily_tab["box"]})
 
-    def test_asset_branch_blocks_progress_button(self):
+    def test_explicit_purchase_screen_without_countdown_is_blocked(self):
         decision = classify_shimen_scene(
             [
-                text("购买一件装备交给师父", (350, 220, 300, 30)),
-                text("去完成", (500, 410, 100, 30)),
+                text("我要购买", (173, 161, 84, 22)),
+                text("购买数量", (743, 538, 120, 21)),
+                text("购买", (762, 566, 82, 31)),
             ],
             {},
             (1020, 718),
         )
         self.assertEqual(decision["status"], "unsupported_asset_branch")
         self.assertIn("购买", decision["reason"])
+
+    def test_owned_item_instruction_navigates_before_asset_guard(self):
+        decision = classify_shimen_scene(
+            [
+                text("师门-玄妙法术（7/10）", (830, 142, 171, 18)),
+                text("臭豆腐麻烦周怀生修复", (829, 181, 165, 18)),
+                text("一下（拥有1/1)，上交不", (831, 196, 164, 18)),
+            ],
+            {},
+            (1020, 718),
+        )
+
+        self.assertEqual(decision["status"], "continue_task")
+        self.assertEqual(decision["box"], [830, 142, 171, 18])
+
+    def test_map_merchant_name_does_not_block_active_task(self):
+        decision = classify_shimen_scene(
+            [
+                text("坊商会总管", (0, 433, 91, 20)),
+                text("师门-玄妙法术（1/10）", (830, 142, 171, 18)),
+                text("听说周怀生有竹简材料", (828, 166, 166, 18)),
+            ],
+            {},
+            (1020, 718),
+        )
+
+        self.assertEqual(decision["status"], "continue_task")
+        self.assertEqual(decision["box"], [830, 142, 171, 18])
+
+    def test_game_managed_purchase_countdown_waits_without_clicking(self):
+        decision = classify_shimen_scene(
+            [
+                text("我要购买", (173, 161, 84, 22)),
+                text("2秒后自动购买", (743, 538, 120, 21)),
+                text("购买", (762, 566, 82, 31)),
+            ],
+            {},
+            (1020, 718),
+        )
+
+        self.assertEqual(
+            decision, {"status": "wait", "reason": "game_auto_asset_action"}
+        )
+
+    def test_game_managed_submit_countdown_waits_without_clicking(self):
+        decision = classify_shimen_scene(
+            [
+                text("任务物品选择", (779, 160, 123, 24)),
+                text("0秒后自动上交", (780, 491, 118, 21)),
+                text("上交", (822, 522, 45, 25)),
+            ],
+            {},
+            (1020, 718),
+        )
+
+        self.assertEqual(
+            decision, {"status": "wait", "reason": "game_auto_asset_action"}
+        )
+
+    def test_game_managed_dialogue_countdown_waits_without_clicking(self):
+        decision = classify_shimen_scene(
+            [
+                text("点击任意地方继续", (796, 41, 162, 22)),
+                text("0秒后继续", (902, 688, 86, 18)),
+            ],
+            {},
+            (1020, 718),
+        )
+
+        self.assertEqual(
+            decision, {"status": "wait", "reason": "game_auto_continue"}
+        )
 
     def test_progress_and_sidebar_require_expected_regions(self):
         progress = classify_shimen_scene(

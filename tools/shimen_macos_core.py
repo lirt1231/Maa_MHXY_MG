@@ -19,7 +19,7 @@ except ImportError:  # Direct execution through tools/run_shimen_macos.py.
 
 
 ASSET_BRANCH_PATTERN = (
-    r".*(?:购买|上交|提交|交付|商会|摆摊|购买召唤灵|购买宠物|"
+    r".*(?:购买|上交|提交|交付|"
     r"寻找.*(?:装备|药品|烹饪|宠物|召唤灵)|"
     r"需要.*(?:装备|药品|烹饪|宠物|召唤灵)|"
     r"选择.*(?:装备|药品|烹饪|宠物|召唤灵)).*"
@@ -49,6 +49,11 @@ def classify_shimen_scene(
     if find_items(texts, r"自动寻路中?|寻路中"):
         return {"status": "wait", "reason": "auto_pathing_ocr"}
 
+    if find_items(texts, r"\d+秒后自动(?:购买|上交)"):
+        return {"status": "wait", "reason": "game_auto_asset_action"}
+    if find_items(texts, r"\d+秒后继续"):
+        return {"status": "wait", "reason": "game_auto_continue"}
+
     if not daily_tab_confirmed:
         navigation = classify_daily_navigation(
             texts,
@@ -59,13 +64,6 @@ def classify_shimen_scene(
         )
         if navigation["status"] == "open_daily":
             return navigation
-
-    asset_branch = find_items(texts, ASSET_BRANCH_PATTERN)
-    if asset_branch:
-        return {
-            "status": "unsupported_asset_branch",
-            "reason": asset_branch[0]["text"],
-        }
 
     progress_buttons = find_items(
         texts,
@@ -119,6 +117,13 @@ def classify_shimen_scene(
     ]
     if sidebar_details:
         return {"status": "continue_task", "box": valid_box(sidebar_details[0])}
+
+    asset_branch = find_items(texts, ASSET_BRANCH_PATTERN)
+    if asset_branch:
+        return {
+            "status": "unsupported_asset_branch",
+            "reason": asset_branch[0]["text"],
+        }
 
     return classify_daily_navigation(
         texts,
