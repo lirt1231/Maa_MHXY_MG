@@ -20,7 +20,9 @@ from keju_answer_core import (  # noqa: E402
     local_fallback,
     looks_like_answer_result,
     parse_model_answer,
+    parse_model_decision,
     scale_roi,
+    validate_model_decision,
 )
 from searchAnswer import (  # noqa: E402
     load_question_bank,
@@ -108,10 +110,59 @@ class HybridAnswerTests(unittest.TestCase):
         self.assertIn("可信资料", prompt)
         self.assertIn("李世民", prompt)
 
+    def test_prompt_contains_source_aware_web_evidence(self):
+        web = [{
+            "id": "web-1",
+            "provider": "bing",
+            "kind": "direct_answer",
+            "title": "Bing 最佳匹配答案",
+            "snippet": "9 个徒弟",
+            "url": "https://www.bing.com/search",
+            "rank": 0,
+        }]
+        prompt = build_verification_prompt(
+            "一个师父最多同时拥有几个徒弟？",
+            {"A": "3", "B": "6", "C": "9", "D": "7"},
+            [],
+            [],
+            web,
+        )
+        self.assertIn("direct_answer", prompt)
+        self.assertIn("9 个徒弟", prompt)
+        self.assertIn("evidence_ids", prompt)
+
     def test_parse_json_and_plain_model_answers(self):
         self.assertEqual(parse_model_answer('{"answer":"C","confidence":0.9}'), "C")
         self.assertEqual(parse_model_answer("答案为 B。"), "B")
         self.assertIsNone(parse_model_answer("无法判断"))
+
+    def test_structured_model_decision_preserves_confidence_and_citations(self):
+        decision = parse_model_decision(
+            '{"answer":"C","confidence":0.91,"evidence_ids":["web-1", "web-3"]}'
+        )
+        self.assertEqual(decision["answer"], "C")
+        self.assertEqual(decision["confidence"], 0.91)
+        self.assertEqual(decision["evidence_ids"], ["web-1", "web-3"])
+
+    def test_model_decision_requires_confidence_and_valid_web_citation(self):
+        low = {"answer": "C", "confidence": 0.4, "evidence_ids": ["web-1"]}
+        answer, error = validate_model_decision(low, {"web-1"}, 0.62)
+        self.assertIsNone(answer)
+        self.assertIn("置信度不足", error)
+
+        uncited = {"answer": "C", "confidence": 0.9, "evidence_ids": ["web-9"]}
+        answer, error = validate_model_decision(uncited, {"web-1"}, 0.62)
+        self.assertIsNone(answer)
+        self.assertIn("没有引用", error)
+
+        verified = {"answer": "C", "confidence": 0.9, "evidence_ids": ["web-1"]}
+        self.assertEqual(
+            validate_model_decision(verified, {"web-1"}, 0.62),
+            ("C", None),
+        )
+
+    def test_fullwidth_option_prefix_is_removed(self):
+        self.assertEqual(keju_hybrid._clean_option_text("B", "Ｂ６"), "6")
 
     def test_local_fallback_requires_both_confidences(self):
         self.assertEqual(local_fallback(self.candidates, self.options), "A")

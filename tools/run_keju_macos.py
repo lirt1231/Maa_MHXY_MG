@@ -284,6 +284,25 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
         os.environ["MAA_KEJU_MODEL_EXTRA_BODY"] = json.dumps(
             local_config["extra_body"], ensure_ascii=False
         )
+    web_search = local_config.get("web_search") or {}
+    if "enabled" in web_search:
+        os.environ["MAA_KEJU_WEB_SEARCH_ENABLED"] = (
+            "1" if web_search["enabled"] else "0"
+        )
+    if web_search.get("timeout"):
+        os.environ["MAA_KEJU_WEB_SEARCH_TIMEOUT"] = str(web_search["timeout"])
+    if web_search.get("limit_per_provider"):
+        os.environ["MAA_KEJU_WEB_SEARCH_LIMIT"] = str(
+            web_search["limit_per_provider"]
+        )
+    if web_search.get("providers"):
+        os.environ["MAA_KEJU_WEB_SEARCH_PROVIDERS"] = ",".join(
+            map(str, web_search["providers"])
+        )
+    if local_config.get("minimum_confidence") is not None:
+        os.environ["MAA_KEJU_MODEL_MIN_CONFIDENCE"] = str(
+            local_config["minimum_confidence"]
+        )
     if not os.environ.get("MAA_KEJU_API_KEY"):
         api_key = read_keychain_password(
             str(local_config.get("keychain_service", "")),

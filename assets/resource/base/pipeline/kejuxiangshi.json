@@ -246,7 +246,9 @@
             "model": "",
             "timeout": 12,
             "fallback_threshold": 92,
-            "knowledge_threshold": 90
+            "knowledge_threshold": 90,
+            "web_search_timeout": 2.5,
+            "model_minimum_confidence": 0.62
         }
     },
     "活动-科举乡试-开始答题agent-智谱": {

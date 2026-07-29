@@ -38,7 +38,13 @@ def scale_roi(roi, image_width, image_height, reference_size=REFERENCE_SIZE):
     ]
 
 
-def build_verification_prompt(question, options, candidates, knowledge_candidates=None):
+def build_verification_prompt(
+    question,
+    options,
+    candidates,
+    knowledge_candidates=None,
+    web_evidence=None,
+):
     evidence = [
         {
             "question": item["question"],
@@ -63,19 +69,33 @@ def build_verification_prompt(question, options, candidates, knowledge_candidate
             }
             for item in (knowledge_candidates or [])
         ],
+        "web_evidence": [
+            {
+                "id": item["id"],
+                "provider": item["provider"],
+                "kind": item["kind"],
+                "title": item["title"],
+                "snippet": item["snippet"],
+                "url": item["url"],
+                "rank": item["rank"],
+            }
+            for item in (web_evidence or [])
+        ],
     }
     return (
         "你正在回答梦幻西游手游科举单选题。相似题库内容只能作为参考，"
-        "知识库片段按匹配度和来源可信度排序；必须结合当前题目与当前选项独立复核。"
-        "若证据明确，优先依据证据，不得凭空改写其中的数字或专有名词。"
+        "知识库片段按匹配度和来源可信度排序。网页证据来自多个独立搜索渠道，"
+        "direct_answer 是搜索引擎展示的最佳匹配答案，但仍需与普通摘要交叉验证。"
+        "网页可能包含旧版本或互相矛盾的说法，应优先精确匹配题目、梦幻西游手游语境、"
+        "较新版本和多来源共识，不得仅凭自身记忆覆盖检索证据。"
         "只输出一个 JSON 对象，不要输出 Markdown：\n"
-        '{"answer":"A|B|C|D","confidence":0.0,"used_question_bank":true}\n'
+        '{"answer":"A|B|C|D","confidence":0.0,"evidence_ids":["web-1"]}\n'
         "输入：\n"
         + json.dumps(payload, ensure_ascii=False)
     )
 
 
-def parse_model_answer(content, valid_choices=VALID_CHOICES):
+def parse_model_decision(content, valid_choices=VALID_CHOICES):
     text = (content or "").strip()
     if not text:
         return None
@@ -87,16 +107,64 @@ def parse_model_answer(content, valid_choices=VALID_CHOICES):
         json_text = object_match.group(0) if object_match else None
     if json_text:
         try:
-            answer = str(json.loads(json_text).get("answer", "")).strip().upper()
+            payload = json.loads(json_text)
+            answer = str(payload.get("answer", "")).strip().upper()
             if answer in valid_choices:
-                return answer
+                try:
+                    confidence = float(payload.get("confidence", 0.0))
+                except (TypeError, ValueError):
+                    confidence = 0.0
+                evidence_ids = payload.get("evidence_ids", [])
+                if not isinstance(evidence_ids, list):
+                    evidence_ids = []
+                return {
+                    "answer": answer,
+                    "confidence": max(0.0, min(1.0, confidence)),
+                    "evidence_ids": [
+                        str(item)
+                        for item in evidence_ids
+                        if isinstance(item, (str, int))
+                    ],
+                }
         except (TypeError, ValueError, json.JSONDecodeError):
             pass
+
+    return None
+
+
+def parse_model_answer(content, valid_choices=VALID_CHOICES):
+    decision = parse_model_decision(content, valid_choices)
+    if decision:
+        return decision["answer"]
+
+    text = (content or "").strip()
+    if not text:
+        return None
 
     letter_match = re.search(r"(?:答案|answer)?\s*(?:是|为|:|：)?\s*([A-D])\b", text.upper())
     if letter_match and letter_match.group(1) in valid_choices:
         return letter_match.group(1)
     return None
+
+
+def validate_model_decision(
+    decision,
+    valid_evidence_ids,
+    minimum_confidence=0.62,
+    label="模型",
+):
+    """Accept only a confident decision that cites retrieved web evidence."""
+    if not decision:
+        return None, f"{label}回复中没有有效选项"
+    confidence = decision["confidence"]
+    if confidence < minimum_confidence:
+        return (
+            None,
+            f"{label}置信度不足:{confidence:.2f}<{minimum_confidence:.2f}",
+        )
+    if not set(valid_evidence_ids).intersection(decision["evidence_ids"]):
+        return None, f"{label}没有引用有效的网页证据"
+    return decision["answer"], None
 
 
 def answer_to_option(answer_text, options):

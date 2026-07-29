@@ -4,6 +4,7 @@ import re
 import subprocess
 import tempfile
 import time
+import unicodedata
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -19,11 +20,13 @@ from .keju_answer_core import (
     knowledge_fallback,
     local_fallback,
     looks_like_answer_result,
-    parse_model_answer,
+    parse_model_decision,
     scale_roi,
+    validate_model_decision,
 )
 from .searchAnswer import search_candidates
 from .keju_knowledge import search_knowledge
+from .keju_web_search import search_web_evidence
 
 
 if os.environ.get("MAA_DIRECT_RESOURCE") != "1":
@@ -68,6 +71,7 @@ TIMING_STAGES = (
     "ocr",
     "local_question_bank",
     "knowledge_base",
+    "web_search",
     "model_request",
     "parse_decision",
 )
@@ -203,6 +207,7 @@ def _recognition_image(context, argv):
 
 
 def _clean_option_text(choice, text):
+    text = unicodedata.normalize("NFKC", text or "")
     text = re.sub(rf"^{choice}\s*[.、:：]?\s*", "", text, flags=re.IGNORECASE)
     # 当前会试界面会把 B 选项左侧的【中华历史】等分类标签一起 OCR。
     text = re.sub(r"^[【\[（(][^】\]）)]{1,16}[】\]）)]\s*[A-D]?\s*", "", text)
@@ -249,7 +254,7 @@ def _request_model(url, api_key, model, prompt, timeout, extra_body=None):
             {"role": "user", "content": prompt},
         ],
         "temperature": 0,
-        "max_tokens": 80,
+        "max_tokens": 120,
         "stream": False,
     }
     request_body.update(extra_body or {})
@@ -273,9 +278,9 @@ def _request_codex_model(prompt, timeout):
         "properties": {
             "answer": {"type": "string", "enum": list(VALID_CHOICES)},
             "confidence": {"type": "number"},
-            "used_question_bank": {"type": "boolean"},
+            "evidence_ids": {"type": "array", "items": {"type": "string"}},
         },
-        "required": ["answer", "confidence", "used_question_bank"],
+        "required": ["answer", "confidence", "evidence_ids"],
         "additionalProperties": False,
     }
     with tempfile.TemporaryDirectory(prefix="maa-keju-codex-") as temp_dir:
@@ -530,21 +535,78 @@ class KejuHybridAnswer(CustomRecognition):
                     knowledge_threshold=knowledge_threshold,
                 )
 
+        web_result = {
+            "query": "",
+            "evidence": [],
+            "providers": {},
+            "elapsed_ms": 0,
+        }
+        web_search_enabled = os.environ.get("MAA_KEJU_WEB_SEARCH_ENABLED", "1") != "0"
+        if not trusted_local_answer and not trusted_knowledge_answer and web_search_enabled:
+            web_timeout = float(
+                os.environ.get(
+                    "MAA_KEJU_WEB_SEARCH_TIMEOUT",
+                    attach.get("web_search_timeout", 2.5),
+                )
+            )
+            web_limit = int(os.environ.get("MAA_KEJU_WEB_SEARCH_LIMIT", "3"))
+            provider_names = tuple(
+                name.strip()
+                for name in os.environ.get(
+                    "MAA_KEJU_WEB_SEARCH_PROVIDERS", "bing,so360"
+                ).split(",")
+                if name.strip()
+            )
+            with timings.track("web_search"):
+                web_result = search_web_evidence(
+                    question,
+                    timeout=web_timeout,
+                    limit_per_provider=web_limit,
+                    provider_names=provider_names,
+                )
+
         model_answer = None
+        model_confidence = 0.0
+        model_evidence_ids = []
         model_error = None
         model_source = None
+        minimum_confidence = float(
+            os.environ.get(
+                "MAA_KEJU_MODEL_MIN_CONFIDENCE",
+                attach.get("model_minimum_confidence", 0.62),
+            )
+        )
+        valid_web_ids = {item["id"] for item in web_result["evidence"]}
+
+        def accept_model_decision(decision, label):
+            nonlocal model_answer, model_confidence, model_evidence_ids, model_error
+            if decision:
+                model_confidence = decision["confidence"]
+                model_evidence_ids = decision["evidence_ids"]
+            model_answer, model_error = validate_model_decision(
+                decision,
+                valid_web_ids,
+                minimum_confidence,
+                label,
+            )
+
         if trusted_local_answer:
             model_error = "题库精确命中，跳过远端模型"
         elif trusted_knowledge_answer:
             model_error = "知识库高置信度命中，跳过远端模型"
-        elif api_key and url and model:
+        elif api_key and url and model and web_result["evidence"]:
             try:
                 with timings.track("parse_decision"):
                     prompt = build_verification_prompt(
-                        question,
+                        web_result["query"] or question,
                         valid_options,
-                        candidates,
-                        knowledge_candidates,
+                        [item for item in candidates if item["similarity"] >= 50],
+                        [
+                            item
+                            for item in knowledge_candidates
+                            if item["similarity"] >= 50
+                        ],
+                        web_result["evidence"],
                     )
                 with timings.track("model_request"):
                     model_content = _request_model(
@@ -556,22 +618,26 @@ class KejuHybridAnswer(CustomRecognition):
                         extra_body=model_extra_body,
                     )
                 with timings.track("parse_decision"):
-                    model_answer = parse_model_answer(
+                    model_decision = parse_model_decision(
                         model_content, tuple(valid_options)
                     )
-                model_source = "openai_compatible_model"
-                if model_answer is None:
-                    model_error = "模型回复中没有有效选项"
+                    accept_model_decision(model_decision, "模型")
+                model_source = "web_search_verified_model"
             except (requests.RequestException, KeyError, IndexError, ValueError) as exc:
                 model_error = f"{type(exc).__name__}: {exc}"
-        elif os.environ.get("MAA_KEJU_USE_CODEX") == "1":
+        elif os.environ.get("MAA_KEJU_USE_CODEX") == "1" and web_result["evidence"]:
             try:
                 with timings.track("parse_decision"):
                     prompt = build_verification_prompt(
-                        question,
+                        web_result["query"] or question,
                         valid_options,
-                        candidates,
-                        knowledge_candidates,
+                        [item for item in candidates if item["similarity"] >= 50],
+                        [
+                            item
+                            for item in knowledge_candidates
+                            if item["similarity"] >= 50
+                        ],
+                        web_result["evidence"],
                     )
                 codex_timeout = float(os.environ.get("MAA_KEJU_CODEX_TIMEOUT", "120"))
                 with timings.track("model_request"):
@@ -579,16 +645,19 @@ class KejuHybridAnswer(CustomRecognition):
                         prompt, max(timeout, codex_timeout)
                     )
                 with timings.track("parse_decision"):
-                    model_answer = parse_model_answer(
+                    model_decision = parse_model_decision(
                         model_content, tuple(valid_options)
                     )
-                model_source = "codex_model"
-                if model_answer is None:
-                    model_error = "Codex 回复中没有有效选项"
+                    accept_model_decision(model_decision, "Codex")
+                model_source = "web_search_verified_codex"
             except (OSError, subprocess.SubprocessError, ValueError) as exc:
                 model_error = f"{type(exc).__name__}: {exc}"
         else:
-            model_error = "远端模型配置不完整"
+            model_error = (
+                "联网搜索没有返回可校验证据"
+                if not web_result["evidence"]
+                else "远端模型配置不完整"
+            )
 
         with timings.track("parse_decision"):
             final_answer = (
@@ -660,8 +729,16 @@ class KejuHybridAnswer(CustomRecognition):
                         }
                         for item in knowledge_candidates
                     ],
+                    "web_search": {
+                        "query": web_result["query"],
+                        "elapsed_ms": web_result["elapsed_ms"],
+                        "providers": web_result["providers"],
+                        "evidence": web_result["evidence"],
+                    },
                     "answer": final_answer,
                     "source": source,
+                    "model_confidence": model_confidence,
+                    "model_evidence_ids": model_evidence_ids,
                     "model_error": model_error,
                 },
                 ensure_ascii=False,
