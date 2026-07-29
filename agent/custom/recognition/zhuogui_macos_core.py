@@ -273,7 +273,7 @@ def classify_scene(
     if templates.get("main_ready") or templates.get("small_map"):
         return {
             "status": "main_screen",
-            "team": None,
+            "team": relative_point((0.973, 0.15), image_size),
             "location": "长安城" if changan else None,
         }
 

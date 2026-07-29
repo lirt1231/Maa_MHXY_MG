@@ -45,6 +45,14 @@ class SceneClassificationTests(unittest.TestCase):
         unrelated = classify_scene([item("顾伍", 300, 400)], self.image_size)
         self.assertEqual(unrelated, {"status": "unknown"})
 
+    def test_template_confirmed_main_screen_has_team_button_fallback(self):
+        decision = classify_scene(
+            [], self.image_size, {"main_ready": (100, 100, 20, 20)}
+        )
+
+        self.assertEqual(decision["status"], "main_screen")
+        self.assertEqual(decision["team"], (959, 108))
+
     def test_changan_main_screen_keeps_team_action_and_location(self):
         decision = classify_scene(
             [item("长安城", 80, 40), item("队伍", 900, 100)], self.image_size
@@ -236,8 +244,12 @@ class SceneCaptureTests(unittest.TestCase):
 
 
 class SafetyAndCountingTests(unittest.TestCase):
+    def test_level_picker_drag_supports_both_directions(self):
+        self.assertLess(zhuogui_runner.level_drag_end(39, 90), 0.38)
+        self.assertGreater(zhuogui_runner.level_drag_end(90, 20), 0.38)
+
     def test_level_adjustment_budget_covers_90_to_20_picker(self):
-        self.assertGreaterEqual(zhuogui_runner.MAX_TARGET_LEVEL_SWIPES, 21)
+        self.assertGreaterEqual(zhuogui_runner.MAX_TARGET_LEVEL_SWIPES, 64)
 
     def test_recognize_only_action_is_non_mutating_description(self):
         self.assertEqual(proposed_action({"status": "battle"}), "wait")
