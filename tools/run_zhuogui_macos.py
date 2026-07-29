@@ -500,6 +500,10 @@ def run_workflow(
             continue
 
         if status in ("map_zhongkui", "world_map_changan"):
+            if state.phase == "run_round":
+                raise RuntimeError(
+                    "捉鬼任务已接取，但画面仍停留在寻人地图，已停止避免重复找钟馗"
+                )
             click(decision.get("click"), scene, status)
             state.phase = "navigate_zhongkui"
             guard.wait(2.0)

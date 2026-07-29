@@ -85,7 +85,8 @@ def ghost_taskbar_item(
         item
         for item in matching(
             items,
-            r"(?:捉|抓)鬼(?:任务)?(?:\(?\d+/10\)?)?|捉拿.{0,12}(?:鬼|妖|怪)|千年厉鬼",
+            r"(?:捉|抓)鬼(?:任务)?(?:\(?\d+/10\)?)?"
+            r"|捉拿.{0,12}(?:鬼|妖|怪)|千年厉鬼|钟馗|钟道",
         )
         if center(item)[0] >= width * 0.68
         and height * 0.10 <= center(item)[1] <= height * 0.62
@@ -310,9 +311,13 @@ def classify_scene(
             "progress": int(progress_match.group(1)) if progress_match else None,
         }
 
-    zhongkui = first_click(items, r"钟馗|钟道")
-    if zhongkui:
-        return {"status": "map_zhongkui", "click": zhongkui}
+    map_zhongkui = [
+        item
+        for item in matching(items, r"钟馗|钟道")
+        if center(item)[0] < image_size[0] * 0.68
+    ]
+    if map_zhongkui:
+        return {"status": "map_zhongkui", "click": center(map_zhongkui[0])}
 
     changan = first_click(items, r"^长安城$")
     if changan:

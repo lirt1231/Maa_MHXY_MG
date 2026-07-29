@@ -197,7 +197,7 @@ class SceneClassificationTests(unittest.TestCase):
         self.assertEqual(task["progress"], 3)
 
     def test_newly_accepted_generic_ghost_title_is_clickable_in_sidebar(self):
-        for title in ("捉鬼任务", "抓鬼任务", "捉鬼"):
+        for title in ("捉鬼任务", "抓鬼任务", "捉鬼", "钟馗"):
             with self.subTest(title=title):
                 decision = classify_scene(
                     [item(title, 760, 145, 130, 28)], self.image_size
@@ -232,6 +232,19 @@ class SceneClassificationTests(unittest.TestCase):
 
         self.assertEqual(pathing["status"], "auto_pathing")
         self.assertEqual(team["status"], "team_page")
+
+    def test_zhongkui_text_is_distinguished_by_map_and_sidebar_regions(self):
+        map_decision = classify_scene(
+            [item("钟馗", 240, 330, 100, 28)], self.image_size
+        )
+        sidebar_decision = classify_scene(
+            [item("钟馗", 790, 150, 100, 28)], self.image_size
+        )
+
+        self.assertEqual(map_decision["status"], "map_zhongkui")
+        self.assertEqual(map_decision["click"], (290, 344))
+        self.assertEqual(sidebar_decision["status"], "ghost_task")
+        self.assertEqual(sidebar_decision["click"], (840, 164))
 
     def test_target_dialog_reports_endpoints_preset_and_confirm(self):
         decision = classify_scene(
