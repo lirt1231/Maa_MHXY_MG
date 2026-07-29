@@ -76,6 +76,23 @@ def current_channel_click(
     return center(candidates[0]) if candidates else None
 
 
+def ghost_taskbar_item(
+    items: Iterable[dict], image_size: tuple[int, int]
+) -> dict | None:
+    """Find the active ghost task without matching dialogs or team settings."""
+    width, height = image_size
+    candidates = [
+        item
+        for item in matching(
+            items,
+            r"(?:捉|抓)鬼(?:任务)?(?:\(?\d+/10\)?)?|捉拿.{0,12}(?:鬼|妖|怪)|千年厉鬼",
+        )
+        if center(item)[0] >= width * 0.68
+        and height * 0.10 <= center(item)[1] <= height * 0.62
+    ]
+    return min(candidates, key=lambda item: center(item)[1]) if candidates else None
+
+
 def formation_name(value: str) -> str | None:
     text = normalize_text(value)
     for formation in FORMATIONS:
@@ -180,16 +197,6 @@ def classify_scene(
     ):
         return {"status": "battle"}
 
-    task_hits = matching(items, r"捉鬼\(?\d+/10\)?|捉拿.*鬼|千年厉鬼")
-    if task_hits:
-        task_text = normalize_text(task_hits[0].get("text", ""))
-        progress_match = re.search(r"捉鬼[（(]?(\d+)/10", task_text)
-        return {
-            "status": "ghost_task",
-            "click": center(task_hits[0]),
-            "progress": int(progress_match.group(1)) if progress_match else None,
-        }
-
     if templates.get("auto_pathing") or re.search(r"自动寻路", joined):
         return {"status": "auto_pathing"}
 
@@ -292,6 +299,16 @@ def classify_scene(
 
     if re.search(r"捉鬼任务", joined) and re.search(r"钟馗|钟道", joined):
         return {"status": "zhongkui_dialog", "click": first_click(items, r"捉鬼任务")}
+
+    task_item = ghost_taskbar_item(items, image_size)
+    if task_item:
+        task_text = normalize_text(task_item.get("text", ""))
+        progress_match = re.search(r"(?:捉|抓)鬼\(?(\d+)/10", task_text)
+        return {
+            "status": "ghost_task",
+            "click": center(task_item),
+            "progress": int(progress_match.group(1)) if progress_match else None,
+        }
 
     zhongkui = first_click(items, r"钟馗|钟道")
     if zhongkui:

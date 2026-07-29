@@ -48,6 +48,7 @@ RESULT_STATUSES = {
     "cancelled",
 }
 MAX_TARGET_LEVEL_SWIPES = 64
+MAX_TASKBAR_CLICK_ATTEMPTS = 3
 LEVEL_RANGES = {
     "90-115": (90, 115),
     "20-115": (20, 115),
@@ -79,6 +80,7 @@ class WorkflowState:
     unknown_count: int = 0
     round_started_at: float | None = None
     last_task_click_at: float | None = None
+    taskbar_click_attempts: int = 0
     navigate_not_before: float | None = None
     steps: int = 0
     last_ghost_progress: int | None = None
@@ -453,6 +455,7 @@ def run_workflow(
             continue
 
         if status == "battle":
+            state.taskbar_click_attempts = 0
             if budget.battle_started_at is None:
                 budget.battle_started_at = now
             elif budget.battle_expired(now):
@@ -475,8 +478,15 @@ def run_workflow(
                     state.last_task_click_at is None
                     or now - state.last_task_click_at >= 8.0
                 ):
+                    if state.taskbar_click_attempts >= MAX_TASKBAR_CLICK_ATTEMPTS:
+                        raise RuntimeError(
+                            "连续三次点击右侧捉鬼任务后仍未开始寻路，已安全停止"
+                        )
                     click(decision.get("click"), scene, "点击抓鬼任务栏")
                     state.last_task_click_at = now
+                    state.taskbar_click_attempts += 1
+            else:
+                state.taskbar_click_attempts = 0
             guard.wait(args.poll_interval)
             continue
 
@@ -484,6 +494,8 @@ def run_workflow(
             click(decision.get("click"), scene, "接取捉鬼任务")
             state.phase = "run_round"
             state.round_started_at = now
+            state.last_task_click_at = None
+            state.taskbar_click_attempts = 0
             guard.wait(args.poll_interval)
             continue
 

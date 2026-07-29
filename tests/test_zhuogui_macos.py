@@ -18,6 +18,7 @@ from zhuogui_macos_core import (  # noqa: E402
     classify_scene,
     fifth_member_present,
     formation_name,
+    ghost_taskbar_item,
     relative_point,
     round_completion_action,
     proposed_action,
@@ -194,6 +195,43 @@ class SceneClassificationTests(unittest.TestCase):
         task = classify_scene([item("捉鬼（3/10）", 800, 200)], self.image_size)
         self.assertEqual(task["status"], "ghost_task")
         self.assertEqual(task["progress"], 3)
+
+    def test_newly_accepted_generic_ghost_title_is_clickable_in_sidebar(self):
+        for title in ("捉鬼任务", "抓鬼任务", "捉鬼"):
+            with self.subTest(title=title):
+                decision = classify_scene(
+                    [item(title, 760, 145, 130, 28)], self.image_size
+                )
+                self.assertEqual(decision["status"], "ghost_task")
+                self.assertEqual(decision["click"], (825, 159))
+                self.assertIsNone(decision["progress"])
+
+    def test_generic_ghost_title_outside_sidebar_is_not_clicked(self):
+        settings = [item("捉鬼任务", 250, 210, 130, 28)]
+
+        self.assertIsNone(ghost_taskbar_item(settings, self.image_size))
+        self.assertEqual(classify_scene(settings, self.image_size), {"status": "unknown"})
+
+    def test_sidebar_task_recognition_is_bounded_vertically(self):
+        chat = [item("抓鬼任务", 760, 650, 130, 28)]
+        top_icon = [item("捉鬼任务", 760, 10, 130, 28)]
+
+        self.assertIsNone(ghost_taskbar_item(chat, self.image_size))
+        self.assertIsNone(ghost_taskbar_item(top_icon, self.image_size))
+
+    def test_pathing_and_team_page_take_priority_over_sidebar_title(self):
+        sidebar = item("捉鬼任务", 760, 145, 130, 28)
+        pathing = classify_scene(
+            [sidebar, item("自动寻路")], self.image_size
+        )
+        team = classify_scene(
+            [sidebar, item("退出队伍"), item("自动匹配")],
+            self.image_size,
+            {"team_header": (0, 0, 20, 20)},
+        )
+
+        self.assertEqual(pathing["status"], "auto_pathing")
+        self.assertEqual(team["status"], "team_page")
 
     def test_target_dialog_reports_endpoints_preset_and_confirm(self):
         decision = classify_scene(
