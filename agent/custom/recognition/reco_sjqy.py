@@ -67,10 +67,32 @@ def sjqy_rois(image):
 
 def parse_answer_candidates(value):
     """Convert the legacy formatted answer string into OCR candidates."""
-    if isinstance(value, (list, tuple)):
-        return [str(item).strip() for item in value if str(item).strip()]
-    parsed = re.findall(r'"([^"]+)"', str(value))
-    return parsed or ([str(value).strip()] if str(value).strip() else [])
+    raw_candidates = value if isinstance(value, (list, tuple)) else None
+    if raw_candidates is None:
+        parsed = re.findall(r'"([^"]+)"', str(value))
+        raw_candidates = parsed or [str(value)]
+
+    candidates = []
+    for raw_candidate in raw_candidates:
+        for candidate in re.split(r"[，,、；;]+", str(raw_candidate)):
+            candidate = candidate.strip()
+            if candidate and candidate not in candidates:
+                candidates.append(candidate)
+    return candidates
+
+
+def remaining_answer_candidates(candidates, selected_answers):
+    """Exclude answers already clicked while preserving question-bank order."""
+    selected = {
+        re.sub(r"\s+", "", str(answer)).strip()
+        for answer in selected_answers
+        if str(answer).strip()
+    }
+    return [
+        candidate
+        for candidate in candidates
+        if re.sub(r"\s+", "", candidate).strip() not in selected
+    ]
 
 @register_custom_recognition("reco2")
 class reco2_sjqy(CustomRecognition):
@@ -302,11 +324,13 @@ class sjqy_tiku_V3(CustomRecognition):
         # 获取答案list[]
         results_value, confidence ,match_type = SearchQuestions(text)
         answer_candidates = parse_answer_candidates(results_value)
-
-        if question_key == getattr(self, "last_question_key", None):
-            self.last_status = "unchanged"
-            logger.error(f"题目未变化，停止重复点击：{text}")
-            return CustomRecognition.AnalyzeResult(box=(0,0,0,0),detail="题目未变化")
+        if question_key != getattr(self, "selection_question_key", None):
+            self.selection_question_key = question_key
+            self.selected_answers = set()
+        remaining_candidates = remaining_answer_candidates(
+            answer_candidates,
+            getattr(self, "selected_answers", set()),
+        )
 
         if confidence < 80:
             self.last_status = "low_confidence"
@@ -314,6 +338,12 @@ class sjqy_tiku_V3(CustomRecognition):
             return CustomRecognition.AnalyzeResult(box=(0,0,0,0),detail="题库缺少本问题")
         elif confidence >=80 and confidence < 100:
             logger.warning(f"本问题与题库非100%匹配：{text}，匹配度：{confidence}")
+        if not remaining_candidates:
+            self.last_status = "awaiting_transition"
+            logger.info(f"本题答案已全部选择，等待题目切换：{text}")
+            return CustomRecognition.AnalyzeResult(
+                box=(0,0,0,0), detail="等待题目切换"
+            )
         # 识别答案位置
         # new_context = context.clone()
         # image2 = context.tasker.controller.post_screencap().wait().get()
@@ -321,7 +351,7 @@ class sjqy_tiku_V3(CustomRecognition):
                         "三界奇缘答案位置",
                         image1,
                         pipeline_override={"三界奇缘答案位置": {"roi" : answer_roi,
-                                                            "expected":answer_candidates,
+                                                            "expected":remaining_candidates,
                                                             "recognition": "OCR"
                                                             }
                                             }
@@ -330,6 +360,9 @@ class sjqy_tiku_V3(CustomRecognition):
         # logger.info(new_reco_detail.box)
         # 点击答案
         if new_reco_detail and new_reco_detail.hit:
+            matched_answer = new_reco_detail.best_result.text.strip()
+            if matched_answer not in remaining_candidates:
+                matched_answer = remaining_candidates[0]
             box = new_reco_detail.box  # 假设box为(x, y, w, h)
             center_x = box[0] + box[2] // 2
             center_y = box[1] + box[3] // 2 
@@ -340,7 +373,7 @@ class sjqy_tiku_V3(CustomRecognition):
                 self.last_click = (center_x, center_y)
                 self.last_image_size = (image1.shape[1], image1.shape[0])
                 logger.info(
-                    f"识别完成，等待外部输入桥接。题目：{text}。答案：{answer_candidates}。"
+                    f"识别完成，等待外部输入桥接。题目：{text}。答案：{remaining_candidates}。"
                     f"答案框：{box}。点击坐标：({center_x}, {center_y})。"
                 )
                 return CustomRecognition.AnalyzeResult(box=box, detail="答案坐标已就绪")
@@ -353,6 +386,7 @@ class sjqy_tiku_V3(CustomRecognition):
                 return CustomRecognition.AnalyzeResult(box=(0,0,0,0),detail="点击失败")
             self.last_question = text
             self.last_question_key = question_key
+            self.selected_answers.add(matched_answer)
             self.last_status = "clicked"
             # image2 = context.tasker.controller.post_screencap().wait().get()
             # logger.info(image2)

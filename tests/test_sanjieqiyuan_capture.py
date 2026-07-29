@@ -15,9 +15,14 @@ from tools.run_sanjieqiyuan_macos import (
     classify_scene,
     main,
     navigate_to_exam,
+    recognize_answer,
     verify_answering_completion,
 )
-from custom.recognition.reco_sjqy import sjqy_rois
+from custom.recognition.reco_sjqy import (
+    parse_answer_candidates,
+    remaining_answer_candidates,
+    sjqy_rois,
+)
 from custom.recognition.searchAnswer import get_question_bank, search_answer
 
 
@@ -141,6 +146,20 @@ class NativeMacOSInputBindingTests(unittest.TestCase):
 
 
 class SanjieRoiTests(unittest.TestCase):
+    def test_splits_combined_multi_select_answers(self):
+        self.assertEqual(
+            parse_answer_candidates('["吸血鬼，孤魂野鬼，千年僵尸"]'),
+            ["吸血鬼", "孤魂野鬼", "千年僵尸"],
+        )
+
+    def test_excludes_already_selected_multi_select_answers(self):
+        candidates = ["吸血鬼", "孤魂野鬼", "千年僵尸"]
+
+        self.assertEqual(
+            remaining_answer_candidates(candidates, {"吸血鬼", "孤魂野鬼"}),
+            ["千年僵尸"],
+        )
+
     def test_macos_question_roi_covers_both_wrapped_lines(self):
         image = np.ones((718, 1020, 3), dtype=np.uint8)
 
@@ -167,6 +186,74 @@ class SanjieRoiTests(unittest.TestCase):
 
         self.assertEqual(answer, '["白姑娘"]')
         self.assertEqual(confidence, 100)
+
+
+class SanjieAnswerRecognitionTests(unittest.TestCase):
+    @staticmethod
+    def ocr_result(text, box):
+        return SimpleNamespace(text=text, box=box)
+
+    @patch(
+        "custom.recognition.searchAnswer.SearchQuestions",
+        return_value=(' ["吸血鬼，孤魂野鬼，千年僵尸"] ', 100, "精确匹配"),
+    )
+    @patch("tools.run_sanjieqiyuan_macos.recognition_detail")
+    def test_multi_select_skips_answer_already_clicked(self, recognition_detail, _search):
+        question_text = "第9题：找出3只地府恶鬼（9/10）"
+        question_result = self.ocr_result(question_text, (330, 130, 300, 40))
+        question_detail = SimpleNamespace(
+            hit=True,
+            filtered_results=[question_result],
+        )
+        answer_result = self.ocr_result("孤魂野鬼", (430, 270, 80, 25))
+        answer_detail = SimpleNamespace(
+            hit=True,
+            box=answer_result.box,
+            best_result=answer_result,
+        )
+
+        def recognize(_tasker, _type, params, _image, _guard):
+            if params.roi[1] < 200:
+                return question_detail
+            self.assertEqual(params.expected, ["孤魂野鬼", "千年僵尸"])
+            return answer_detail
+
+        recognition_detail.side_effect = recognize
+        result = recognize_answer(
+            Mock(),
+            np.ones((718, 1020, 3), dtype=np.uint8),
+            Mock(),
+            question_text,
+            {"吸血鬼"},
+        )
+
+        self.assertEqual(result["status"], "ready")
+        self.assertEqual(result["answer"], "孤魂野鬼")
+
+    @patch(
+        "custom.recognition.searchAnswer.SearchQuestions",
+        return_value=(' ["吸血鬼，孤魂野鬼，千年僵尸"] ', 100, "精确匹配"),
+    )
+    @patch("tools.run_sanjieqiyuan_macos.recognition_detail")
+    def test_multi_select_waits_after_all_answers_clicked(self, recognition_detail, _search):
+        question_text = "第9题：找出3只地府恶鬼（9/10）"
+        recognition_detail.return_value = SimpleNamespace(
+            hit=True,
+            filtered_results=[
+                self.ocr_result(question_text, (330, 130, 300, 40))
+            ],
+        )
+
+        result = recognize_answer(
+            Mock(),
+            np.ones((718, 1020, 3), dtype=np.uint8),
+            Mock(),
+            question_text,
+            {"吸血鬼", "孤魂野鬼", "千年僵尸"},
+        )
+
+        self.assertEqual(result["status"], "awaiting_transition")
+        recognition_detail.assert_called_once()
 
     def test_lion_monster_question_uses_the_real_option_name(self):
         answer, confidence, _ = search_answer(

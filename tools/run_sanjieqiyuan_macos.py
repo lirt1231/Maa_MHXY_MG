@@ -390,10 +390,17 @@ def advance_question_count(current_question, next_question, completed_questions)
     return next_question, completed_questions
 
 
-def recognize_answer(tasker, image, guard):
+def recognize_answer(
+    tasker,
+    image,
+    guard,
+    selected_question_key=None,
+    selected_answers=(),
+):
     """Recognize one question and its answer from an explicit screenshot."""
     from custom.recognition.reco_sjqy import (
         parse_answer_candidates,
+        remaining_answer_candidates,
         sjqy_rois,
     )
     from custom.recognition.searchAnswer import SearchQuestions
@@ -435,10 +442,21 @@ def recognize_answer(tasker, image, guard):
             "confidence": confidence,
         }
 
+    already_selected = selected_answers if selected_question_key == question_key else ()
+    remaining_candidates = remaining_answer_candidates(candidates, already_selected)
+    if not remaining_candidates:
+        return {
+            "status": "awaiting_transition",
+            "question": question,
+            "question_key": question_key,
+            "candidates": candidates,
+            "confidence": confidence,
+        }
+
     answer_detail = recognition_detail(
         tasker,
         "OCR",
-        JOCR(expected=candidates, roi=tuple(answer_roi)),
+        JOCR(expected=remaining_candidates, roi=tuple(answer_roi)),
         image,
         guard,
     )
@@ -447,10 +465,13 @@ def recognize_answer(tasker, image, guard):
             "status": "answer_not_found",
             "question": question,
             "question_key": question_key,
-            "candidates": candidates,
+            "candidates": remaining_candidates,
             "confidence": confidence,
         }
     x, y, width, height = answer_detail.box
+    matched_answer = answer_detail.best_result.text.strip()
+    if matched_answer not in remaining_candidates:
+        matched_answer = remaining_candidates[0]
     return {
         "status": "ready",
         "question": question,
@@ -458,6 +479,7 @@ def recognize_answer(tasker, image, guard):
         "click": (x + width // 2, y + height // 2),
         "image_size": (image.shape[1], image.shape[0]),
         "candidates": candidates,
+        "answer": matched_answer,
         "confidence": confidence,
     }
 
@@ -797,8 +819,10 @@ def run(guard: CancellationGuard, args=None) -> int:
             return 0
     else:
         print("entry_status=manual_answer_screen", flush=True)
-    last_question_key = None
     current_question = None
+    selected_question_key = None
+    selected_answers = set()
+    selected_clicks = set()
     completed_questions = 0
     click_count = 0
     unchanged_polls = 0
@@ -807,7 +831,13 @@ def run(guard: CancellationGuard, args=None) -> int:
         guard.checkpoint()
         if click_count == 0:
             guard.wait(1.5)
-        result = recognize_answer(tasker, capture.capture(guard), guard)
+        result = recognize_answer(
+            tasker,
+            capture.capture(guard),
+            guard,
+            selected_question_key,
+            selected_answers,
+        )
         status = result["status"]
         question = result.get("question", "")
         question_key = result.get("question_key", question)
@@ -832,15 +862,19 @@ def run(guard: CancellationGuard, args=None) -> int:
             )
             emit_result(completion_status, questions=questions, clicks=click_count)
             return 0
-        if status == "ready" and question_key == last_question_key:
+        if status == "awaiting_transition":
             unchanged_polls += 1
             if unchanged_polls >= 6:
-                raise RuntimeError("点击后题目状态持续未变化，已停止以避免重复点击")
-            print(f"question_unchanged retry={unchanged_polls}", flush=True)
+                raise RuntimeError("本题答案已全部选择但题目持续未变化，已安全停止")
+            print(f"awaiting_question_transition retry={unchanged_polls}", flush=True)
             guard.wait(0.5)
             continue
         unchanged_polls = 0
         if status == "ready" and native_input is not None:
+            if question_key != selected_question_key:
+                selected_question_key = question_key
+                selected_answers = set()
+                selected_clicks = set()
             current_question, completed_questions = advance_question_count(
                 current_question,
                 question,
@@ -852,16 +886,23 @@ def run(guard: CancellationGuard, args=None) -> int:
                 result["click"],
                 result["image_size"],
             )
+            click_signature = (round(click_point[0]), round(click_point[1]))
+            if click_signature in selected_clicks:
+                raise RuntimeError(
+                    f"检测到同一道题重复点击同一选项：{question}，已安全停止"
+                )
             screen_point = guard.perform_input(
                 native_input.click,
                 *click_point,
                 result["image_size"],
             )
-            last_question_key = question_key
+            selected_answers.add(result["answer"])
+            selected_clicks.add(click_signature)
             click_count += 1
             print(
                 f"native_click source={result['click']} "
-                f"stable={click_point} screen={screen_point}",
+                f"stable={click_point} screen={screen_point} "
+                f"answer={result['answer']}",
                 flush=True,
             )
             guard.wait(1.2)
