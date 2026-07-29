@@ -28,7 +28,7 @@ class DashboardApiTests(unittest.TestCase):
             {item["id"] for item in response.json()["items"]},
             {
                 "sanjieqiyuan", "keju", "keju_huishi", "zhuogui",
-                "fuli_qiandao", "bangpai_qiandao", "baotu", "yunbiao", "shimen",
+                "fuli_qiandao", "bangpai_qiandao", "baotu", "yunbiao", "shimen", "kaogu",
             },
         )
         self.assertTrue(

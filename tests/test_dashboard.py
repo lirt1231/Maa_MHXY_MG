@@ -24,7 +24,7 @@ class TaskRegistryTests(unittest.TestCase):
             set(TASKS),
             {
                 "sanjieqiyuan", "keju", "keju_huishi", "zhuogui",
-                "fuli_qiandao", "bangpai_qiandao", "baotu", "yunbiao", "shimen",
+                "fuli_qiandao", "bangpai_qiandao", "baotu", "yunbiao", "shimen", "kaogu",
             },
         )
         self.assertTrue(all(task["checklist"] for task in task_list()))

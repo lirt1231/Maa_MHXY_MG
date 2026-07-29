@@ -26,7 +26,8 @@ TASK_SUCCESS_RESULTS = {"completed", "already_completed", "limit_reached"}
 TASK_RESULT_STATUSES = TASK_SUCCESS_RESULTS | {"safe_stopped", "cancelled"}
 TASK_RESULT_NUMERIC_FIELDS = {
     "questions", "answers", "clicks", "limit", "rounds", "target_rounds",
-    "actions", "steps", "ghost_progress", "max_steps"
+    "actions", "steps", "ghost_progress", "max_steps", "digs", "target_digs",
+    "purchases",
 }
 TASK_RESULT_SCHEMAS = {
     "sanjieqiyuan": {
@@ -110,6 +111,17 @@ TASK_RESULT_SCHEMAS = {
             "already_completed": {"actions", "clicks"},
         },
     },
+    "kaogu": {
+        "statuses": {"completed", "already_completed", "safe_stopped", "cancelled"},
+        "fields": {
+            "task_id", "status", "reason", "digs", "target_digs", "purchases",
+            "actions", "clicks",
+        },
+        "required": {
+            status: {"digs", "target_digs", "purchases", "actions", "clicks"}
+            for status in {"completed", "already_completed"}
+        },
+    },
 }
 
 SCENE_LABELS = {
@@ -148,6 +160,21 @@ SCENE_LABELS = {
     "unsupported_delivery": "非普通镖选项",
     "progress_task": "师门任务推进页",
     "unsupported_asset_branch": "师门资产操作分支",
+    "open_skills": "技能入口",
+    "open_auxiliary": "辅助技能页签",
+    "open_archaeology": "工坊考古入口",
+    "open_production": "技能生产页签",
+    "switch_tier": "考古阶数切换",
+    "open_tool_selection": "考古工具选择入口",
+    "open_shovel_shop": "洛阳铲购买入口",
+    "buy_shovel": "洛阳铲购买确认页",
+    "close_shop": "杂货铺关闭按钮",
+    "select_shovel": "洛阳铲工具",
+    "use_shovel": "洛阳铲使用按钮",
+    "start_archaeology": "考古开始按钮",
+    "dig": "考古挖掘按钮",
+    "close_temporary_bag": "临时道具栏",
+    "wait_for_dig": "等待下一次挖掘",
 }
 
 ACTION_LABELS = {
@@ -199,6 +226,20 @@ ACTION_LABELS = {
     "confirm_normal": "确认押送普通镖银",
     "delivery_active": "等待本轮普通运镖结束",
     "progress_task": "点击经过识别的“去完成”或“继续任务”",
+    "open_skills": "打开技能页面",
+    "open_auxiliary": "切换到辅助技能",
+    "open_archaeology": "进入工坊考古",
+    "open_production": "切换到技能生产",
+    "switch_tier": "切换到较低考古阶数",
+    "open_tool_selection": "打开考古工具选择",
+    "open_shovel_shop": "打开洛阳铲购买页",
+    "buy_shovel": "购买一个洛阳铲",
+    "close_shop": "关闭杂货铺",
+    "select_shovel": "选择洛阳铲",
+    "use_shovel": "使用洛阳铲",
+    "start_archaeology": "开始考古",
+    "dig": "执行本次挖掘",
+    "close_temporary_bag": "关闭临时道具栏",
 }
 
 
@@ -442,6 +483,8 @@ class RunnerManager:
             ]
         if task_id == "shimen":
             return [sys.executable, str(ROOT / "tools/run_shimen_macos.py")]
+        if task_id == "kaogu":
+            return [sys.executable, str(ROOT / "tools/run_kaogu_macos.py")]
         raise ValueError("不支持的任务")
 
     def _inspection_command(self, task_id: str, options: dict) -> list[str]:
@@ -455,6 +498,7 @@ class RunnerManager:
             "baotu": "run_baotu_macos.py",
             "yunbiao": "run_yunbiao_macos.py",
             "shimen": "run_shimen_macos.py",
+            "kaogu": "run_kaogu_macos.py",
         }
         command = [sys.executable, str(ROOT / "tools" / scripts[task_id]), "--inspect-scene"]
         if task_id == "sanjieqiyuan":
@@ -534,6 +578,14 @@ class RunnerManager:
                 "open_activity", "open_daily", "scroll_daily", "join_task",
                 "accept_task_dialogue", "start_task", "continue_task",
                 "progress_task", "battle", "auto_pathing",
+            }
+        elif task_id == "kaogu":
+            ready = scene in {
+                "expand_menu", "open_skills", "open_auxiliary", "open_archaeology",
+                "open_production", "switch_tier", "open_tool_selection",
+                "open_shovel_shop", "buy_shovel", "close_shop", "select_shovel",
+                "use_shovel", "start_archaeology", "dig", "close_temporary_bag",
+                "wait_for_dig",
             }
 
         action_key = proposed if proposed else scene
@@ -676,6 +728,14 @@ class RunnerManager:
             and result["rounds"] != result["target_rounds"]
         ):
             raise RuntimeError("捉鬼完成轮数与目标轮数不一致")
+        if (
+            task_id == "kaogu"
+            and status == "completed"
+            and result["digs"] != result["target_digs"]
+        ):
+            raise RuntimeError("考古完成次数与目标次数不一致")
+        if task_id == "kaogu" and result.get("purchases", 0) > 1:
+            raise RuntimeError("考古结果中的洛阳铲购买次数超过上限")
         return result
 
     @classmethod
@@ -713,6 +773,7 @@ class RunnerManager:
                 "baotu": "宝图任务完成",
                 "yunbiao": "普通运镖完成",
                 "shimen": "师门任务完成",
+                "kaogu": "工坊考古完成 10 次挖掘",
             }[task_id]
         return None
 
@@ -871,6 +932,10 @@ class RunnerManager:
             payload["stage"] = "正在识别并推进低风险师门任务"
         elif task_id == "shimen" and line.startswith(RESULT_PREFIX):
             payload["stage"] = RunnerManager._bounded_task_result_stage(line, "师门任务")
+        elif task_id == "kaogu" and '"event": "scene"' in line:
+            payload["stage"] = "正在识别并推进工坊考古"
+        elif task_id == "kaogu" and line.startswith(RESULT_PREFIX):
+            payload["stage"] = RunnerManager._bounded_task_result_stage(line, "工坊考古")
         return payload
 
     @staticmethod
@@ -917,5 +982,6 @@ class RunnerManager:
             "baotu": "宝图任务未能继续，请保持主界面、日常活动页或宝图任务过程完整可见。",
             "yunbiao": "普通运镖未能继续，请检查活力、镖种和当前任务页面。",
             "shimen": "师门任务未能继续，请查看是否进入购买、提交或其他资产操作分支。",
+            "kaogu": "工坊考古未能继续，请检查技能生产页面、角色活力和洛阳铲购买状态。",
         }
         return f"{hints[task_id]}（进程代码 {return_code}）"

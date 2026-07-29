@@ -55,6 +55,21 @@ SCENE_MESSAGES = {
     "select_stage": "正在选择当前可挑战关卡",
     "enter_battle": "正在进入秘境战斗",
     "enter_dungeon": "正在进入当前秘境",
+    "open_skills": "正在打开技能页面",
+    "open_auxiliary": "正在切换到辅助技能",
+    "open_archaeology": "正在进入工坊考古",
+    "open_production": "正在切换到技能生产",
+    "switch_tier": "正在切换到二阶考古",
+    "open_tool_selection": "正在打开考古工具选择",
+    "open_shovel_shop": "正在打开洛阳铲购买页",
+    "buy_shovel": "正在购买一个洛阳铲",
+    "close_shop": "洛阳铲已购买，正在关闭杂货铺",
+    "select_shovel": "正在选择洛阳铲",
+    "use_shovel": "正在使用洛阳铲",
+    "start_archaeology": "洛阳铲已就绪，正在开始考古",
+    "dig": "正在进行考古挖掘",
+    "close_temporary_bag": "正在关闭临时道具栏",
+    "wait_for_dig": "正在等待下一次挖掘",
 }
 
 WAIT_MESSAGES = {
