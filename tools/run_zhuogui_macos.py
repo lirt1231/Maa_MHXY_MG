@@ -46,6 +46,11 @@ RESULT_STATUSES = {
     "safe_stopped",
     "cancelled",
 }
+MAX_TARGET_LEVEL_SWIPES = 32
+LEVEL_RANGES = {
+    "90-115": (90, 115),
+    "20-115": (20, 115),
+}
 
 
 @dataclass
@@ -110,6 +115,11 @@ def emit_result(result: dict) -> None:
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--rounds", type=int, default=2)
+    parser.add_argument(
+        "--level-range",
+        choices=tuple(LEVEL_RANGES),
+        default="90-115",
+    )
     parser.add_argument("--inspect-scene", action="store_true")
     parser.add_argument("--recognize-only", action="store_true")
     parser.add_argument("--max-steps", type=int, default=600)
@@ -336,6 +346,7 @@ def run_workflow(
         recruitment_timeout=args.recruit_timeout,
         max_rebuilds=args.max_rebuilds,
     )
+    target_min_level, target_max_level = LEVEL_RANGES[args.level_range]
 
     def click(point, scene, reason):
         if point is None:
@@ -476,27 +487,41 @@ def run_workflow(
             elif (
                 not state.target_high_range_clicked
                 and decision.get("range_90_115")
-                and decision.get("current_max_level") != 115
+                and (
+                    decision.get("current_max_level") != target_max_level
+                    or (
+                        decision.get("current_min_level") is not None
+                        and decision.get("current_min_level") < target_min_level
+                    )
+                )
             ):
                 click(decision["range_90_115"], scene, "选择90-115预设区间")
                 state.target_high_range_clicked = True
             elif (
-                decision.get("current_min_level") == 20
-                and decision.get("current_max_level") == 115
+                decision.get("current_min_level") == target_min_level
+                and decision.get("current_max_level") == target_max_level
                 and decision.get("confirm")
             ):
-                click(decision.get("confirm"), scene, "确认20-115抓鬼目标")
+                click(
+                    decision.get("confirm"),
+                    scene,
+                    f"确认{args.level_range}抓鬼目标",
+                )
                 state.target_configured = True
                 state.phase = "recruit"
                 budget.recruitment_started_at = now
-            elif state.target_level_swipes < 20:
+            elif state.target_level_swipes < MAX_TARGET_LEVEL_SWIPES:
                 width, height = scene["image_size"]
                 current_min = decision.get("current_min_level")
                 if current_min is None:
                     raise RuntimeError("未能读取最低等级，停止避免盲目拖动")
-                if current_min < 20:
-                    raise RuntimeError(f"最低等级已越过20（当前{current_min}），停止")
-                drag_end_y = 0.75 if current_min > 35 else 0.45
+                if current_min < target_min_level:
+                    raise RuntimeError(
+                        f"最低等级已越过{target_min_level}（当前{current_min}），停止"
+                    )
+                drag_end_y = (
+                    0.75 if current_min - target_min_level > 15 else 0.45
+                )
                 guard.perform_input(
                     native_input.drag,
                     relative_point((0.623, 0.395), (width, height)),
@@ -507,12 +532,15 @@ def run_workflow(
                 state.target_level_swipes += 1
                 log_event(
                     "drag",
-                    reason="调整最低等级至20",
+                    reason=f"调整最低等级至{target_min_level}",
                     current_min=current_min,
                     count=state.target_level_swipes,
                 )
             else:
-                raise RuntimeError("调整20-115等级范围超过20次，停止")
+                raise RuntimeError(
+                    f"调整{args.level_range}等级范围超过"
+                    f"{MAX_TARGET_LEVEL_SWIPES}次，停止"
+                )
             guard.wait(args.poll_interval)
             continue
 

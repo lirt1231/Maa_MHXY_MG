@@ -416,7 +416,14 @@ class RunnerManager:
                 command.append("--wait-for-round-one")
             return command
         if task_id == "zhuogui":
-            return [sys.executable, str(ROOT / "tools/run_zhuogui_macos.py"), "--rounds", str(options["rounds"])]
+            return [
+                sys.executable,
+                str(ROOT / "tools/run_zhuogui_macos.py"),
+                "--rounds",
+                str(options["rounds"]),
+                "--level-range",
+                str(options["levelRange"]),
+            ]
         if task_id == "fuli_qiandao":
             return [sys.executable, str(ROOT / "tools/run_fuli_qiandao_macos.py")]
         if task_id == "bangpai_qiandao":

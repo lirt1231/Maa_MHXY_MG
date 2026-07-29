@@ -144,7 +144,7 @@ TASKS = {
         "risk": {"level": "medium", "label": "中风险", "summary": "包含组队、战斗和双倍点数确认"},
         "steps": [
             "确认角色可以创建或加入队伍，背包与弹窗不会遮挡主界面。",
-            "填写实际希望完成的轮数；页面数值不会沿用旧流程的加一规则。",
+            "填写实际希望完成的轮数，并选择队伍等级范围。",
             "启动后允许自动化进行匹配、队伍重组和双倍领取确认。",
         ],
         "checklist": COMMON_CHECKLIST
@@ -161,7 +161,17 @@ TASKS = {
                 "default": 2,
                 "minimum": 1,
                 "maximum": 100,
-            }
+            },
+            {
+                "key": "levelRange",
+                "label": "队伍等级范围",
+                "type": "select",
+                "default": "90-115",
+                "choices": [
+                    {"value": "90-115", "label": "90-115（默认）"},
+                    {"value": "20-115", "label": "20-115"},
+                ],
+            },
         ],
     },
     "fuli_qiandao": {

@@ -236,6 +236,9 @@ class SceneCaptureTests(unittest.TestCase):
 
 
 class SafetyAndCountingTests(unittest.TestCase):
+    def test_level_adjustment_budget_covers_90_to_20_picker(self):
+        self.assertGreaterEqual(zhuogui_runner.MAX_TARGET_LEVEL_SWIPES, 21)
+
     def test_recognize_only_action_is_non_mutating_description(self):
         self.assertEqual(proposed_action({"status": "battle"}), "wait")
         self.assertEqual(proposed_action({"status": "unknown"}), "stop")
