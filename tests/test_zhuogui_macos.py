@@ -7,6 +7,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import numpy as np
+
 
 RECOGNITION_DIR = Path(__file__).parents[1] / "agent" / "custom" / "recognition"
 sys.path.insert(0, str(RECOGNITION_DIR))
@@ -33,6 +35,15 @@ class SceneClassificationTests(unittest.TestCase):
         decision = classify_scene([item("队伍", 900, 100)], self.image_size)
         self.assertEqual(decision["status"], "main_screen")
         self.assertEqual(decision["team"], (940, 112))
+
+    def test_main_screen_accepts_position_bounded_team_ocr_error(self):
+        decision = classify_scene([item("顾伍", 930, 90)], self.image_size)
+
+        self.assertEqual(decision["status"], "main_screen")
+        self.assertEqual(decision["team"], (970, 102))
+
+        unrelated = classify_scene([item("顾伍", 300, 400)], self.image_size)
+        self.assertEqual(unrelated, {"status": "unknown"})
 
     def test_changan_main_screen_keeps_team_action_and_location(self):
         decision = classify_scene(
@@ -188,6 +199,40 @@ class SceneClassificationTests(unittest.TestCase):
             self.image_size,
         )
         self.assertEqual(decision["status"], "main_screen")
+
+    def test_world_chat_current_label_is_not_a_channel_picker(self):
+        decision = classify_scene(
+            [item("当前", 0, 650), item("顾伍", 930, 90)],
+            self.image_size,
+        )
+
+        self.assertEqual(decision["status"], "main_screen")
+
+    def test_channel_picker_requires_full_label_in_recruitment_region(self):
+        decision = classify_scene(
+            [item("当前频道", 800, 400)],
+            self.image_size,
+        )
+
+        self.assertEqual(decision["status"], "channel_picker")
+        self.assertEqual(decision["click"], (840, 412))
+
+
+class SceneCaptureTests(unittest.TestCase):
+    @patch.object(zhuogui_runner, "template_box", return_value=None)
+    @patch.object(zhuogui_runner, "recognition_detail", return_value=None)
+    def test_read_scene_uses_window_capture_fallback(
+        self, _recognition_detail, _template_box
+    ):
+        image = np.ones((718, 1020, 3), dtype=np.uint8)
+        capture = Mock()
+        capture.capture.return_value = image
+
+        scene = zhuogui_runner.read_scene(Mock(), capture, Mock())
+
+        capture.capture.assert_called_once()
+        self.assertEqual(scene["image_size"], [1020, 718])
+        self.assertEqual(scene["decision"], {"status": "unknown"})
 
 
 class SafetyAndCountingTests(unittest.TestCase):

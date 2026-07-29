@@ -51,6 +51,19 @@ def first_click(items: Iterable[dict], pattern: str) -> tuple[int, int] | None:
     return center(matches[0]) if matches else None
 
 
+def current_channel_click(
+    items: Iterable[dict], image_size: tuple[int, int]
+) -> tuple[int, int] | None:
+    """Find the recruitment channel option without matching the world-chat label."""
+    candidates = [
+        item
+        for item in matching(items, r"^当前频道$")
+        if center(item)[0] >= image_size[0] * 0.72
+        and center(item)[1] >= image_size[1] * 0.35
+    ]
+    return center(candidates[0]) if candidates else None
+
+
 def selected_level(
     items: Iterable[dict], image_size: tuple[int, int], column_x: float
 ) -> int | None:
@@ -213,7 +226,7 @@ def classify_scene(
             "auto_match": first_click(items, r"^自动匹配$"),
             "matching": bool(matching(items, r"取消匹配|匹配中")),
             "shout": first_click(items, r"一键喊话|键喊话"),
-            "current_channel": first_click(items, r"当前频道|^当前$"),
+            "current_channel": current_channel_click(items, image_size),
             "offline": center(offline[0]) if offline else None,
             "remove": remove,
             "full": fifth_member_present(items, image_size),
@@ -239,11 +252,17 @@ def classify_scene(
         if re.search(r"世界地图|地图", joined):
             return {"status": "world_map_changan", "click": changan}
 
-    current_channel = first_click(items, r"当前频道|^当前$")
+    current_channel = current_channel_click(items, image_size)
     if current_channel:
         return {"status": "channel_picker", "click": current_channel}
 
-    team_button = first_click(items, r"^队伍$")
+    team_buttons = [
+        item
+        for item in matching(items, r"^(?:队伍|顾伍)$")
+        if center(item)[0] >= image_size[0] * 0.88
+        and center(item)[1] <= image_size[1] * 0.22
+    ]
+    team_button = center(team_buttons[0]) if team_buttons else None
     if team_button:
         return {
             "status": "main_screen",

@@ -35,7 +35,7 @@ from zhuogui_macos_core import (  # noqa: E402
     round_completion_action,
 )
 from macos_cancellation import CancellationGuard, CancellationRequested  # noqa: E402
-from run_sanjieqiyuan_macos import NativeMacOSInput  # noqa: E402
+from run_sanjieqiyuan_macos import NativeMacOSInput, WindowCapture  # noqa: E402
 
 
 RESULT_PREFIX = "result_json="
@@ -150,20 +150,8 @@ def template_box(tasker, image, templates, guard, threshold=0.75, roi=None):
     return tuple(detail.box)
 
 
-def read_scene(tasker, controller, guard):
-    image = None
-    for attempt in range(1, 4):
-        guard.checkpoint()
-        screenshot = controller.post_screencap().wait()
-        guard.checkpoint()
-        if screenshot.succeeded:
-            image = screenshot.get()
-            if image is not None:
-                break
-        log_event("screencap_retry", attempt=attempt)
-        guard.wait(0.5)
-    if image is None:
-        raise RuntimeError("连续三次截图失败；停止以避免使用旧画面")
+def read_scene(tasker, capture, guard):
+    image = capture.capture(guard)
     height, width = image.shape[:2]
     ocr = recognition_detail(
         tasker,
@@ -319,8 +307,10 @@ def run_workflow(
     guard.bind_tasker(tasker)
     guard.checkpoint()
 
-    native_input = NativeMacOSInput()
-    first_scene = read_scene(tasker, controller, guard)
+    window_id = windows[0].hwnd
+    native_input = NativeMacOSInput(window_id)
+    capture = WindowCapture(controller, window_id)
+    first_scene = read_scene(tasker, capture, guard)
     if args.inspect_scene:
         print(
             "preflight_json="
@@ -350,11 +340,18 @@ def run_workflow(
     def click(point, scene, reason):
         if point is None:
             raise RuntimeError(f"{reason} 缺少经过识别的点击位置")
-        result = guard.perform_input(controller.post_click, *point).wait()
-        guard.checkpoint()
-        if not result.succeeded:
-            raise RuntimeError(f"Maa 点击失败：{reason}，位置：{point}")
-        log_event("click", reason=reason, source=point, phase=state.phase)
+        screen_point = guard.perform_input(
+            native_input.click,
+            *point,
+            scene["image_size"],
+        )
+        log_event(
+            "click",
+            reason=reason,
+            source=point,
+            screen=screen_point,
+            phase=state.phase,
+        )
 
     def click_box(box, scene, reason):
         click(box_center(box) if box else None, scene, reason)
@@ -363,7 +360,7 @@ def run_workflow(
         state.steps = step
         guard.checkpoint()
         now = time.monotonic()
-        scene = read_scene(tasker, controller, guard)
+        scene = read_scene(tasker, capture, guard)
         decision = scene["decision"]
         status = decision["status"]
         progress = decision.get("progress")
