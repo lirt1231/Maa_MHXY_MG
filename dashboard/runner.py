@@ -423,6 +423,8 @@ class RunnerManager:
                 str(options["rounds"]),
                 "--level-range",
                 str(options["levelRange"]),
+                "--formation",
+                str(options["formation"]),
             ]
         if task_id == "fuli_qiandao":
             return [sys.executable, str(ROOT / "tools/run_fuli_qiandao_macos.py")]

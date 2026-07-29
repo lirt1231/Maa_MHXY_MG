@@ -263,13 +263,17 @@ class RunnerTaskContractTests(unittest.TestCase):
 
     def test_zhuogui_passes_selected_team_level_range(self):
         command = self.manager._command(
-            "zhuogui", {"rounds": 2, "levelRange": "90-115"}
+            "zhuogui",
+            {"rounds": 2, "levelRange": "90-115", "formation": "虎翼阵"},
         )
 
         self.assertTrue(command[1].endswith("tools/run_zhuogui_macos.py"))
         self.assertEqual(
             command[2:],
-            ["--rounds", "2", "--level-range", "90-115"],
+            [
+                "--rounds", "2", "--level-range", "90-115",
+                "--formation", "虎翼阵",
+            ],
         )
 
     def test_sect_task_uses_low_risk_runner(self):

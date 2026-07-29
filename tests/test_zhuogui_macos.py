@@ -17,6 +17,7 @@ from zhuogui_macos_core import (  # noqa: E402
     RuntimeBudget,
     classify_scene,
     fifth_member_present,
+    formation_name,
     relative_point,
     round_completion_action,
     proposed_action,
@@ -149,6 +150,30 @@ class SceneClassificationTests(unittest.TestCase):
         self.assertTrue(decision["full"])
         self.assertIsNotNone(decision["offline"])
         self.assertTrue(fifth_member_present(items, self.image_size))
+
+    def test_team_page_reports_current_formation(self):
+        decision = classify_scene(
+            [item("退出队伍"), item("自动匹配"), item("5级虎翼阵", 90, 100)],
+            self.image_size,
+            {"team_header": (0, 0, 20, 20)},
+        )
+
+        self.assertEqual(decision["status"], "team_page")
+        self.assertEqual(decision["current_formation"], "虎翼阵")
+        self.assertEqual(decision["formation"], (130, 112))
+
+    def test_formation_menu_requires_multiple_visible_formations(self):
+        decision = classify_scene(
+            [item("天覆阵", 300, 200), item("虎翼阵", 500, 200)],
+            self.image_size,
+        )
+
+        self.assertEqual(decision["status"], "formation_menu")
+        self.assertEqual(decision["formations"]["虎翼阵"], (540, 212))
+        self.assertEqual(formation_name("5级虎翼阵"), "虎翼阵")
+
+        single = classify_scene([item("虎翼阵", 500, 200)], self.image_size)
+        self.assertEqual(single, {"status": "unknown"})
 
     def test_assist_slots_do_not_count_as_full_members(self):
         items = [

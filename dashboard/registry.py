@@ -144,7 +144,7 @@ TASKS = {
         "risk": {"level": "medium", "label": "中风险", "summary": "包含组队、战斗和双倍点数确认"},
         "steps": [
             "确认角色可以创建或加入队伍，背包与弹窗不会遮挡主界面。",
-            "填写实际希望完成的轮数，并选择队伍等级范围。",
+            "填写实际希望完成的轮数，并选择队伍等级范围和阵法。",
             "启动后允许自动化进行匹配、队伍重组和双倍领取确认。",
         ],
         "checklist": COMMON_CHECKLIST
@@ -170,6 +170,25 @@ TASKS = {
                 "choices": [
                     {"value": "90-115", "label": "90-115（默认）"},
                     {"value": "20-115", "label": "20-115"},
+                ],
+            },
+            {
+                "key": "formation",
+                "label": "队伍阵法",
+                "type": "select",
+                "default": "current",
+                "choices": [
+                    {"value": "current", "label": "保持当前阵法（默认）"},
+                    {"value": "天覆阵", "label": "天覆阵"},
+                    {"value": "地载阵", "label": "地载阵"},
+                    {"value": "风扬阵", "label": "风扬阵"},
+                    {"value": "云垂阵", "label": "云垂阵"},
+                    {"value": "龙飞阵", "label": "龙飞阵"},
+                    {"value": "虎翼阵", "label": "虎翼阵"},
+                    {"value": "鸟翔阵", "label": "鸟翔阵"},
+                    {"value": "蛇蟠阵", "label": "蛇蟠阵"},
+                    {"value": "鹰啸阵", "label": "鹰啸阵"},
+                    {"value": "雷绝阵", "label": "雷绝阵"},
                 ],
             },
         ],

@@ -34,16 +34,21 @@ class TaskRegistryTests(unittest.TestCase):
     def test_defaults_and_integer_bounds_are_applied(self):
         self.assertEqual(
             validate_options("zhuogui", {}),
-            {"rounds": 2, "levelRange": "90-115"},
+            {"rounds": 2, "levelRange": "90-115", "formation": "current"},
         )
         self.assertEqual(
-            validate_options("zhuogui", {"rounds": 1, "levelRange": "20-115"}),
-            {"rounds": 1, "levelRange": "20-115"},
+            validate_options(
+                "zhuogui",
+                {"rounds": 1, "levelRange": "20-115", "formation": "虎翼阵"},
+            ),
+            {"rounds": 1, "levelRange": "20-115", "formation": "虎翼阵"},
         )
         with self.assertRaisesRegex(ValueError, "1–100"):
             validate_options("zhuogui", {"rounds": 0})
         with self.assertRaisesRegex(ValueError, "选项无效"):
             validate_options("zhuogui", {"levelRange": "1-115"})
+        with self.assertRaisesRegex(ValueError, "选项无效"):
+            validate_options("zhuogui", {"formation": "无敌阵"})
         with self.assertRaisesRegex(ValueError, "未知参数"):
             validate_options("keju", {"apiKey": "must-not-be-accepted"})
 

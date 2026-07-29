@@ -28,6 +28,7 @@ from maa.tasker import Tasker  # noqa: E402
 from maa.toolkit import Toolkit  # noqa: E402
 
 from zhuogui_macos_core import (  # noqa: E402
+    FORMATIONS,
     RuntimeBudget,
     classify_scene,
     proposed_action,
@@ -51,6 +52,7 @@ LEVEL_RANGES = {
     "90-115": (90, 115),
     "20-115": (20, 115),
 }
+FORMATION_CHOICES = ("current", *FORMATIONS)
 
 
 def level_drag_end(current_level: int, target_level: int) -> float:
@@ -71,6 +73,8 @@ class WorkflowState:
     target_high_range_clicked: bool = False
     target_level_swipes: int = 0
     target_configured: bool = False
+    formation_configured: bool = False
+    formation_selection_attempts: int = 0
     double_claims_this_round: int = 0
     unknown_count: int = 0
     round_started_at: float | None = None
@@ -128,6 +132,11 @@ def parse_args():
         "--level-range",
         choices=tuple(LEVEL_RANGES),
         default="90-115",
+    )
+    parser.add_argument(
+        "--formation",
+        choices=FORMATION_CHOICES,
+        default="current",
     )
     parser.add_argument("--inspect-scene", action="store_true")
     parser.add_argument("--recognize-only", action="store_true")
@@ -356,6 +365,7 @@ def run_workflow(
         max_rebuilds=args.max_rebuilds,
     )
     target_min_level, target_max_level = LEVEL_RANGES[args.level_range]
+    state.formation_configured = args.formation == "current"
 
     def click(point, scene, reason):
         if point is None:
@@ -541,6 +551,17 @@ def run_workflow(
             guard.wait(args.poll_interval)
             continue
 
+        if status == "formation_menu":
+            target = decision.get("formations", {}).get(args.formation)
+            if target is None:
+                raise RuntimeError(f"阵法菜单中未找到{args.formation}，已安全停止")
+            if state.formation_selection_attempts >= 2:
+                raise RuntimeError("阵法选择重复超过2次，已安全停止")
+            click(target, scene, f"选择{args.formation}")
+            state.formation_selection_attempts += 1
+            guard.wait(args.poll_interval)
+            continue
+
         if status in ("team_page", "remove_member_menu"):
             state.phase = "recruit"
             if decision.get("target_is_ghost"):
@@ -554,6 +575,15 @@ def run_workflow(
                     raise RuntimeError("队伍重组已达最大次数，停止并保留当前队伍")
                 click(decision.get("click"), scene, "请离一个异常成员")
                 budget.record_rebuild()
+            elif not state.formation_configured:
+                if decision.get("current_formation") == args.formation:
+                    state.formation_configured = True
+                elif decision.get("formation"):
+                    click(decision["formation"], scene, "打开阵法选择")
+                    guard.wait(args.poll_interval)
+                    continue
+                else:
+                    raise RuntimeError("队伍页未识别到当前阵法入口，已安全停止")
             elif decision.get("remove"):
                 if not budget.can_rebuild():
                     raise RuntimeError("队伍重组已达最大次数，停止并保留当前队伍")

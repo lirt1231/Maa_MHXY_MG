@@ -24,6 +24,18 @@ SCHOOLS = (
     "须弥海",
     "盘丝洞",
 )
+FORMATIONS = (
+    "天覆阵",
+    "地载阵",
+    "风扬阵",
+    "云垂阵",
+    "龙飞阵",
+    "虎翼阵",
+    "鸟翔阵",
+    "蛇蟠阵",
+    "鹰啸阵",
+    "雷绝阵",
+)
 
 
 def normalize_text(value: str) -> str:
@@ -62,6 +74,14 @@ def current_channel_click(
         and center(item)[1] >= image_size[1] * 0.35
     ]
     return center(candidates[0]) if candidates else None
+
+
+def formation_name(value: str) -> str | None:
+    text = normalize_text(value)
+    for formation in FORMATIONS:
+        if formation in text:
+            return formation
+    return None
 
 
 def selected_level(
@@ -209,6 +229,20 @@ def classify_scene(
             "team": first_click(items, r"^队伍$"),
         }
 
+    formation_items = [
+        (formation_name(item.get("text", "")), item)
+        for item in items
+        if formation_name(item.get("text", ""))
+    ]
+    visible_formations = {
+        name: center(item) for name, item in formation_items if name is not None
+    }
+    if len(visible_formations) >= 2:
+        return {
+            "status": "formation_menu",
+            "formations": visible_formations,
+        }
+
     team_visible = bool(
         templates.get("team_header")
         or matching(
@@ -219,6 +253,14 @@ def classify_scene(
     if team_visible:
         offline = matching(items, r"离线|暂离")
         remove = first_click(items, r"请离队伍")
+        current_formation_item = next(
+            (
+                item
+                for name, item in formation_items
+                if name is not None and center(item)[1] < image_size[1] * 0.25
+            ),
+            None,
+        )
         return {
             "status": "team_page",
             "create": first_click(items, r"创建队伍"),
@@ -235,6 +277,14 @@ def classify_scene(
             "close": templates.get("team_close")
             or (*relative_point((0.921, 0.146), image_size), 40, 40),
             "target_is_ghost": bool(matching(items, r"捉鬼任务")),
+            "formation": center(current_formation_item)
+            if current_formation_item
+            else None,
+            "current_formation": formation_name(
+                current_formation_item.get("text", "")
+            )
+            if current_formation_item
+            else None,
         }
 
     if re.search(r"请离队伍", joined):
@@ -300,6 +350,7 @@ def proposed_action(decision: dict) -> str:
         "team_created_panel": "open_full_team_page",
         "team_page": "evaluate_team",
         "target_dialog": "configure_ghost_target",
+        "formation_menu": "select_formation",
         "channel_picker": "choose_current_channel",
         "map_zhongkui": "click_zhongkui",
         "world_map_changan": "travel_to_changan",
