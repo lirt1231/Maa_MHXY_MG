@@ -24,6 +24,21 @@ def classify_baotu_scene(
     if find_items(texts, r"宝图任务完成|今日宝图任务已完成|宝图任务全部完成"):
         return {"status": "completed"}
 
+    completion_dialogues = find_items(
+        texts,
+        r"任务完成",
+        image_size,
+        {"min_x": 0.3, "max_x": 0.7, "min_y": 0.1, "max_y": 0.45},
+    )
+    treasure_map_rewards = find_items(
+        texts,
+        r".*(?:搜出|获得).*(?:藏宝|宝图).*",
+        image_size,
+        {"min_x": 0.25, "max_x": 0.75, "min_y": 0.35, "max_y": 0.75},
+    )
+    if completion_dialogues and treasure_map_rewards:
+        return {"status": "completed"}
+
     if not daily_tab_confirmed:
         navigation = classify_daily_navigation(
             texts,

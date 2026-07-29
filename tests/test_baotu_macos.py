@@ -109,6 +109,33 @@ class DailyNavigationTests(unittest.TestCase):
 
 
 class BaotuSceneTests(unittest.TestCase):
+    def test_current_completion_dialogue_with_treasure_map_reward_completes(self):
+        decision = classify_baotu_scene(
+            [
+                text("任务完成", (401, 120, 228, 59)),
+                text("你从强盗身上搜出了1张藏宝", (423, 372, 227, 19)),
+                text("图", (423, 394, 22, 19)),
+                text("宝图任务", (830, 142, 74, 19)),
+            ],
+            {},
+            (1020, 718),
+        )
+
+        self.assertEqual(decision["status"], "completed")
+
+    def test_unrelated_completion_dialogue_does_not_complete_baotu(self):
+        decision = classify_baotu_scene(
+            [
+                text("任务完成", (401, 120, 228, 59)),
+                text("获得了门派贡献", (423, 372, 180, 19)),
+                text("宝图任务", (830, 142, 74, 19)),
+            ],
+            {},
+            (1020, 718),
+        )
+
+        self.assertEqual(decision["status"], "continue_task")
+
     def test_sidebar_task_and_dialogue_use_expected_regions(self):
         self.assertEqual(
             classify_baotu_scene(
@@ -147,6 +174,27 @@ class BaotuSceneTests(unittest.TestCase):
 
 
 class BaotuRunnerTests(unittest.TestCase):
+    @patch("tools.run_baotu_macos.MacOSTaskRuntime")
+    def test_completion_overlay_finishes_without_another_sidebar_click(
+        self, runtime_class
+    ):
+        runtime = runtime_class.return_value
+        runtime.read_scene.return_value = scene(
+            [
+                text("任务完成", (401, 120, 228, 59)),
+                text("你从强盗身上搜出了1张藏宝", (423, 372, 227, 19)),
+                text("宝图任务", (830, 142, 74, 19)),
+            ]
+        )
+        args = SimpleNamespace(inspect_scene=False, recognize_only=False, max_steps=2)
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            self.assertEqual(run(args, Mock()), 0)
+
+        runtime.click_box.assert_not_called()
+        self.assertIn('"status": "completed"', output.getvalue())
+
     @patch("tools.run_baotu_macos.MacOSTaskRuntime")
     def test_bounded_flow_clicks_only_recognized_boxes(self, runtime_class):
         runtime = runtime_class.return_value
