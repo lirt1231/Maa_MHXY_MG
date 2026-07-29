@@ -53,16 +53,6 @@ LEVEL_RANGES = {
 }
 
 
-def level_drag_end(current_level: int, target_level: int) -> float:
-    """Return a bounded picker drag endpoint for either adjustment direction."""
-    difference = current_level - target_level
-    if difference == 0:
-        raise ValueError("current level already matches target")
-    if difference > 0:
-        return 0.75 if difference > 15 else 0.45
-    return 0.10 if difference < -15 else 0.34
-
-
 @dataclass
 class WorkflowState:
     phase: str = "ensure_team"
@@ -495,21 +485,24 @@ def run_workflow(
                 click(decision["daily"], scene, "展开日常任务")
                 state.target_daily_clicked = True
             elif (
-                not state.target_high_range_clicked
+                args.level_range == "90-115"
+                and not state.target_high_range_clicked
                 and decision.get("range_90_115")
-                and (
-                    decision.get("current_max_level") != target_max_level
-                    or (
-                        decision.get("current_min_level") is not None
-                        and decision.get("current_min_level") < target_min_level
-                    )
-                )
             ):
                 click(decision["range_90_115"], scene, "选择90-115预设区间")
                 state.target_high_range_clicked = True
             elif (
-                decision.get("current_min_level") == target_min_level
-                and decision.get("current_max_level") == target_max_level
+                (
+                    (
+                        args.level_range == "90-115"
+                        and state.target_high_range_clicked
+                    )
+                    or (
+                        args.level_range == "20-115"
+                        and decision.get("current_min_level") == target_min_level
+                        and decision.get("current_max_level") == target_max_level
+                    )
+                )
                 and decision.get("confirm")
             ):
                 click(
@@ -525,7 +518,15 @@ def run_workflow(
                 current_min = decision.get("current_min_level")
                 if current_min is None:
                     raise RuntimeError("未能读取最低等级，停止避免盲目拖动")
-                drag_end_y = level_drag_end(current_min, target_min_level)
+                if args.level_range == "90-115":
+                    raise RuntimeError("未识别到90-115队伍等级预设，已安全停止")
+                if current_min < target_min_level:
+                    raise RuntimeError(
+                        f"最低等级已越过{target_min_level}（当前{current_min}），停止"
+                    )
+                drag_end_y = (
+                    0.75 if current_min - target_min_level > 15 else 0.45
+                )
                 guard.perform_input(
                     native_input.drag,
                     relative_point((0.623, 0.395), (width, height)),
