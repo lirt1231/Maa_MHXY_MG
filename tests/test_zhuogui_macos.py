@@ -236,6 +236,14 @@ class SceneCaptureTests(unittest.TestCase):
 
 
 class SafetyAndCountingTests(unittest.TestCase):
+    def test_level_picker_drag_supports_both_directions(self):
+        self.assertLess(zhuogui_runner.level_drag_end(21, 90), 0.395)
+        self.assertLess(zhuogui_runner.level_drag_end(89, 90), 0.395)
+        self.assertGreater(zhuogui_runner.level_drag_end(90, 20), 0.395)
+        self.assertGreater(zhuogui_runner.level_drag_end(21, 20), 0.395)
+        with self.assertRaises(ValueError):
+            zhuogui_runner.level_drag_end(90, 90)
+
     def test_level_adjustment_budget_covers_90_to_20_picker(self):
         self.assertGreaterEqual(zhuogui_runner.MAX_TARGET_LEVEL_SWIPES, 21)
 

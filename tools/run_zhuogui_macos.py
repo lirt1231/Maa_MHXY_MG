@@ -53,6 +53,16 @@ LEVEL_RANGES = {
 }
 
 
+def level_drag_end(current_level: int, target_level: int) -> float:
+    """Return a bounded picker drag endpoint for either adjustment direction."""
+    difference = current_level - target_level
+    if difference == 0:
+        raise ValueError("current level already matches target")
+    if difference > 0:
+        return 0.75 if difference > 15 else 0.45
+    return 0.10 if difference < -15 else 0.34
+
+
 @dataclass
 class WorkflowState:
     phase: str = "ensure_team"
@@ -515,13 +525,7 @@ def run_workflow(
                 current_min = decision.get("current_min_level")
                 if current_min is None:
                     raise RuntimeError("未能读取最低等级，停止避免盲目拖动")
-                if current_min < target_min_level:
-                    raise RuntimeError(
-                        f"最低等级已越过{target_min_level}（当前{current_min}），停止"
-                    )
-                drag_end_y = (
-                    0.75 if current_min - target_min_level > 15 else 0.45
-                )
+                drag_end_y = level_drag_end(current_min, target_min_level)
                 guard.perform_input(
                     native_input.drag,
                     relative_point((0.623, 0.395), (width, height)),
