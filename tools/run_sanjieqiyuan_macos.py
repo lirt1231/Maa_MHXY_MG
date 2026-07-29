@@ -60,16 +60,17 @@ def emit_result(status: str, **payload) -> None:
 
 def system_window_capture(window_id: int) -> np.ndarray:
     """Capture only the game window without relying on Maa ScreenCaptureKit."""
-    with tempfile.NamedTemporaryFile(suffix=".png") as output:
+    with tempfile.TemporaryDirectory() as directory:
+        output = Path(directory) / "window.png"
         completed = subprocess.run(
-            ["/usr/sbin/screencapture", "-x", "-l", str(window_id), output.name],
+            ["/usr/sbin/screencapture", "-x", "-l", str(window_id), str(output)],
             capture_output=True,
             check=False,
             timeout=10,
         )
         if completed.returncode != 0:
             raise RuntimeError("游戏窗口截图失败，请检查屏幕录制权限和窗口可见性")
-        image = Image.open(output.name).convert("RGB")
+        image = Image.open(output).convert("RGB")
         raw = np.asarray(image)
         visible = raw.max(axis=2) > 20
         ys, xs = np.where(visible)

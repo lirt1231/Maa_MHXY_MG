@@ -1,7 +1,9 @@
 import io
 import json
+import subprocess
 import unittest
 from contextlib import redirect_stdout
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -16,6 +18,7 @@ from tools.run_sanjieqiyuan_macos import (
     main,
     navigate_to_exam,
     recognize_answer,
+    system_window_capture,
     verify_answering_completion,
 )
 from custom.recognition.reco_sjqy import (
@@ -95,6 +98,23 @@ class WindowCaptureTests(unittest.TestCase):
             capture.capture(FakeGuard(fail_at=2))
         fallback.assert_not_called()
         self.assertTrue(capture.maa_available)
+
+    @patch("tools.run_sanjieqiyuan_macos.subprocess.run")
+    def test_system_capture_writes_to_a_new_path(self, run_command):
+        def create_capture(command, **_kwargs):
+            output = Path(command[-1])
+            self.assertFalse(output.exists())
+            from PIL import Image
+
+            Image.new("RGB", (1700, 1400), "white").save(output)
+            return subprocess.CompletedProcess(command, 0)
+
+        run_command.side_effect = create_capture
+
+        image = system_window_capture(42)
+
+        self.assertEqual(image.shape, (718, 1020, 3))
+        self.assertEqual(run_command.call_args.args[0][2:4], ["-l", "42"])
 
 
 class NativeMacOSInputBindingTests(unittest.TestCase):
