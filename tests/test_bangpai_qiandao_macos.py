@@ -5,7 +5,10 @@ from contextlib import redirect_stdout
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from tools.bangpai_qiandao_macos_core import classify_clan_sign_in_scene
+from tools.bangpai_qiandao_macos_core import (
+    classify_clan_sign_in_scene,
+    welfare_close_box,
+)
 import tools.run_bangpai_qiandao_macos as clan_runner
 from tools.run_bangpai_qiandao_macos import run
 
@@ -40,6 +43,33 @@ def protocol_payloads(output, prefix):
 
 
 class ClanSignInSceneTests(unittest.TestCase):
+    def test_closes_only_a_fully_recognized_leftover_welfare_page(self):
+        texts = [
+            text("梦幻刮刮乐", (460, 90, 130, 28)),
+            text("今日奖品", (605, 160, 127, 39)),
+            text("当前累计：3/7次", (450, 590, 141, 22)),
+        ]
+
+        decision = classify_clan_sign_in_scene(texts, {}, "enter", (1020, 718))
+        incomplete = classify_clan_sign_in_scene(texts[:-1], {}, "enter", (1020, 718))
+
+        self.assertEqual(decision, {
+            "status": "close_known_welfare_overlay",
+            "box": welfare_close_box((1020, 718)),
+        })
+        self.assertEqual(incomplete["status"], "unknown")
+
+    def test_welfare_template_is_only_closed_from_entry_phase(self):
+        templates = {"welfare_header": (420, 20, 300, 60)}
+        self.assertEqual(
+            classify_clan_sign_in_scene([], templates, "enter", (1020, 718))["status"],
+            "close_known_welfare_overlay",
+        )
+        self.assertEqual(
+            classify_clan_sign_in_scene([], templates, "clan", (1020, 718))["status"],
+            "unknown",
+        )
+
     def test_expands_menu_only_from_entry_phase(self):
         decision = classify_clan_sign_in_scene(
             [], {"expand_menu": (940, 630, 50, 50)}, "enter"
@@ -314,6 +344,53 @@ class ClanSignInSceneTests(unittest.TestCase):
 
 
 class ClanSignInRunnerTests(unittest.TestCase):
+    @patch("tools.run_bangpai_qiandao_macos.MacOSTaskRuntime")
+    def test_recovers_from_welfare_page_left_by_previous_task(self, runtime_class):
+        runtime = runtime_class.return_value
+        runtime.read_scene.side_effect = [
+            scene(templates={"welfare_header": (420, 20, 300, 60)}),
+            scene(templates={"expand_menu": (940, 630, 50, 50)}),
+            scene(templates={"clan_entry": (800, 620, 70, 60)}),
+            scene(templates={
+                "clan_header": (350, 0, 320, 70),
+                "clan_welfare": (880, 350, 60, 90),
+            }),
+            scene(
+                [text("今日已签到")],
+                {"clan_header": (350, 0, 320, 70)},
+            ),
+        ]
+        args = SimpleNamespace(inspect_scene=False, recognize_only=False, max_steps=6)
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            self.assertEqual(run(args, Mock()), 0)
+
+        self.assertEqual(
+            [call.args[0] for call in runtime.click_box.call_args_list],
+            [
+                welfare_close_box((1020, 718)),
+                (940, 630, 50, 50),
+                (800, 620, 70, 60),
+                (880, 350, 60, 90),
+            ],
+        )
+        self.assertEqual(
+            protocol_payloads(output.getvalue(), "result_json=")[0]["status"],
+            "already_completed",
+        )
+
+    @patch("tools.run_bangpai_qiandao_macos.MacOSTaskRuntime")
+    def test_leftover_welfare_close_is_clicked_at_most_once(self, runtime_class):
+        runtime = runtime_class.return_value
+        welfare = scene(templates={"welfare_header": (420, 20, 300, 60)})
+        runtime.read_scene.side_effect = [welfare, welfare]
+        args = SimpleNamespace(inspect_scene=False, recognize_only=False, max_steps=3)
+
+        with self.assertRaisesRegex(RuntimeError, "关闭后仍未变化"):
+            run(args, Mock())
+        self.assertEqual(runtime.click_box.call_count, 1)
+
     @patch("tools.run_bangpai_qiandao_macos.MacOSTaskRuntime")
     def test_full_flow_clicks_only_recognized_boxes(self, runtime_class):
         runtime = runtime_class.return_value

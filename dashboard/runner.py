@@ -560,7 +560,7 @@ class RunnerManager:
         elif task_id == "bangpai_qiandao":
             ready = scene in {
                 "expand_menu", "open_clan", "open_welfare", "sign_in",
-                "claim_dividend", "confirm_dividend",
+                "claim_dividend", "confirm_dividend", "close_known_welfare_overlay",
             }
         elif task_id == "baotu":
             ready = scene in {

@@ -31,12 +31,52 @@ def box_in_region(box, image_size, *, min_x=0.0, max_x=1.0, min_y=0.0, max_y=1.0
     return min_x <= center_x <= max_x and min_y <= center_y <= max_y
 
 
+def welfare_close_box(image_size):
+    image_width, image_height = image_size or (1020, 718)
+    return [
+        round(image_width * 0.88),
+        round(image_height * 0.055),
+        max(1, round(image_width * 0.06)),
+        max(1, round(image_height * 0.10)),
+    ]
+
+
 def classify_clan_sign_in_scene(
     texts: list[dict], templates: dict, phase: str, image_size=None
 ) -> dict:
     no_clan = find_text(texts, r"未加入帮派|申请加入帮派|创建帮派")
     if no_clan:
         return {"status": "no_clan"}
+
+    welfare_header = templates.get("welfare_header")
+    welfare_header_valid = box_in_region(
+        welfare_header,
+        image_size,
+        min_x=0.25,
+        max_x=0.8,
+        max_y=0.3,
+    )
+    scratch_title = find_text(texts, r"^梦幻刮刮乐$")
+    scratch_prize = find_text(texts, r"^今日奖品$")
+    scratch_cumulative = find_text(texts, r"^当前累计[:：]?\d+/\d+次$")
+    scratch_page_valid = all((scratch_title, scratch_prize, scratch_cumulative)) and all(
+        (
+            box_in_region(
+                scratch_title["box"], image_size, min_x=0.3, max_x=0.75, max_y=0.3
+            ),
+            box_in_region(
+                scratch_prize["box"], image_size, min_x=0.4, max_x=0.9, max_y=0.45
+            ),
+            box_in_region(
+                scratch_cumulative["box"], image_size, min_x=0.3, max_x=0.75, min_y=0.7
+            ),
+        )
+    )
+    if phase == "enter" and (welfare_header_valid or scratch_page_valid):
+        return {
+            "status": "close_known_welfare_overlay",
+            "box": welfare_close_box(image_size),
+        }
 
     clan_header = templates.get("clan_header")
     clan_title = find_text(texts, r"^[·•]?帮派[·•]?$")

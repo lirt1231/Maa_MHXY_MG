@@ -25,6 +25,7 @@ TEMPLATES = {
         "qiandao/bangpai_jiemian_panduan2.png",
     ],
     "clan_welfare": ["qiandao/bangpaifuli.png"],
+    "welfare_header": ["qiandao/fuli.png"],
 }
 RESULT_PREFIX = "result_json="
 RESULT_STATUSES = {"completed", "already_completed", "safe_stopped", "cancelled"}
@@ -47,7 +48,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--inspect-scene", action="store_true")
     parser.add_argument("--recognize-only", action="store_true")
-    parser.add_argument("--max-steps", type=int, default=12)
+    parser.add_argument("--max-steps", type=int, default=16)
     args = parser.parse_args()
     if args.max_steps <= 0:
         parser.error("--max-steps 必须是正整数")
@@ -62,6 +63,7 @@ def run(args, guard: CancellationGuard) -> int:
     sign_in_attempts = 0
     dividend_attempts = 0
     confirmation_attempts = 0
+    welfare_close_attempts = 0
     actions = 0
     clicks = 0
 
@@ -103,6 +105,14 @@ def run(args, guard: CancellationGuard) -> int:
             actions += 1
             clicks += 1
             phase = "menu"
+        elif status == "close_known_welfare_overlay":
+            welfare_close_attempts += 1
+            if welfare_close_attempts > 1:
+                raise RuntimeError("福利页面关闭后仍未变化，已安全停止")
+            runtime.click_box(decision["box"], scene, "关闭上一任务遗留的福利页面")
+            actions += 1
+            clicks += 1
+            phase = "enter"
         elif status == "open_clan":
             runtime.click_box(decision["box"], scene, "打开帮派")
             actions += 1
@@ -143,7 +153,7 @@ def run(args, guard: CancellationGuard) -> int:
             raise RuntimeError("帮派页面未显示可识别的福利入口，已安全停止")
         elif status == "unknown" and unknown_polls >= 3:
             raise RuntimeError("连续三次无法识别帮派签到页面，已停止以避免无证据点击")
-        guard.wait(0.8)
+        guard.wait(1.5 if status == "close_known_welfare_overlay" else 0.8)
 
     raise RuntimeError("帮派签到超过最大识别步骤，已安全停止")
 

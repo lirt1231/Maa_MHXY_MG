@@ -37,6 +37,7 @@ SCENE_MESSAGES = {
     "claim_dividend": "发现可领取分红，正在领取",
     "confirm_dividend": "正在确认领取帮派分红",
     "clan_idle": "正在检查帮派签到与分红状态",
+    "close_known_welfare_overlay": "正在关闭上一任务遗留的福利页面",
     "team_quick_panel": "正在打开队伍页面",
     "team_created_panel": "队伍已创建，正在检查队伍设置",
     "team_page": "正在检查队伍成员与设置",
