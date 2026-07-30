@@ -42,7 +42,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--inspect-scene", action="store_true")
     parser.add_argument("--recognize-only", action="store_true")
-    parser.add_argument("--max-steps", type=int, default=12)
+    parser.add_argument("--max-steps", type=int, default=20)
     args = parser.parse_args()
     if args.max_steps <= 0:
         parser.error("--max-steps 必须是正整数")
@@ -121,9 +121,15 @@ def run(args, guard: CancellationGuard) -> int:
                 raise RuntimeError("福利页面未显示今日签到入口或明确完成状态，已安全停止")
         else:
             unknown_polls += 1
-            if unknown_polls >= 3:
-                raise RuntimeError("连续三次无法识别福利签到页面，已停止以避免无证据点击")
-        guard.wait(0.8)
+            unknown_limit = 8 if phase in {"welfare", "scratch", "verify"} else 3
+            if unknown_polls >= unknown_limit:
+                raise RuntimeError(
+                    f"连续{unknown_limit}次无法识别福利签到页面，已停止以避免无证据点击"
+                )
+        wait_seconds = 2.5 if status == "open_scratch" else (
+            1.2 if status == "open_welfare" else 0.8
+        )
+        guard.wait(wait_seconds)
 
     raise RuntimeError("福利签到超过最大识别步骤，已安全停止")
 

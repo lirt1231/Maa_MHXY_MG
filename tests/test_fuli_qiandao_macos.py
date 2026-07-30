@@ -238,6 +238,31 @@ class WelfareSceneClassificationTests(unittest.TestCase):
 
 class WelfareRunnerTests(unittest.TestCase):
     @patch("tools.run_fuli_qiandao_macos.MacOSTaskRuntime")
+    def test_waits_through_slow_scratch_page_transition(self, runtime_class):
+        runtime = runtime_class.return_value
+        runtime.read_scene.side_effect = [
+            scene([text("福利", (5, 110, 60, 50))]),
+            scene([text("打开刮刮乐", (820, 590, 160, 50))]),
+            *[scene() for _ in range(5)],
+            scene(templates={"scratch": (300, 210, 428, 157)}),
+            scene([text("签到成功")]),
+        ]
+        guard = Mock()
+        args = SimpleNamespace(inspect_scene=False, recognize_only=False, max_steps=12)
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            self.assertEqual(run(args, guard), 0)
+
+        self.assertEqual(runtime.click_box.call_count, 2)
+        self.assertEqual(runtime.drag.call_count, 5)
+        self.assertEqual(
+            protocol_payloads(output.getvalue(), "result_json=")[0]["status"],
+            "completed",
+        )
+        self.assertIn(2.5, [call.args[0] for call in guard.wait.call_args_list])
+
+    @patch("tools.run_fuli_qiandao_macos.MacOSTaskRuntime")
     def test_full_flow_uses_only_recognized_boxes(self, runtime_class):
         runtime = runtime_class.return_value
         runtime.read_scene.side_effect = [
@@ -303,17 +328,15 @@ class WelfareRunnerTests(unittest.TestCase):
         runtime_class.return_value.read_scene.side_effect = [
             scene(),
             scene([text("福利", (5, 110, 60, 50))]),
-            scene(),
-            scene(),
-            scene(),
+            *[scene() for _ in range(8)],
         ]
         guard = Mock()
-        args = SimpleNamespace(inspect_scene=False, recognize_only=False, max_steps=6)
+        args = SimpleNamespace(inspect_scene=False, recognize_only=False, max_steps=12)
 
-        with self.assertRaisesRegex(RuntimeError, "连续三次"):
+        with self.assertRaisesRegex(RuntimeError, "连续8次"):
             run(args, guard)
 
-        self.assertEqual(runtime_class.return_value.read_scene.call_count, 5)
+        self.assertEqual(runtime_class.return_value.read_scene.call_count, 10)
 
     @patch("tools.run_fuli_qiandao_macos.MacOSTaskRuntime")
     def test_repeated_scratch_region_has_bounded_drag_attempts(self, runtime_class):
