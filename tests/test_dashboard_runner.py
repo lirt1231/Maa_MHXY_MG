@@ -345,6 +345,24 @@ class RunnerTaskContractTests(unittest.TestCase):
             self.manager._friendly_error("bangpai_qiandao", 1, "unknown scene"),
         )
 
+    def test_shimen_progress_reports_handoff_to_game(self):
+        running = self.manager._progress_payload(
+            "shimen", '{"event": "scene", "status": "start_task"}'
+        )
+        self.assertEqual(running["stage"], "正在领取并启动师门任务")
+        completed = self.manager._progress_payload(
+            "shimen", 'result_json={"task_id":"shimen","status":"completed"}'
+        )
+        self.assertEqual(completed["stage"], "师门任务已启动，后续由游戏自动完成")
+        safe_stopped = self.manager._progress_payload(
+            "shimen", 'result_json={"task_id":"shimen","status":"safe_stopped"}'
+        )
+        self.assertEqual(safe_stopped["stage"], "师门任务已安全停止")
+        final_message = self.manager._task_result_message(
+            "shimen", {"status": "completed", "actions": 2, "clicks": 2}
+        )
+        self.assertEqual(final_message, "师门任务已启动，后续由游戏自动完成")
+
     def test_sanjie_completed_result_is_preserved_in_final_event(self):
         process = _FinishedProcess([
             'result_json={"task_id":"sanjieqiyuan","status":"completed","questions":10,"clicks":10}'

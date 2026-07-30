@@ -61,10 +61,11 @@ class TaskRegistryTests(unittest.TestCase):
             validate_options("yunbiao", {"rounds": 4})
         self.assertEqual(validate_options("shimen", {}), {})
 
-    def test_sect_task_discloses_and_blocks_asset_branches(self):
+    def test_sect_task_discloses_game_handoff_after_start(self):
         task = TASKS["shimen"]
-        self.assertIn("资产操作一律保留现场", task["summary"])
-        self.assertTrue(any("不购买" in warning for warning in task["warnings"]))
+        self.assertIn("后续流程交给游戏自动完成", task["summary"])
+        self.assertTrue(any("不再监控" in warning for warning in task["warnings"]))
+        self.assertEqual(task["risk"]["level"], "low")
         self.assertEqual(
             validate_options("sanjieqiyuan", {}),
             {"maxSteps": 10, "navigation": "auto"},

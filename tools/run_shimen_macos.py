@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the low-risk subset of sect missions on macOS."""
+"""Start a sect mission and hand the remaining automation back to the game."""
 
 from __future__ import annotations
 
@@ -113,12 +113,21 @@ def run(args, guard):
             raise RuntimeError(
                 f"师门进入需要资产操作的分支，首版不会自动处理：{decision['reason']}"
             )
-        if status in {
-            "accept_task_dialogue",
-            "start_task",
-            "continue_task",
-            "progress_task",
-        }:
+        if status in {"start_task", "continue_task"}:
+            task_clicks += 1
+            runtime.click_box(decision["box"], scene, "点击右侧师门任务正式开始")
+            actions += 1
+            clicks += 1
+            guard.wait(1.0)
+            log_event("handed_off", reason="game_managed_after_sidebar_click")
+            emit_result(
+                "completed",
+                actions=actions,
+                clicks=clicks,
+                reason="已点击右侧师门任务，后续由游戏自动完成",
+            )
+            return 0
+        if status in {"accept_task_dialogue", "progress_task"}:
             daily_tab_confirmed = False
             daily_loading_polls = 0
             daily_reselects = 0
@@ -135,15 +144,13 @@ def run(args, guard):
                 raise RuntimeError(f"师门连续重复执行 {status}，已安全停止")
             reasons = {
                 "accept_task_dialogue": "接取师门 NPC 对话任务",
-                "start_task": "点击右侧师门任务正式开始",
-                "continue_task": "继续右侧师门任务",
                 "progress_task": "执行师门去完成按钮",
             }
             runtime.click_box(decision["box"], scene, reasons[status])
             actions += 1
             clicks += 1
             unknown_polls = 0
-            guard.wait(7.0 if status in {"start_task", "continue_task"} else 2.0)
+            guard.wait(2.0)
             continue
         if status == "scroll_daily":
             daily_loading_polls = 0

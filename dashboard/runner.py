@@ -772,7 +772,7 @@ class RunnerManager:
                 "bangpai_qiandao": "帮派签到与分红领取完成",
                 "baotu": "宝图任务完成",
                 "yunbiao": "普通运镖完成",
-                "shimen": "师门任务完成",
+                "shimen": "师门任务已启动，后续由游戏自动完成",
                 "kaogu": "工坊考古完成 10 次挖掘",
             }[task_id]
         return None
@@ -929,9 +929,14 @@ class RunnerManager:
         elif task_id == "yunbiao" and line.startswith(RESULT_PREFIX):
             payload["stage"] = RunnerManager._bounded_task_result_stage(line, "普通运镖")
         elif task_id == "shimen" and '"event": "scene"' in line:
-            payload["stage"] = "正在识别并推进低风险师门任务"
+            payload["stage"] = "正在领取并启动师门任务"
         elif task_id == "shimen" and line.startswith(RESULT_PREFIX):
-            payload["stage"] = RunnerManager._bounded_task_result_stage(line, "师门任务")
+            result_stage = RunnerManager._bounded_task_result_stage(line, "师门任务")
+            payload["stage"] = (
+                "师门任务已启动，后续由游戏自动完成"
+                if result_stage == "师门任务完成"
+                else result_stage
+            )
         elif task_id == "kaogu" and '"event": "scene"' in line:
             payload["stage"] = "正在识别并推进工坊考古"
         elif task_id == "kaogu" and line.startswith(RESULT_PREFIX):
@@ -981,7 +986,7 @@ class RunnerManager:
             "bangpai_qiandao": "帮派签到未能继续，请确认角色已加入帮派并保持相关页面完整可见。",
             "baotu": "宝图任务未能继续，请保持主界面、日常活动页或宝图任务过程完整可见。",
             "yunbiao": "普通运镖未能继续，请检查活力、镖种和当前任务页面。",
-            "shimen": "师门任务未能继续，请查看是否进入购买、提交或其他资产操作分支。",
+            "shimen": "师门任务未能启动，请保持活动入口、领取对话或右侧师门任务完整可见。",
             "kaogu": "工坊考古未能继续，请检查技能生产页面、角色活力和洛阳铲购买状态。",
         }
         return f"{hints[task_id]}（进程代码 {return_code}）"

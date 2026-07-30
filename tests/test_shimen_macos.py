@@ -224,8 +224,6 @@ class ShimenRunnerTests(unittest.TestCase):
                     text("向师父领取集物任务", (831, 167, 145, 15)),
                 ]
             ),
-            scene([], {"auto_pathing": (1, 2, 3, 4)}),
-            scene([text("师门任务完成", (420, 180, 180, 30))]),
         ]
         args = SimpleNamespace(inspect_scene=False, recognize_only=False, max_steps=6)
 
@@ -238,52 +236,51 @@ class ShimenRunnerTests(unittest.TestCase):
         self.assertEqual(
             runtime.click_box.call_args_list[1].args[0], [831, 167, 145, 15]
         )
+        self.assertEqual(runtime.read_scene.call_count, 2)
 
     @patch("tools.run_shimen_macos.MacOSTaskRuntime")
-    def test_low_risk_flow_completes_with_evidence_only(self, runtime_class):
+    def test_existing_sidebar_task_is_clicked_once_then_handed_off(self, runtime_class):
         runtime = runtime_class.return_value
-        runtime.read_scene.side_effect = [
-            scene([text("师门任务", (830, 180, 130, 28))]),
-            scene([text("继续任务", (500, 410, 100, 30))]),
-            scene([], {"auto_pathing": (1, 2, 3, 4)}),
-            scene([], {"battle": (1, 2, 3, 4)}),
-            scene([text("师门任务完成", (420, 180, 180, 30))]),
-        ]
+        runtime.read_scene.return_value = scene(
+            [text("师门任务", (830, 180, 130, 28))]
+        )
         args = SimpleNamespace(inspect_scene=False, recognize_only=False, max_steps=8)
         output = io.StringIO()
 
         with redirect_stdout(output):
             self.assertEqual(run(args, Mock()), 0)
 
-        self.assertEqual(runtime.click_box.call_count, 2)
+        runtime.click_box.assert_called_once()
+        self.assertEqual(runtime.read_scene.call_count, 1)
         result = next(
             json.loads(line[len("result_json="):])
             for line in output.getvalue().splitlines()
             if line.startswith("result_json=")
         )
         self.assertEqual(result["status"], "completed")
+        self.assertIn("后续由游戏自动完成", result["reason"])
 
     @patch("tools.run_shimen_macos.MacOSTaskRuntime")
-    def test_repeated_same_task_click_stops_at_two_clicks(self, runtime_class):
+    def test_sidebar_task_never_receives_a_second_click(self, runtime_class):
         runtime = runtime_class.return_value
         runtime.read_scene.return_value = scene(
             [text("师门-巡逻", (830, 180, 130, 28))]
         )
         args = SimpleNamespace(inspect_scene=False, recognize_only=False, max_steps=5)
 
-        with self.assertRaisesRegex(RuntimeError, "连续重复"):
-            run(args, Mock())
-        self.assertEqual(runtime.click_box.call_count, 2)
+        self.assertEqual(run(args, Mock()), 0)
+        runtime.click_box.assert_called_once()
+        self.assertEqual(runtime.read_scene.call_count, 1)
 
     @patch("tools.run_shimen_macos.MacOSTaskRuntime")
     def test_repeated_five_step_navigation_cycle_stops_early(self, runtime_class):
         runtime = runtime_class.return_value
         decisions = [
             {"status": "progress_task", "box": [500, 410, 100, 30]},
-            {"status": "continue_task", "box": [830, 180, 130, 28]},
             {"status": "open_activity", "box": [260, 45, 50, 22]},
             {"status": "open_daily", "box": [80, 90, 100, 30]},
             {"status": "join_task", "box": [500, 210, 60, 25]},
+            {"status": "scroll_daily"},
         ] * 2
         runtime.read_scene.return_value = scene()
         args = SimpleNamespace(inspect_scene=False, recognize_only=False, max_steps=12)
@@ -293,7 +290,7 @@ class ShimenRunnerTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(RuntimeError, "五步页面序列"):
                 run(args, Mock())
-        self.assertEqual(runtime.click_box.call_count, 9)
+        self.assertEqual(runtime.click_box.call_count, 8)
 
     @patch("tools.run_shimen_macos.MacOSTaskRuntime")
     def test_reselects_daily_tab_after_bounded_loading_wait(self, runtime_class):
@@ -310,7 +307,7 @@ class ShimenRunnerTests(unittest.TestCase):
             *[scene([daily_tab]) for _ in range(MAX_DAILY_LOADING_POLLS)],
             scene(full_page),
             scene(full_page),
-            scene([text("师门任务完成", (420, 180, 180, 30))]),
+            scene([text("师门任务", (830, 180, 130, 28))]),
         ]
         args = SimpleNamespace(
             inspect_scene=False,
@@ -319,7 +316,7 @@ class ShimenRunnerTests(unittest.TestCase):
         )
 
         self.assertEqual(run(args, Mock()), 0)
-        self.assertEqual(runtime.click_box.call_count, 3)
+        self.assertEqual(runtime.click_box.call_count, 4)
 
 
 if __name__ == "__main__":
