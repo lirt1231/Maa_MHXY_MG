@@ -200,6 +200,37 @@ class TaskResourceStorageTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"rangeDays": 30, "tasks": []})
 
+    def test_partial_remainder_run_is_not_a_full_task_sample(self):
+        self.database.update_run(
+            "run-1", "succeeded",
+            result={
+                "task_id": "yunbiao", "status": "completed",
+                "rounds": 2, "target_rounds": 3,
+            },
+        )
+        before = self.database.add_resource_snapshot(
+            "run-1", self.snapshot("before", "2026-08-05T02:00:01+00:00")
+        )
+        after = self.database.add_resource_snapshot(
+            "run-1",
+            self.snapshot(
+                "after", "2026-08-05T02:05:00+00:00",
+                experience=1400, gold=10120, silver=20200,
+            ),
+        )
+        self.database.add_resource_yield(
+            "run-1", "yunbiao",
+            calculate_resource_yield(before, after, task_status="completed"),
+        )
+
+        task = self.database.task_yield_statistics(30)["tasks"][0]
+
+        self.assertEqual(task["attempts"], 1)
+        self.assertEqual(task["completedRuns"], 0)
+        self.assertEqual(task["reliableRuns"], 0)
+        self.assertEqual(task["metrics"]["gold"]["sampleCount"], 0)
+        self.assertEqual(task["points"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

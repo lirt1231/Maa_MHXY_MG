@@ -399,7 +399,7 @@ class Database:
         cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
         with self.connect() as db:
             rows = db.execute(
-                """SELECT yields.*, runs.task_name,
+                """SELECT yields.*, runs.task_name, runs.result_json,
                 COALESCE(runs.finished_at, yields.created_at) completed_at
                 FROM task_resource_yields AS yields
                 JOIN task_runs AS runs ON runs.id=yields.run_id
@@ -436,6 +436,31 @@ class Database:
             task["attempts"] += 1
             task["latestAt"] = row["completed_at"]
             completed = row["task_status"] == "completed"
+            if completed and row["result_json"]:
+                try:
+                    result = json.loads(row["result_json"])
+                except (json.JSONDecodeError, TypeError):
+                    result = None
+                if isinstance(result, dict):
+                    unit_pairs = (
+                        ("rounds", "target_rounds"),
+                        ("digs", "target_digs"),
+                        ("answers", "limit"),
+                        ("questions", "limit"),
+                    )
+                    for progress_key, target_key in unit_pairs:
+                        progress = result.get(progress_key)
+                        target = result.get(target_key)
+                        if (
+                            isinstance(progress, int)
+                            and not isinstance(progress, bool)
+                            and isinstance(target, int)
+                            and not isinstance(target, bool)
+                            and target > 0
+                            and progress < target
+                        ):
+                            completed = False
+                            break
             if completed:
                 task["completedRuns"] += 1
             if completed and row["attribution_status"] == "reliable":
