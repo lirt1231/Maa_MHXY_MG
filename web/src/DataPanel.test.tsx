@@ -95,10 +95,11 @@ gameData.latestUsableByCategory.character_resources = gameData.items[1];
 gameData.latestUsableByCategory.daily_tasks = gameData.items[0];
 
 const panelProps = {
-  system, metrics, gameData, metricKind: "gold" as const, rangeDays: 7 as const,
+  system, metrics, gameData, tasks: [], taskYields: { rangeDays: 30, tasks: [] },
+  metricKind: "gold" as const, rangeDays: 7 as const, taskYieldRangeDays: 30 as const,
   busy: false, capturing: false,
   onMetricKindChange: vi.fn(), onRangeDaysChange: vi.fn(), onCapture: vi.fn(),
-  onCorrect: vi.fn()
+  onTaskYieldRangeDaysChange: vi.fn(), onCorrect: vi.fn()
 };
 
 test("defaults to current resources and hides unavailable fields", () => {
@@ -120,7 +121,7 @@ test("does not relabel stale gold or seven-day data as experience for thirty day
     metricKind="experience"
     rangeDays={30}
   />);
-  fireEvent.click(screen.getByRole("tab", { name: "收益走势" }));
+  fireEvent.click(screen.getByRole("tab", { name: "资产走势" }));
 
   const currentExperience = screen.getByText("当前经验").closest("article");
   expect(currentExperience?.textContent).toContain("—");
@@ -132,7 +133,7 @@ test("does not relabel stale gold or seven-day data as experience for thirty day
 test("requires a fully available game before updating earnings", () => {
   const unavailable = { ...system, available: false };
   render(<DataPanel {...panelProps} system={unavailable} />);
-  fireEvent.click(screen.getByRole("tab", { name: "收益走势" }));
+  fireEvent.click(screen.getByRole("tab", { name: "资产走势" }));
   expect((screen.getByRole("button", { name: "立即更新数据" }) as HTMLButtonElement).disabled).toBe(true);
 });
 
@@ -186,7 +187,7 @@ test("explains a failed earnings update and reuses the existing retry action", (
     }],
   };
   render(<DataPanel {...panelProps} metrics={failedMetrics} onCapture={onCapture} />);
-  fireEvent.click(screen.getByRole("tab", { name: "收益走势" }));
+  fireEvent.click(screen.getByRole("tab", { name: "资产走势" }));
 
   expect(screen.getByText("游戏数据更新失败")).toBeTruthy();
   expect(screen.getByText(/请确认游戏窗口已经打开.*再试一次/)).toBeTruthy();
@@ -200,7 +201,7 @@ test("explains a failed earnings update and reuses the existing retry action", (
 
 test("prioritizes plain-language earnings and keeps technical stats collapsed", () => {
   render(<DataPanel {...panelProps} />);
-  fireEvent.click(screen.getByRole("tab", { name: "收益走势" }));
+  fireEvent.click(screen.getByRole("tab", { name: "资产走势" }));
 
   expect(screen.getAllByText("近 7 天增加了 60")).toHaveLength(2);
   expect(screen.getByText("金币变化")).toBeTruthy();
@@ -229,7 +230,7 @@ test("does not present a level-up reset as a negative experience change", () => 
     ],
   };
   render(<DataPanel {...panelProps} metrics={experienceMetrics} metricKind="experience" />);
-  fireEvent.click(screen.getByRole("tab", { name: "收益走势" }));
+  fireEvent.click(screen.getByRole("tab", { name: "资产走势" }));
 
   const latestChange = screen.getByText("相比上次记录").closest("article");
   expect(latestChange?.textContent).toContain("—");
@@ -241,7 +242,7 @@ test("requests a 30 day range from the range control", () => {
   const onRangeDaysChange = vi.fn();
   render(<DataPanel {...panelProps} onRangeDaysChange={onRangeDaysChange} />);
 
-  fireEvent.click(screen.getByRole("tab", { name: "收益走势" }));
+  fireEvent.click(screen.getByRole("tab", { name: "资产走势" }));
   fireEvent.click(screen.getByRole("button", { name: "近 30 天" }));
   expect(onRangeDaysChange).toHaveBeenCalledWith(30);
 });
@@ -259,7 +260,7 @@ test("exports source fields with empty values and escaped errors", () => {
 test("keeps the export command inside advanced details", () => {
   render(<DataPanel {...panelProps} />);
 
-  fireEvent.click(screen.getByRole("tab", { name: "收益走势" }));
+  fireEvent.click(screen.getByRole("tab", { name: "资产走势" }));
   const details = screen.getByText("查看详细数据").closest("details");
   expect(details?.open).toBe(false);
   expect(screen.getByRole("button", { name: "导出 CSV" })).toBeTruthy();

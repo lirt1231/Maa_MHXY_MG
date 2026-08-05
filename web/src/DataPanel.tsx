@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { CharacterResourcesView, DataUpdateError } from "./GameDataViews";
+import { TaskYieldPanel } from "./TaskYieldPanel";
 import { TrendChart } from "./TrendChart";
-import type { GameDataResponse, GameDataSnapshot, MetricSnapshot, Metrics, SystemState } from "./types";
+import type { GameDataResponse, GameDataSnapshot, MetricSnapshot, Metrics, SystemState, Task, TaskYieldStatistics } from "./types";
 
 function formatNumber(value: number | null | undefined) {
   return value == null ? "—" : new Intl.NumberFormat("zh-CN").format(value);
@@ -127,22 +128,28 @@ function SnapshotStatus({ snapshot }: { snapshot: MetricSnapshot }) {
 type Props = {
   system?: SystemState;
   metrics?: Metrics;
+  taskYields?: TaskYieldStatistics;
+  tasks: Task[];
   gameData?: GameDataResponse;
   metricKind: "gold" | "experience";
   rangeDays: 7 | 30;
+  taskYieldRangeDays: 7 | 30 | 90;
   busy: boolean;
   capturing: boolean;
   onMetricKindChange: (kind: "gold" | "experience") => void;
   onRangeDaysChange: (days: 7 | 30) => void;
+  onTaskYieldRangeDaysChange: (days: 7 | 30 | 90) => void;
   onCapture: () => void;
   onCorrect: () => void;
 };
 
 export function DataPanel({
-  system, metrics, gameData, metricKind, rangeDays, busy, capturing,
-  onMetricKindChange, onRangeDaysChange, onCapture, onCorrect
+  system, metrics, taskYields, tasks, gameData, metricKind, rangeDays,
+  taskYieldRangeDays, busy, capturing,
+  onMetricKindChange, onRangeDaysChange, onTaskYieldRangeDaysChange,
+  onCapture, onCorrect,
 }: Props) {
-  const [view, setView] = useState<"resources" | "history">("resources");
+  const [view, setView] = useState<"resources" | "task-yields" | "asset-history">("resources");
   const activeMetrics = metrics?.metric === metricKind && metrics.rangeDays === rangeDays
     ? metrics
     : undefined;
@@ -197,7 +204,8 @@ export function DataPanel({
 
     <div className="segmented data-view-tabs" role="tablist" aria-label="数据视图">
       <button id="data-tab-resources" role="tab" aria-selected={view === "resources"} aria-controls="data-panel-resources" className={view === "resources" ? "active" : ""} onClick={() => setView("resources")}>当前资源</button>
-      <button id="data-tab-history" role="tab" aria-selected={view === "history"} aria-controls="data-panel-history" className={view === "history" ? "active" : ""} onClick={() => setView("history")}>收益走势</button>
+      <button id="data-tab-task-yields" role="tab" aria-selected={view === "task-yields"} aria-controls="data-panel-task-yields" className={view === "task-yields" ? "active" : ""} onClick={() => setView("task-yields")}>任务收益</button>
+      <button id="data-tab-history" role="tab" aria-selected={view === "asset-history"} aria-controls="data-panel-history" className={view === "asset-history" ? "active" : ""} onClick={() => setView("asset-history")}>资产走势</button>
     </div>
 
     {view === "resources" && <CharacterResourcesView
@@ -207,7 +215,13 @@ export function DataPanel({
       disabled={busy || !system?.available}
       onCapture={onCapture}
     />}
-    {view === "history" && <div role="tabpanel" id="data-panel-history" aria-labelledby="data-tab-history">
+    {view === "task-yields" && <TaskYieldPanel
+      data={taskYields}
+      tasks={tasks}
+      rangeDays={taskYieldRangeDays}
+      onRangeDaysChange={onTaskYieldRangeDaysChange}
+    />}
+    {view === "asset-history" && <div role="tabpanel" id="data-panel-history" aria-labelledby="data-tab-history">
 
     <section className="data-toolbar" aria-label="数据筛选">
       <div className="segmented" aria-label="查看内容">

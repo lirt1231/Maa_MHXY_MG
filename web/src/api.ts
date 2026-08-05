@@ -1,4 +1,4 @@
-import type { GameDataResponse, GameDataSnapshot, LiveEvent, Metrics, Run, RunSummary, SystemState, Task, TaskInspection } from "./types";
+import type { GameDataResponse, GameDataSnapshot, LiveEvent, Metrics, Run, RunSummary, SystemState, Task, TaskInspection, TaskYieldStatistics } from "./types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -29,6 +29,8 @@ export const api = {
   ),
   metrics: (metric: "gold" | "experience", rangeDays = 7) =>
     request<Metrics>(`/api/metrics?range=${rangeDays}d&metric=${metric}`),
+  taskYields: (rangeDays = 30) =>
+    request<TaskYieldStatistics>(`/api/task-yields?range=${rangeDays}d`),
   start: (taskId: string, options: Record<string, unknown>) =>
     request<Run>("/api/runs", { method: "POST", body: JSON.stringify({ taskId, options, checklistConfirmed: true }) }),
   inspect: (taskId: string, options: Record<string, unknown>) =>

@@ -6,7 +6,7 @@ import { OnboardingDialog } from "./OnboardingDialog";
 import { PanelNavigation, type PanelKind } from "./PanelNavigation";
 import { TaskDialog } from "./TaskDialog";
 import { TaskPanel } from "./TaskPanel";
-import type { GameDataResponse, LiveEvent, Metrics, Run, RunSummary, SystemState, Task, TaskInspection } from "./types";
+import type { GameDataResponse, LiveEvent, Metrics, Run, RunSummary, SystemState, Task, TaskInspection, TaskYieldStatistics } from "./types";
 
 const ACTIVE = new Set(["preparing", "running", "recovering", "stopping"]);
 const EMPTY_SUMMARY: RunSummary = { total: 0, succeeded: 0, failed: 0, successRate: 0, averageDurationMs: 0 };
@@ -94,6 +94,8 @@ export function App() {
   const [metricKind, setMetricKind] = useState<"gold" | "experience">("gold");
   const [metricRangeDays, setMetricRangeDays] = useState<7 | 30>(7);
   const [metrics, setMetrics] = useState<Metrics>();
+  const [taskYieldRangeDays, setTaskYieldRangeDays] = useState<7 | 30 | 90>(30);
+  const [taskYields, setTaskYields] = useState<TaskYieldStatistics>();
   const [gameData, setGameData] = useState<GameDataResponse>();
   const [selected, setSelected] = useState<Task>();
   const [logs, setLogs] = useState<LiveEvent[]>([]);
@@ -108,11 +110,12 @@ export function App() {
 
   const refresh = useCallback(async () => {
     const sequence = ++refreshSequence.current;
-    const [systemData, taskData, runData, metricData, gameDataResponse] = await Promise.all([
-      api.system(), api.tasks(), api.runs(), api.metrics(metricKind, metricRangeDays), api.gameData()
+    const [systemData, taskData, runData, metricData, taskYieldData, gameDataResponse] = await Promise.all([
+      api.system(), api.tasks(), api.runs(), api.metrics(metricKind, metricRangeDays),
+      api.taskYields(taskYieldRangeDays), api.gameData()
     ]);
     if (sequence !== refreshSequence.current) return;
-    setSystem(systemData); setTasks(taskData.items); setRuns(runData.items); setSummary(runData.summary); setMetrics(metricData); setGameData(gameDataResponse);
+    setSystem(systemData); setTasks(taskData.items); setRuns(runData.items); setSummary(runData.summary); setMetrics(metricData); setTaskYields(taskYieldData); setGameData(gameDataResponse);
     const runId = systemData.run?.id || runData.items[0]?.id;
     if (runId) {
       const history = await api.runEvents(runId);
@@ -121,7 +124,7 @@ export function App() {
     } else {
       setLogs([]);
     }
-  }, [metricKind, metricRangeDays]);
+  }, [metricKind, metricRangeDays, taskYieldRangeDays]);
 
   useEffect(() => {
     let midnightTimer: number | undefined;
@@ -376,7 +379,8 @@ export function App() {
         startingGame={startingGame} onStartGame={startGame} onStop={stopTask} onSelectTask={setSelected}
         updatingTaskStatus={updatingTaskStatus} onSetTodayStatus={setTaskTodayStatus}
       /> : <DataPanel
-        system={system} metrics={metrics} gameData={gameData} metricKind={metricKind} rangeDays={metricRangeDays}
+        system={system} metrics={metrics} taskYields={taskYields} tasks={tasks} gameData={gameData} metricKind={metricKind} rangeDays={metricRangeDays}
+        taskYieldRangeDays={taskYieldRangeDays} onTaskYieldRangeDaysChange={setTaskYieldRangeDays}
         busy={busy} capturing={capturing}
         onMetricKindChange={setMetricKind} onRangeDaysChange={setMetricRangeDays}
         onCapture={capture}

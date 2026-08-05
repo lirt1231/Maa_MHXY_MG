@@ -8,6 +8,7 @@ const apiMock = vi.hoisted(() => ({
   runs: vi.fn(),
   runEvents: vi.fn(),
   metrics: vi.fn(),
+  taskYields: vi.fn(),
   gameData: vi.fn(),
   start: vi.fn(),
   inspect: vi.fn(),
@@ -77,6 +78,7 @@ describe("App daily refresh", () => {
     });
     apiMock.runEvents.mockResolvedValue({ items: [] });
     apiMock.metrics.mockResolvedValue(undefined);
+    apiMock.taskYields.mockResolvedValue({ rangeDays: 30, tasks: [] });
     apiMock.gameData.mockResolvedValue(undefined);
     apiMock.openSystemSettings.mockResolvedValue({ opened: true, section: "screen-capture" });
     apiMock.stop.mockResolvedValue({ status: "stopping" });

@@ -138,6 +138,43 @@ export type TaskResourceYield = {
   after: ResourceSnapshot | null;
 };
 
+export type TaskYieldMetric = "experience" | "gold" | "silver";
+
+export type TaskYieldMetricStats = {
+  average: number | null;
+  total: number | null;
+  sampleCount: number;
+  minimum: number | null;
+  maximum: number | null;
+};
+
+export type TaskYieldPoint = {
+  runId: string;
+  completedAt: string;
+  attributionStatus: TaskResourceYield["attributionStatus"];
+  experienceDelta: number | null;
+  goldDelta: number | null;
+  silverDelta: number | null;
+  validMetrics: TaskYieldMetric[];
+};
+
+export type TaskYieldTaskStatistics = {
+  taskId: string;
+  taskName: string;
+  attempts: number;
+  completedRuns: number;
+  reliableRuns: number;
+  coverageRate: number;
+  latestAt: string | null;
+  metrics: Record<TaskYieldMetric, TaskYieldMetricStats>;
+  points: TaskYieldPoint[];
+};
+
+export type TaskYieldStatistics = {
+  rangeDays: number;
+  tasks: TaskYieldTaskStatistics[];
+};
+
 type TaskRunProgress = {
   task_id: string;
   questions?: number;
