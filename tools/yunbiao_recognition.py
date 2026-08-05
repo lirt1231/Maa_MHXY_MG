@@ -53,7 +53,7 @@ def classify_yunbiao_scene(
         texts,
         r"距离运镖完成[:：]?.*",
         image_size,
-        {"max_x": 0.38, "max_y": 0.16},
+        {"max_x": 0.42, "max_y": 0.24},
     )
     if active:
         return {"status": "delivery_active"}

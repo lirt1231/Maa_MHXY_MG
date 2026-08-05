@@ -103,6 +103,20 @@ class YunbiaoSceneTests(unittest.TestCase):
         )
         self.assertEqual(blocked["status"], "blocked_resource")
 
+    def test_delivery_marker_survives_live_map_position_and_split_timer_ocr(self):
+        decision = classify_yunbiao_scene(
+            [
+                text("距离运镖完成：", (129, 115, 121, 20)),
+                text("40秒", (275, 114, 42, 21)),
+                text("本日运镖次数普通镖：1/3高级镖：0/3", (466, 609, 306, 20)),
+            ],
+            {},
+            (923, 720),
+            "await_delivery",
+        )
+
+        self.assertEqual(decision["status"], "delivery_active")
+
     def test_current_battle_cancel_is_wait_only(self):
         decision = classify_yunbiao_scene(
             [text("取消", (961, 680, 44, 25))],
