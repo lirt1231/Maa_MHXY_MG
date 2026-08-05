@@ -180,6 +180,11 @@ def create_app(
     def run_events(run_id: str, limit: int = Query(200, ge=1, le=300)):
         return {"items": database.events_for_run(run_id, limit)}
 
+    @app.get("/api/task-yields")
+    def task_yields(range: str = Query("30d", pattern=r"^\d+d$")):
+        days = min(365, max(1, int(range[:-1])))
+        return database.task_yield_statistics(days)
+
     @app.get("/api/metrics")
     def metrics(
         range: str = Query("7d", pattern=r"^\d+d$"),

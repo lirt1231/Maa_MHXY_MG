@@ -11,6 +11,7 @@ from tools.resource_snapshots import (
     ResourceFieldEvidence,
     ResourceSnapshot,
     ResourceValues,
+    ResourceYield,
     calculate_resource_yield,
 )
 
@@ -129,6 +130,75 @@ class TaskResourceStorageTests(unittest.TestCase):
 
         self.assertIn("resource_snapshots", tables)
         self.assertIn("task_resource_yields", tables)
+
+    def test_task_yield_statistics_use_per_metric_reliability(self):
+        before = self.database.add_resource_snapshot(
+            "run-1", self.snapshot("before", "2026-08-05T02:00:01+00:00")
+        )
+        after = self.database.add_resource_snapshot(
+            "run-1",
+            self.snapshot(
+                "after", "2026-08-05T02:05:00+00:00",
+                experience=1400, gold=10120, silver=20200,
+            ),
+        )
+        self.database.add_resource_yield(
+            "run-1", "baotu",
+            calculate_resource_yield(before, after, task_status="completed"),
+        )
+
+        self.database.create_run({
+            "id": "run-2", "taskId": "baotu", "taskName": "宝图任务",
+            "status": "succeeded", "options": {},
+            "startedAt": "2026-08-05T03:00:00+00:00",
+        })
+        second_before = self.database.add_resource_snapshot(
+            "run-2", self.snapshot("before", "2026-08-05T03:00:01+00:00")
+        )
+        second_after = self.database.add_resource_snapshot(
+            "run-2",
+            self.snapshot(
+                "after", "2026-08-05T03:05:00+00:00",
+                level=70, experience=200, gold=10060, silver=20300,
+            ),
+        )
+        self.database.add_resource_yield(
+            "run-2", "baotu",
+            ResourceYield(
+                task_status="completed",
+                attribution_status="cross_level_unknown",
+                experience_delta=None,
+                gold_delta=60,
+                silver_delta=300,
+                reasons=("level_requirement_missing",),
+                before_snapshot_id=second_before.snapshot_id,
+                after_snapshot_id=second_after.snapshot_id,
+            ),
+        )
+
+        statistics = self.database.task_yield_statistics(30)
+        task = statistics["tasks"][0]
+
+        self.assertEqual(statistics["rangeDays"], 30)
+        self.assertEqual(task["taskId"], "baotu")
+        self.assertEqual(task["completedRuns"], 2)
+        self.assertEqual(task["reliableRuns"], 1)
+        self.assertEqual(task["coverageRate"], 50.0)
+        self.assertEqual(task["metrics"]["experience"], {
+            "average": 400, "total": 400, "sampleCount": 1,
+            "minimum": 400, "maximum": 400,
+        })
+        self.assertEqual(task["metrics"]["gold"]["average"], 90)
+        self.assertEqual(task["metrics"]["gold"]["sampleCount"], 2)
+        self.assertEqual(task["metrics"]["silver"]["total"], 500)
+        self.assertEqual(task["points"][1]["validMetrics"], ["gold", "silver"])
+
+    def test_task_yield_statistics_api_defaults_to_thirty_days(self):
+        with TestClient(create_app(self.path)) as client:
+            response = client.get("/api/task-yields")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"rangeDays": 30, "tasks": []})
 
 
 if __name__ == "__main__":

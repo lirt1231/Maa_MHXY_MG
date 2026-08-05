@@ -393,6 +393,101 @@ class Database:
             ).fetchone()
             return self._resource_yield_row(db, row) if row is not None else None
 
+    def task_yield_statistics(self, days: int = 30) -> dict:
+        if isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= 365:
+            raise ValueError("任务收益统计范围必须在 1 到 365 天之间")
+        cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+        with self.connect() as db:
+            rows = db.execute(
+                """SELECT yields.*, runs.task_name,
+                COALESCE(runs.finished_at, yields.created_at) completed_at
+                FROM task_resource_yields AS yields
+                JOIN task_runs AS runs ON runs.id=yields.run_id
+                WHERE yields.created_at>=?
+                ORDER BY yields.created_at""",
+                (cutoff,),
+            ).fetchall()
+
+        metric_columns = {
+            "experience": "experience_delta",
+            "gold": "gold_delta",
+            "silver": "silver_delta",
+        }
+        tasks: dict[str, dict[str, Any]] = {}
+        metric_values: dict[str, dict[str, list[int]]] = {}
+        for row in rows:
+            task_id = row["task_id"]
+            if task_id not in tasks:
+                tasks[task_id] = {
+                    "taskId": task_id,
+                    "taskName": row["task_name"],
+                    "attempts": 0,
+                    "completedRuns": 0,
+                    "reliableRuns": 0,
+                    "coverageRate": 0,
+                    "latestAt": None,
+                    "metrics": {},
+                    "points": [],
+                }
+                metric_values[task_id] = {name: [] for name in metric_columns}
+
+            task = tasks[task_id]
+            task["taskName"] = row["task_name"]
+            task["attempts"] += 1
+            task["latestAt"] = row["completed_at"]
+            completed = row["task_status"] == "completed"
+            if completed:
+                task["completedRuns"] += 1
+            if completed and row["attribution_status"] == "reliable":
+                task["reliableRuns"] += 1
+
+            valid_metrics: list[str] = []
+            if completed and row["attribution_status"] == "reliable":
+                valid_metrics = [
+                    name
+                    for name, column in metric_columns.items()
+                    if row[column] is not None
+                ]
+            elif completed and row["attribution_status"] == "cross_level_unknown":
+                valid_metrics = [
+                    name
+                    for name in ("gold", "silver")
+                    if row[metric_columns[name]] is not None
+                ]
+
+            for name in valid_metrics:
+                metric_values[task_id][name].append(row[metric_columns[name]])
+            if completed:
+                task["points"].append({
+                    "runId": row["run_id"],
+                    "completedAt": row["completed_at"],
+                    "attributionStatus": row["attribution_status"],
+                    "experienceDelta": row["experience_delta"],
+                    "goldDelta": row["gold_delta"],
+                    "silverDelta": row["silver_delta"],
+                    "validMetrics": valid_metrics,
+                })
+
+        for task_id, task in tasks.items():
+            completed_runs = task["completedRuns"]
+            task["coverageRate"] = (
+                round(task["reliableRuns"] * 100 / completed_runs, 1)
+                if completed_runs else 0
+            )
+            for name, values in metric_values[task_id].items():
+                task["metrics"][name] = {
+                    "average": round(sum(values) / len(values)) if values else None,
+                    "total": sum(values) if values else None,
+                    "sampleCount": len(values),
+                    "minimum": min(values) if values else None,
+                    "maximum": max(values) if values else None,
+                }
+
+        return {
+            "rangeDays": days,
+            "tasks": list(tasks.values()),
+        }
+
     def today_task_completions(
         self,
         local_date: date | None = None,
