@@ -49,10 +49,12 @@ class MetricCorrection(BaseModel):
     experienceRequired: int | None = Field(default=None, ge=0)
 
 
-def create_app(database_path: Path | None = None) -> FastAPI:
+def create_app(
+    database_path: Path | None = None, *, resource_tracking: bool = False
+) -> FastAPI:
     database = Database(database_path or DATA_PATH)
     broker = EventBroker()
-    runner = RunnerManager(database, broker)
+    runner = RunnerManager(database, broker, resource_tracking=resource_tracking)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -403,4 +405,4 @@ def _sse_event(event: dict) -> str:
     return f"{event_id}event: {event['type']}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
 
 
-app = create_app()
+app = create_app(resource_tracking=True)

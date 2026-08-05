@@ -11,6 +11,13 @@ import uuid
 from pathlib import Path
 from typing import Callable
 
+from tools.resource_snapshots import (
+    ResourceFieldEvidence,
+    ResourceSnapshot,
+    ResourceValues,
+    calculate_resource_yield,
+)
+
 from .database import Database, utc_now
 from .events import EventBroker
 from .registry import TASKS, ensure_task_available, validate_options
@@ -24,6 +31,7 @@ STOP_KILL_TIMEOUT_SECONDS = 2.0
 INSPECTION_TIMEOUT_SECONDS = 15.0
 RESULT_PREFIX = "result_json="
 HOME_RECOVERY_PREFIX = "home_recovery_json="
+RESOURCE_SNAPSHOT_PREFIX = "resource_snapshot_json="
 TASK_SUCCESS_RESULTS = {"completed", "already_completed"}
 TASK_RESULT_STATUSES = TASK_SUCCESS_RESULTS | {"safe_stopped", "cancelled"}
 TASK_RESULT_NUMERIC_FIELDS = {
@@ -281,11 +289,13 @@ class RunnerManager:
         *,
         stop_term_timeout: float = STOP_TERM_TIMEOUT_SECONDS,
         stop_kill_timeout: float = STOP_KILL_TIMEOUT_SECONDS,
+        resource_tracking: bool = False,
     ):
         self.database = database
         self.broker = broker
         self._stop_term_timeout = stop_term_timeout
         self._stop_kill_timeout = stop_kill_timeout
+        self._resource_tracking = resource_tracking
         self._lock = threading.RLock()
         self._current: dict | None = None
         self._process: subprocess.Popen | None = None
@@ -335,6 +345,7 @@ class RunnerManager:
                 "options": normalized,
                 "startedAt": utc_now(),
                 "benefitStatus": "not_captured",
+                "resourceYield": None,
                 "homeRecovery": {"status": "not_requested"},
                 "failurePhase": None,
             }
@@ -539,6 +550,189 @@ class RunnerManager:
             "--task-id",
             task_id,
         ]
+
+    @staticmethod
+    def _resource_snapshot_command(phase: str) -> list[str]:
+        return [
+            sys.executable,
+            str(ROOT / "tools/run_resource_snapshot_macos.py"),
+            "--phase",
+            phase,
+        ]
+
+    @staticmethod
+    def _parse_resource_snapshot(
+        output_lines: list[str], expected_phase: str
+    ) -> ResourceSnapshot:
+        protocol = [
+            line[len(RESOURCE_SNAPSHOT_PREFIX):]
+            for line in output_lines
+            if line.startswith(RESOURCE_SNAPSHOT_PREFIX)
+        ]
+        if len(protocol) != 1:
+            raise RuntimeError("资源采集进程没有返回唯一的结构化结果")
+        try:
+            payload = json.loads(protocol[0])
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("资源采集进程返回了无效结果") from exc
+        if not isinstance(payload, dict) or payload.get("phase") != expected_phase:
+            raise RuntimeError("资源采集结果阶段不匹配")
+        values = payload.get("values")
+        evidence_payload = payload.get("evidence", {})
+        if not isinstance(values, dict) or not isinstance(evidence_payload, dict):
+            raise RuntimeError("资源采集结果缺少字段数据")
+        evidence = {}
+        try:
+            for name, item in evidence_payload.items():
+                if not isinstance(item, dict):
+                    raise ValueError("资源字段证据无效")
+                evidence[name] = ResourceFieldEvidence(
+                    status=item.get("status"),
+                    source_page=item.get("sourcePage"),
+                    raw_text=item.get("rawText"),
+                    confidence=item.get("confidence"),
+                    box=None if item.get("box") is None else tuple(item["box"]),
+                    frame_id=item.get("frameId"),
+                )
+            return ResourceSnapshot(
+                target_id=payload.get("targetId"),
+                character_id=payload.get("characterId"),
+                phase=payload.get("phase"),
+                captured_at=payload.get("capturedAt"),
+                values=ResourceValues(
+                    level=values.get("level"),
+                    experience=values.get("experience"),
+                    experience_required=values.get("experienceRequired"),
+                    gold=values.get("gold"),
+                    silver=values.get("silver"),
+                ),
+                evidence=evidence,
+                status=payload.get("status"),
+                error=payload.get("error"),
+            )
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("资源采集结果不符合快照契约") from exc
+
+    @staticmethod
+    def _failed_resource_snapshot(phase: str, reason: str) -> ResourceSnapshot:
+        return ResourceSnapshot(
+            target_id="local-primary",
+            phase=phase,
+            captured_at=utc_now(),
+            values=ResourceValues(),
+            error=reason,
+        )
+
+    def _capture_resource_snapshot(
+        self, run: dict, phase: str
+    ) -> ResourceSnapshot | None:
+        label = "任务前" if phase == "before" else "任务完成后"
+        output_lines: list[str] = []
+        process = None
+        try:
+            with self._lock:
+                if self._stop_requested:
+                    return None
+                stage = f"正在记录{label}资源"
+                run["stage"] = stage
+                if self._current and self._current["id"] == run["id"]:
+                    self._current["stage"] = stage
+                    self.database.update_run_stage(
+                        run["id"], self._current["status"], stage,
+                        result=run.get("result"),
+                        home_recovery=run.get("homeRecovery"),
+                        failure_phase=run.get("failurePhase"),
+                    )
+                self._emit(
+                    "info", "resource", f"正在记录{label}的金币、银币和经验",
+                    {"phase": phase, "status": "running"},
+                )
+                self._process = subprocess.Popen(
+                    self._resource_snapshot_command(phase),
+                    cwd=ROOT,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    bufsize=1,
+                    start_new_session=True,
+                )
+                process = self._process
+            assert process.stdout is not None
+            for line in process.stdout:
+                message = line.strip()
+                if message:
+                    output_lines.append(message)
+            return_code = process.wait()
+            with self._lock:
+                stopped = self._stop_requested
+                if self._process is process:
+                    self._process = None
+            if stopped:
+                return None
+            if return_code != 0:
+                raise RuntimeError(f"资源采集进程异常退出（{return_code}）")
+            snapshot = self._parse_resource_snapshot(output_lines, phase)
+        except Exception as exc:
+            with self._lock:
+                if self._stop_requested:
+                    return None
+                if process is not None and self._process is process:
+                    self._process = None
+            snapshot = self._failed_resource_snapshot(phase, str(exc))
+
+        stored = self.database.add_resource_snapshot(run["id"], snapshot)
+        level = "info" if stored.status == "success" else "warning"
+        message = (
+            f"{label}资源记录完成"
+            if stored.status == "success"
+            else f"{label}资源记录不完整，任务仍会继续"
+        )
+        self._emit(
+            level,
+            "resource",
+            message,
+            {"phase": phase, "snapshot": stored.to_payload()},
+        )
+        return stored
+
+    def _store_resource_yield(
+        self,
+        run: dict,
+        before: ResourceSnapshot,
+        after: ResourceSnapshot | None,
+        task_status: str,
+    ) -> dict:
+        calculated = calculate_resource_yield(
+            before,
+            after,
+            task_status=task_status,
+        )
+        stored = self.database.add_resource_yield(
+            run["id"], run["taskId"], calculated
+        )
+        with self._lock:
+            run["resourceYield"] = stored
+            run["benefitStatus"] = stored["attributionStatus"]
+            if self._current and self._current["id"] == run["id"]:
+                self._current["resourceYield"] = stored
+                self._current["benefitStatus"] = stored["attributionStatus"]
+        messages = {
+            "reliable": "本次任务资源净变化已记录",
+            "not_run": "任务本次未重复执行，不统计资源变化",
+            "partial": "本次任务仅记录到部分资源变化",
+            "cross_level_unknown": "任务期间角色升级，经验变化待确认",
+            "interrupted": "本次资源变化存在干扰，仅供参考",
+            "unavailable": "本次任务资源变化未能完整记录",
+        }
+        self._emit(
+            "info" if stored["attributionStatus"] in {"reliable", "not_run"} else "warning",
+            "resource",
+            messages[stored["attributionStatus"]],
+            {"resourceYield": stored},
+        )
+        return stored
 
     @staticmethod
     def _parse_home_recovery(output_lines: list[str]) -> dict:
@@ -937,7 +1131,12 @@ class RunnerManager:
         home_recovery = {"status": "not_requested"}
         failure_phase = "task"
         recovery_started = False
+        before_snapshot = None
+        after_snapshot = None
+        resource_yield_stored = False
         try:
+            if self._resource_tracking:
+                before_snapshot = self._capture_resource_snapshot(run, "before")
             command = self._command(run["taskId"], run["options"])
             with self._lock:
                 if self._stop_requested:
@@ -1072,6 +1271,14 @@ class RunnerManager:
                             if home_recovery["status"] == "confirmed" and recovery_return_code == 0:
                                 status = "succeeded"
                                 failure_phase = None
+                                run["homeRecovery"] = home_recovery
+                                if (
+                                    self._resource_tracking
+                                    and task_result["status"] == "completed"
+                                ):
+                                    after_snapshot = self._capture_resource_snapshot(
+                                        run, "after"
+                                    )
                             else:
                                 status = "failed"
                                 failure_phase = "recovery"
@@ -1105,6 +1312,29 @@ class RunnerManager:
                     }
         finally:
             try:
+                if (
+                    self._resource_tracking
+                    and before_snapshot is not None
+                    and not resource_yield_stored
+                ):
+                    resource_task_status = (
+                        task_result.get("status")
+                        if isinstance(task_result, dict)
+                        else "cancelled" if status == "cancelled" else "failed"
+                    )
+                    try:
+                        self._store_resource_yield(
+                            run,
+                            before_snapshot,
+                            after_snapshot,
+                            resource_task_status,
+                        )
+                        resource_yield_stored = True
+                    except Exception as exc:
+                        self._emit(
+                            "warning", "resource", "资源净变化计算失败",
+                            {"reason": str(exc)},
+                        )
                 with self._lock:
                     # Once stop() accepts a request, cancellation wins over a
                     # result parsed concurrently after the subprocess exits.
