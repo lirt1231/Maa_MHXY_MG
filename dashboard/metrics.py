@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 import subprocess
 import tempfile
@@ -48,24 +49,43 @@ def parse_visible_metrics(texts: Iterable[str]) -> dict:
     return result
 
 
-def parse_backpack_gold(results: list[dict]) -> int | None:
-    """The yellow-gold balance is the left-most currency value at the bag footer."""
-    candidates = []
+def parse_backpack_resources(results: list[dict]) -> dict:
+    """Read the two fixed currency slots in the normalized bag footer."""
+    candidates: list[tuple[float, dict, int]] = []
     for item in results:
-        x, y, _, _ = item["box"]
+        x, y, width, _ = item["box"]
         text = re.sub(r"\s+", "", item["text"])
-        if y < 565 or x > 330 or not re.fullmatch(r"\d[\d,，.]*", text):
+        center_x = x + width / 2
+        if not 565 <= y <= 640 or not re.fullmatch(r"\d[\d,，.]*", text):
             continue
         value = parse_number(text)
         if value is not None:
-            candidates.append((x, value))
-    return min(candidates)[1] if candidates else None
+            candidates.append((center_x, item, value))
+
+    def in_slot(left: float, right: float, target: float):
+        matches = [item for item in candidates if left <= item[0] < right]
+        return min(matches, key=lambda item: abs(item[0] - target)) if matches else None
+
+    gold = in_slot(120, 300, 210)
+    silver = in_slot(300, 520, 395)
+    return {
+        "gold": None if gold is None else gold[2],
+        "silver": None if silver is None else silver[2],
+        "goldItem": None if gold is None else gold[1],
+        "silverItem": None if silver is None else silver[1],
+    }
 
 
-def parse_profile_metrics(results: list[dict]) -> dict:
+def parse_backpack_gold(results: list[dict]) -> int | None:
+    return parse_backpack_resources(results)["gold"]
+
+
+def parse_profile_resources(results: list[dict]) -> dict:
     level = None
     experience = None
     required = None
+    level_item = None
+    experience_item = None
     for item in results:
         text = re.sub(r"\s+", "", item["text"])
         if "级" in text:
@@ -77,6 +97,7 @@ def parse_profile_metrics(results: list[dict]) -> dict:
                         candidate = int(digits[-width:])
                         if 20 <= candidate <= 200:
                             level = candidate
+                            level_item = item
                             break
         x, y, _, _ = item["box"]
         fraction = re.fullmatch(r"(\d[\d,，.]*)/(\d[\d,，.]*)", text)
@@ -85,7 +106,23 @@ def parse_profile_metrics(results: list[dict]) -> dict:
             denominator = parse_number(fraction.group(2))
             if numerator is not None and denominator is not None and numerator >= 10000:
                 experience, required = numerator, denominator
-    return {"level": level, "experience": experience, "experienceRequired": required}
+                experience_item = item
+    return {
+        "level": level,
+        "experience": experience,
+        "experienceRequired": required,
+        "levelItem": level_item,
+        "experienceItem": experience_item,
+    }
+
+
+def parse_profile_metrics(results: list[dict]) -> dict:
+    parsed = parse_profile_resources(results)
+    return {
+        "level": parsed["level"],
+        "experience": parsed["experience"],
+        "experienceRequired": parsed["experienceRequired"],
+    }
 
 
 def _window_capture(window_id: int) -> np.ndarray:
@@ -167,6 +204,39 @@ def _wait_for(tasker, window_id: int, predicate, timeout: float = 8) -> tuple[np
     raise RuntimeError("游戏页面切换超时，请确认窗口完整可见且当前不在战斗中")
 
 
+def _wait_for_stable_values(
+    tasker,
+    window_id: int,
+    parser,
+    value_keys: tuple[str, ...],
+    initial_results: list[dict],
+    timeout: float = 6,
+) -> tuple[np.ndarray, list[dict], dict]:
+    previous = tuple(parser(initial_results).get(key) for key in value_keys)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        time.sleep(0.5)
+        image = _window_capture(window_id)
+        results = _recognize(tasker, image)
+        parsed = parser(results)
+        current = tuple(parsed.get(key) for key in value_keys)
+        if current == previous:
+            return image, results, parsed
+        previous = current
+    raise RuntimeError("资源数字在限定时间内没有稳定，请等待奖励动画结束后重试")
+
+
+def _field_evidence(item: dict | None, source_page: str, frame_id: str) -> dict:
+    return {
+        "status": "captured" if item is not None else "missing",
+        "sourcePage": source_page,
+        "rawText": None if item is None else item["text"],
+        "confidence": None,
+        "box": None if item is None else list(item["box"]),
+        "frameId": frame_id,
+    }
+
+
 def _ensure_main(tasker, native_input, window_id: int) -> list[dict]:
     for _ in range(4):
         _, results = _wait_for(tasker, window_id, lambda value: bool(value), timeout=4)
@@ -197,7 +267,7 @@ def _resolve_game_window(toolkit, native_input_class):
 
 
 def capture_visible_metrics() -> dict:
-    """Navigate through bag/profile pages, OCR both metrics, and restore the main page."""
+    """Capture stable currencies and experience, then restore the main page."""
     from maa.controller import MacOSController, MaaMacOSInputMethodEnum, MaaMacOSScreencapMethodEnum
     from maa.resource import Resource
     from maa.tasker import Tasker
@@ -227,19 +297,56 @@ def capture_visible_metrics() -> dict:
         # main-screen position remains stable in the fixed macOS game layout.
         native_input.click(985, 630, OCR_SIZE)
     _, bag_results = _wait_for(tasker, window_id, lambda value: _has(value, "人物评分", "包裹"))
-    gold = parse_backpack_gold(bag_results)
+    bag_image, bag_results, currencies = _wait_for_stable_values(
+        tasker,
+        window_id,
+        parse_backpack_resources,
+        ("gold", "silver"),
+        bag_results,
+    )
     _close_panel(native_input)
-    if gold is None:
-        raise RuntimeError("背包已自动打开，但未能识别金币数值")
 
     _wait_for(tasker, window_id, _is_main)
     native_input.click(978, 55, OCR_SIZE)
     _, profile_results = _wait_for(tasker, window_id, lambda value: _has(value, "人物属性"))
-    profile = parse_profile_metrics(profile_results)
+    profile_image, profile_results, profile = _wait_for_stable_values(
+        tasker,
+        window_id,
+        parse_profile_resources,
+        ("level", "experience", "experienceRequired"),
+        profile_results,
+    )
     _close_panel(native_input)
-    if profile["experience"] is None:
-        raise RuntimeError("人物属性已自动打开，但未能识别经验数值")
+    _wait_for(tasker, window_id, _is_main)
 
     raw_text = "背包：" + " | ".join(item["text"] for item in bag_results)
     raw_text += "\n人物属性：" + " | ".join(item["text"] for item in profile_results)
-    return {"gold": gold, **profile, "rawText": raw_text, "status": "success"}
+    bag_frame_id = hashlib.sha256(bag_image.tobytes()).hexdigest()
+    profile_frame_id = hashlib.sha256(profile_image.tobytes()).hexdigest()
+    values = {
+        "gold": currencies["gold"],
+        "silver": currencies["silver"],
+        "level": profile["level"],
+        "experience": profile["experience"],
+        "experienceRequired": profile["experienceRequired"],
+    }
+    captured_count = sum(value is not None for value in values.values())
+    status = "success" if captured_count == len(values) else "partial" if captured_count else "failed"
+    missing = [name for name, value in values.items() if value is None]
+    return {
+        **values,
+        "rawText": raw_text,
+        "status": status,
+        "error": f"未能识别字段：{', '.join(missing)}" if missing else None,
+        "resourceEvidence": {
+            "gold": _field_evidence(currencies["goldItem"], "backpack", bag_frame_id),
+            "silver": _field_evidence(currencies["silverItem"], "backpack", bag_frame_id),
+            "level": _field_evidence(profile["levelItem"], "character_profile", profile_frame_id),
+            "experience": _field_evidence(
+                profile["experienceItem"], "character_profile", profile_frame_id
+            ),
+            "experience_required": _field_evidence(
+                profile["experienceItem"], "character_profile", profile_frame_id
+            ),
+        },
+    }
