@@ -494,6 +494,66 @@ describe("TaskPanel run outcomes", () => {
     expect(view.queryByText("未采集收益")).toBeNull();
   });
 
+  it("shows resource before, after, and reliable net changes", () => {
+    const resourceYield: NonNullable<Run["resourceYield"]> = {
+      taskStatus: "completed", attributionStatus: "reliable",
+      beforeSnapshotId: 1, afterSnapshotId: 2,
+      experienceDelta: 400, goldDelta: 120, silverDelta: -50,
+      reasons: [], calculationVersion: 1, createdAt: "2026-08-05T02:10:01Z",
+      before: {
+        id: 1, targetId: "local-primary", phase: "before", capturedAt: "2026-08-05T02:00:00Z",
+        status: "success", values: { level: 69, experience: 1000, experienceRequired: 5000, gold: 10000, silver: 20000 }, evidence: {},
+      },
+      after: {
+        id: 2, targetId: "local-primary", phase: "after", capturedAt: "2026-08-05T02:10:00Z",
+        status: "success", values: { level: 69, experience: 1400, experienceRequired: 5000, gold: 10120, silver: 19950 }, evidence: {},
+      },
+    };
+    const view = render(<TaskPanel system={system} tasks={[]} runs={[run({ resourceYield })]}
+      summary={{ total: 1, succeeded: 1, failed: 0, successRate: 100, averageDurationMs: 1000 }}
+      logs={[]} busy={false} progress="等待任务" startingGame={false}
+      onStartGame={vi.fn()} onStop={vi.fn()} onSelectTask={vi.fn()} />);
+
+    const summary = view.getByText("净变化：经验 +400 · 金币 +120 · 银币 -50");
+    fireEvent.click(summary);
+    expect(view.getByText("1,000 → 1,400")).toBeTruthy();
+    expect(view.getByText("10,000 → 10,120")).toBeTruthy();
+    expect(view.getByText("20,000 → 19,950")).toBeTruthy();
+  });
+
+  it("does not present missing or not-run resource data as zero", () => {
+    const unavailable = run({
+      id: "unavailable",
+      resourceYield: {
+        taskStatus: "safe_stopped", attributionStatus: "unavailable",
+        beforeSnapshotId: 1, afterSnapshotId: null,
+        experienceDelta: null, goldDelta: null, silverDelta: null,
+        reasons: ["resource_snapshot_unavailable"], calculationVersion: 1,
+        createdAt: "2026-08-05T02:10:01Z",
+        before: {
+          id: 1, targetId: "local-primary", phase: "before", capturedAt: "2026-08-05T02:00:00Z",
+          status: "failed", values: { level: null, experience: null, experienceRequired: null, gold: null, silver: null }, evidence: {},
+        },
+        after: null,
+      },
+    });
+    const notRun = run({
+      id: "not-run",
+      resourceYield: {
+        ...unavailable.resourceYield!, taskStatus: "already_completed",
+        attributionStatus: "not_run", reasons: ["task_not_run"],
+      },
+    });
+    const view = render(<TaskPanel system={system} tasks={[]} runs={[unavailable, notRun]}
+      summary={{ total: 2, succeeded: 1, failed: 1, successRate: 50, averageDurationMs: 1000 }}
+      logs={[]} busy={false} progress="等待任务" startingGame={false}
+      onStartGame={vi.fn()} onStop={vi.fn()} onSelectTask={vi.fn()} />);
+
+    expect(view.getByText("资源变化未完整记录")).toBeTruthy();
+    expect(view.getByText("本次未执行，不统计资源变化")).toBeTruthy();
+    expect(view.queryByText("金币 0")).toBeNull();
+  });
+
   it("shows an automatic stop without implying the game returned safely", () => {
     const view = render(<TaskPanel system={system} tasks={[]} runs={[run({
       status: "failed", error: "未识别到明确完成状态",

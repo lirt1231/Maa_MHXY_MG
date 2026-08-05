@@ -61,7 +61,10 @@ function StatusDot({ ok, label }: { ok: boolean; label: string }) {
 }
 
 function AutomationWarning({ run, progress, onStop }: { run: Run; progress: string; onStop: () => void }) {
-  const content = run.status === "recovering"
+  const recordingResources = run.stage?.startsWith("正在记录");
+  const content = recordingResources
+    ? { title: run.stage || "正在记录角色资源", body: "正在读取金币、银币和经验，请保持游戏窗口不动。" }
+    : run.status === "recovering"
     ? { title: "正在返回主界面", body: "任务已完成，请继续保持游戏窗口不动，等待主界面确认。" }
     : run.status === "stopping"
       ? { title: "正在停止自动操作", body: "停止完成前请勿操作游戏窗口。" }

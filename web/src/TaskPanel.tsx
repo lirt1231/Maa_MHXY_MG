@@ -66,6 +66,51 @@ function runDetail(run: Run) {
   return null;
 }
 
+function formatResourceValue(value?: number | null) {
+  return value === null || value === undefined ? "未记录" : value.toLocaleString("zh-CN");
+}
+
+function formatResourceDelta(value?: number | null) {
+  if (value === null || value === undefined) return "未记录";
+  const formatted = Math.abs(value).toLocaleString("zh-CN");
+  return value > 0 ? `+${formatted}` : value < 0 ? `-${formatted}` : "0";
+}
+
+const RESOURCE_FIELDS = [
+  { key: "experience", deltaKey: "experienceDelta", label: "经验" },
+  { key: "gold", deltaKey: "goldDelta", label: "金币" },
+  { key: "silver", deltaKey: "silverDelta", label: "银币" },
+] as const;
+
+function ResourceYieldDetail({ run }: { run: Run }) {
+  const resource = run.resourceYield;
+  if (!resource) return null;
+  if (resource.attributionStatus === "not_run") {
+    return <small className="resource-yield-status">本次未执行，不统计资源变化</small>;
+  }
+  if (resource.attributionStatus === "unavailable") {
+    return <small className="resource-yield-status unavailable">资源变化未完整记录</small>;
+  }
+  const statusLabel = {
+    reliable: "净变化",
+    partial: "部分变化",
+    interrupted: "变化仅供参考",
+    cross_level_unknown: "升级期间变化",
+  }[resource.attributionStatus];
+  const deltaSummary = RESOURCE_FIELDS
+    .map((field) => `${field.label} ${formatResourceDelta(resource[field.deltaKey])}`)
+    .join(" · ");
+  return <details className={`resource-yield-detail ${resource.attributionStatus}`}>
+    <summary>{statusLabel}：{deltaSummary}</summary>
+    <dl>{RESOURCE_FIELDS.map((field) => <div key={field.key}>
+      <dt>{field.label}</dt>
+      <dd>{formatResourceValue(resource.before.values[field.key])} → {formatResourceValue(resource.after?.values[field.key])}</dd>
+      <strong>{formatResourceDelta(resource[field.deltaKey])}</strong>
+    </div>)}</dl>
+    {resource.attributionStatus !== "reliable" && <small>该记录未计入可靠收益统计。</small>}
+  </details>;
+}
+
 function isStoppedRun(run?: Run | null) {
   return run?.status === "cancelled" || run?.result?.status === "safe_stopped";
 }
@@ -338,7 +383,7 @@ export function TaskPanel({ system, tasks, runs, logs, busy, progress, startingG
       </article>
       <article className="panel history-panel">
         <div className="panel-heading"><div><span className="eyebrow">运行记录</span><h2>最近任务</h2></div></div>
-        <div className="history-list">{runs.length ? runs.slice(0, 6).map((run) => <div className="history-row" key={run.id}><span className={`run-icon ${run.status}`}>{run.status === "succeeded" ? "✓" : run.status === "failed" ? "!" : run.status === "cancelled" ? "×" : "·"}</span><div><strong>{run.taskName}</strong><small>{new Date(run.startedAt).toLocaleString("zh-CN")} · {duration(run.durationMs)}</small>{runDetail(run) && <small className="history-detail">{runDetail(run)}</small>}</div><span className={`run-outcome ${run.status}`}>{runOutcome(run)}</span></div>) : <div className="log-empty">还没有运行记录。</div>}</div>
+        <div className="history-list">{runs.length ? runs.slice(0, 6).map((run) => <div className="history-row" key={run.id}><span className={`run-icon ${run.status}`}>{run.status === "succeeded" ? "✓" : run.status === "failed" ? "!" : run.status === "cancelled" ? "×" : "·"}</span><div><strong>{run.taskName}</strong><small>{new Date(run.startedAt).toLocaleString("zh-CN")} · {duration(run.durationMs)}</small>{runDetail(run) && <small className="history-detail">{runDetail(run)}</small>}<ResourceYieldDetail run={run} /></div><span className={`run-outcome ${run.status}`}>{runOutcome(run)}</span></div>) : <div className="log-empty">还没有运行记录。</div>}</div>
       </article>
     </section>
   </div>;

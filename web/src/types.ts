@@ -84,6 +84,7 @@ export type Run = {
   error?: string | null;
   result?: TaskRunResult | null;
   benefitStatus?: string;
+  resourceYield?: TaskResourceYield | null;
   failurePhase?: "task" | "recovery" | null;
   homeRecovery?: {
     status: "not_requested" | "running" | "confirmed" | "failed" | "cancelled";
@@ -102,6 +103,39 @@ export type Run = {
       captureMethod?: string;
     };
   };
+};
+
+export type ResourceSnapshot = {
+  id: number;
+  targetId: string;
+  characterId?: string | null;
+  phase: "before" | "after";
+  capturedAt: string;
+  status: "success" | "partial" | "failed";
+  values: {
+    level: number | null;
+    experience: number | null;
+    experienceRequired: number | null;
+    gold: number | null;
+    silver: number | null;
+  };
+  evidence: Record<string, unknown>;
+  error?: string | null;
+};
+
+export type TaskResourceYield = {
+  taskStatus: string;
+  attributionStatus: "reliable" | "interrupted" | "cross_level_unknown" | "partial" | "unavailable" | "not_run";
+  beforeSnapshotId: number;
+  afterSnapshotId: number | null;
+  experienceDelta: number | null;
+  goldDelta: number | null;
+  silverDelta: number | null;
+  reasons: string[];
+  calculationVersion: number;
+  createdAt: string;
+  before: ResourceSnapshot;
+  after: ResourceSnapshot | null;
 };
 
 type TaskRunProgress = {
