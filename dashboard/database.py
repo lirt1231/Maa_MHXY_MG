@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import replace
 from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from pathlib import Path
 from typing import Any
+
+from tools.resource_snapshots import ResourceSnapshot, ResourceYield
 
 from .game_data_contract import (
     GAME_DATA_CATEGORIES,
@@ -103,6 +106,42 @@ class Database:
                     data_json TEXT NOT NULL DEFAULT '{}',
                     evidence_json TEXT NOT NULL DEFAULT '{}',
                     error TEXT
+                );
+                CREATE TABLE IF NOT EXISTS resource_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id TEXT NOT NULL,
+                    target_id TEXT NOT NULL,
+                    character_id TEXT,
+                    phase TEXT NOT NULL,
+                    captured_at TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    level INTEGER,
+                    experience INTEGER,
+                    experience_required INTEGER,
+                    gold INTEGER,
+                    silver INTEGER,
+                    evidence_json TEXT NOT NULL DEFAULT '{}',
+                    error TEXT,
+                    FOREIGN KEY(run_id) REFERENCES task_runs(id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_resource_snapshots_run_phase
+                ON resource_snapshots(run_id, phase, captured_at DESC, id DESC);
+                CREATE TABLE IF NOT EXISTS task_resource_yields (
+                    run_id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL,
+                    before_snapshot_id INTEGER NOT NULL,
+                    after_snapshot_id INTEGER,
+                    task_status TEXT NOT NULL,
+                    attribution_status TEXT NOT NULL,
+                    experience_delta INTEGER,
+                    gold_delta INTEGER,
+                    silver_delta INTEGER,
+                    reasons_json TEXT NOT NULL DEFAULT '[]',
+                    calculation_version INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(run_id) REFERENCES task_runs(id),
+                    FOREIGN KEY(before_snapshot_id) REFERENCES resource_snapshots(id),
+                    FOREIGN KEY(after_snapshot_id) REFERENCES resource_snapshots(id)
                 );
                 """
             )
@@ -237,7 +276,122 @@ class Database:
     def recent_runs(self, limit: int = 20) -> list[dict]:
         with self.connect() as db:
             rows = db.execute("SELECT * FROM task_runs ORDER BY started_at DESC LIMIT ?", (limit,)).fetchall()
-        return [self._run_row(row) for row in rows]
+            runs = []
+            for row in rows:
+                run = self._run_row(row)
+                resource_row = db.execute(
+                    "SELECT * FROM task_resource_yields WHERE run_id=?",
+                    (row["id"],),
+                ).fetchone()
+                run["resourceYield"] = (
+                    self._resource_yield_row(db, resource_row)
+                    if resource_row is not None
+                    else None
+                )
+                runs.append(run)
+        return runs
+
+    def add_resource_snapshot(
+        self, run_id: str, snapshot: ResourceSnapshot
+    ) -> ResourceSnapshot:
+        if not isinstance(snapshot, ResourceSnapshot):
+            raise ValueError("资源快照契约无效")
+        values = snapshot.values
+        evidence_json = json.dumps(
+            {
+                name: item.to_payload()
+                for name, item in snapshot.evidence.items()
+            },
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        with self.connect() as db:
+            cursor = db.execute(
+                """INSERT INTO resource_snapshots(
+                run_id, target_id, character_id, phase, captured_at, status,
+                level, experience, experience_required, gold, silver,
+                evidence_json, error
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    run_id,
+                    snapshot.target_id,
+                    snapshot.character_id,
+                    snapshot.phase,
+                    snapshot.captured_at,
+                    snapshot.status,
+                    values.level,
+                    values.experience,
+                    values.experience_required,
+                    values.gold,
+                    values.silver,
+                    evidence_json,
+                    snapshot.error,
+                ),
+            )
+            snapshot_id = cursor.lastrowid
+        return replace(snapshot, snapshot_id=snapshot_id)
+
+    def add_resource_yield(
+        self,
+        run_id: str,
+        task_id: str,
+        resource_yield: ResourceYield,
+    ) -> dict:
+        if not isinstance(resource_yield, ResourceYield):
+            raise ValueError("任务资源收益契约无效")
+        if resource_yield.before_snapshot_id is None:
+            raise ValueError("任务资源收益缺少执行前快照编号")
+        reasons_json = json.dumps(
+            list(resource_yield.reasons), ensure_ascii=False, allow_nan=False
+        )
+        with self.connect() as db:
+            db.execute(
+                """INSERT INTO task_resource_yields(
+                run_id, task_id, before_snapshot_id, after_snapshot_id,
+                task_status, attribution_status, experience_delta, gold_delta,
+                silver_delta, reasons_json, calculation_version, created_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,1,?)
+                ON CONFLICT(run_id) DO UPDATE SET
+                    task_id=excluded.task_id,
+                    before_snapshot_id=excluded.before_snapshot_id,
+                    after_snapshot_id=excluded.after_snapshot_id,
+                    task_status=excluded.task_status,
+                    attribution_status=excluded.attribution_status,
+                    experience_delta=excluded.experience_delta,
+                    gold_delta=excluded.gold_delta,
+                    silver_delta=excluded.silver_delta,
+                    reasons_json=excluded.reasons_json,
+                    calculation_version=excluded.calculation_version,
+                    created_at=excluded.created_at""",
+                (
+                    run_id,
+                    task_id,
+                    resource_yield.before_snapshot_id,
+                    resource_yield.after_snapshot_id,
+                    resource_yield.task_status,
+                    resource_yield.attribution_status,
+                    resource_yield.experience_delta,
+                    resource_yield.gold_delta,
+                    resource_yield.silver_delta,
+                    reasons_json,
+                    utc_now(),
+                ),
+            )
+            db.execute(
+                "UPDATE task_runs SET benefit_status=? WHERE id=?",
+                (resource_yield.attribution_status, run_id),
+            )
+            row = db.execute(
+                "SELECT * FROM task_resource_yields WHERE run_id=?", (run_id,)
+            ).fetchone()
+            return self._resource_yield_row(db, row)
+
+    def resource_yield(self, run_id: str) -> dict | None:
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT * FROM task_resource_yields WHERE run_id=?", (run_id,)
+            ).fetchone()
+            return self._resource_yield_row(db, row) if row is not None else None
 
     def today_task_completions(
         self,
@@ -703,6 +857,55 @@ class Database:
             "level": row["level"], "experience": row["experience"],
             "experienceRequired": row["experience_required"], "rawText": row["raw_text"],
             "status": row["status"], "error": row["error"], "corrected": bool(row["corrected"]),
+        }
+
+    @staticmethod
+    def _resource_snapshot_row(row: sqlite3.Row) -> dict:
+        return {
+            "id": row["id"],
+            "targetId": row["target_id"],
+            "characterId": row["character_id"],
+            "phase": row["phase"],
+            "capturedAt": row["captured_at"],
+            "status": row["status"],
+            "values": {
+                "level": row["level"],
+                "experience": row["experience"],
+                "experienceRequired": row["experience_required"],
+                "gold": row["gold"],
+                "silver": row["silver"],
+            },
+            "evidence": json.loads(row["evidence_json"]),
+            "error": row["error"],
+        }
+
+    @classmethod
+    def _resource_yield_row(
+        cls, db: sqlite3.Connection, row: sqlite3.Row
+    ) -> dict:
+        before = db.execute(
+            "SELECT * FROM resource_snapshots WHERE id=?",
+            (row["before_snapshot_id"],),
+        ).fetchone()
+        after = None
+        if row["after_snapshot_id"] is not None:
+            after = db.execute(
+                "SELECT * FROM resource_snapshots WHERE id=?",
+                (row["after_snapshot_id"],),
+            ).fetchone()
+        return {
+            "taskStatus": row["task_status"],
+            "attributionStatus": row["attribution_status"],
+            "beforeSnapshotId": row["before_snapshot_id"],
+            "afterSnapshotId": row["after_snapshot_id"],
+            "experienceDelta": row["experience_delta"],
+            "goldDelta": row["gold_delta"],
+            "silverDelta": row["silver_delta"],
+            "reasons": json.loads(row["reasons_json"]),
+            "calculationVersion": row["calculation_version"],
+            "createdAt": row["created_at"],
+            "before": cls._resource_snapshot_row(before),
+            "after": cls._resource_snapshot_row(after) if after is not None else None,
         }
 
     @staticmethod
