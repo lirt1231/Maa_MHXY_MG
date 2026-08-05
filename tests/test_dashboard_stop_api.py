@@ -178,7 +178,7 @@ class DashboardStopApiTests(unittest.TestCase):
             )
         )
 
-        second = self._start_task("keju")
+        second = self._start_task("fuli_qiandao")
 
         self.assertNotEqual(second["id"], first["id"])
         self.assertIn(second["status"], {"preparing", "running"})

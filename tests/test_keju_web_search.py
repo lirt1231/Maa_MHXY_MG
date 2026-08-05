@@ -9,8 +9,11 @@ RECOGNITION_DIR = Path(__file__).resolve().parents[1] / "agent" / "custom" / "re
 sys.path.insert(0, str(RECOGNITION_DIR))
 
 from keju_web_search import (  # noqa: E402
+    build_search_routes,
     clean_search_question,
+    parse_bing_rss,
     parse_bing_html,
+    parse_duckduckgo_html,
     parse_so360_html,
     search_web_evidence,
 )
@@ -24,8 +27,58 @@ class SearchQuestionTests(unittest.TestCase):
     def test_fullwidth_text_is_normalized(self):
         self.assertEqual(clean_search_question("第2题 ＡＢＣ"), "ABC")
 
+    def test_timer_label_without_ocr_number_is_removed(self):
+        self.assertEqual(clean_search_question("剩余时间古代社会尊称"), "古代社会尊称")
+
+    def test_contextual_route_contains_game_and_every_option(self):
+        routes = build_search_routes(
+            "剩余时间20下列神兽中初始技能没有感知的是",
+            {"A": "超级大熊猫", "B": "超级神鼠", "C": "超级灵狐", "D": "超级赤焰兽"},
+        )
+
+        self.assertEqual([name for name, _query in routes], [
+            "question",
+            "option_evidence:A",
+            "option_evidence:B",
+            "option_evidence:C",
+            "option_evidence:D",
+        ])
+        self.assertIn("梦幻西游手游", routes[1][1])
+        self.assertIn("超级大熊猫", routes[1][1])
+        self.assertIn("超级赤焰兽", routes[4][1])
+        self.assertIn("必带技能 感知", routes[4][1])
+
+    def test_numeric_options_do_not_pollute_game_context_query(self):
+        routes = build_search_routes(
+            "星盘技能平衡之力一共提供多少属性",
+            {"A": "10", "B": "8", "C": "14", "D": "12"},
+        )
+
+        self.assertEqual(len(routes), 2)
+        self.assertNotIn(" A 10", routes[1][1])
+        self.assertNotIn(" 12", routes[1][1])
 
 class SearchParserTests(unittest.TestCase):
+    def test_duckduckgo_result_has_decoded_target_and_snippet(self):
+        payload = """
+        <div class="result"><a class="result__a"
+          href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fds.163.com%2Fa">平衡之力</a>
+          <div class="result__snippet">每种属性加2点，一共10点。</div></div>
+        """
+        evidence = parse_duckduckgo_html(payload)
+        self.assertEqual(evidence[0]["provider"], "duckduckgo")
+        self.assertEqual(evidence[0]["url"], "https://ds.163.com/a")
+        self.assertIn("一共10点", evidence[0]["snippet"])
+
+    def test_bing_rss_result_is_extracted(self):
+        payload = """<?xml version="1.0"?><rss><channel><item>
+          <title>元宵夜宴</title><link>https://example.com/red</link>
+          <description>王熙凤在元宵节讲聋子放炮仗。</description>
+        </item></channel></rss>"""
+        evidence = parse_bing_rss(payload)
+        self.assertEqual(evidence[0]["provider"], "bing_rss")
+        self.assertIn("元宵节", evidence[0]["snippet"])
+
     def test_bing_direct_answer_xpath_is_prioritized(self):
         payload = """
         <html><body>
@@ -104,6 +157,63 @@ class SearchAggregationTests(unittest.TestCase):
         self.assertEqual(len(result["evidence"]), 1)
         self.assertIn("Timeout", result["providers"]["failed"]["error"])
 
+    def test_numeric_total_evidence_is_fetched_and_prioritized(self):
+        observed_limits = []
+
+        def duckduckgo(_query, _timeout, limit):
+            observed_limits.append(limit)
+            return [
+                {
+                    "provider": "duckduckgo", "kind": "result",
+                    "title": f"结果{rank}",
+                    "snippet": "每种类型加2点" if rank < 4 else "五种属性，一共10点",
+                    "url": f"https://example.com/{rank}", "rank": rank,
+                }
+                for rank in range(1, limit + 1)
+            ]
+
+        result = search_web_evidence(
+            "平衡之力一共提供多少属性",
+            providers={"duckduckgo": duckduckgo},
+            limit_per_provider=3,
+        )
+
+        self.assertEqual(observed_limits, [5])
+        self.assertIn("一共10点", result["evidence"][0]["snippet"])
+        self.assertEqual(len(result["evidence"]), 3)
+
+    def test_question_and_contextual_routes_share_one_parallel_window(self):
+        barrier = threading.Barrier(4)
+
+        def provider(name):
+            def run(query, _timeout, _limit):
+                barrier.wait(timeout=1)
+                return [{
+                    "provider": name,
+                    "kind": "result",
+                    "title": f"{name} {query}",
+                    "snippet": "route evidence",
+                    "url": f"https://{name}.example.com/{len(query)}",
+                    "rank": 1,
+                }]
+            return run
+
+        result = search_web_evidence(
+            "测试题目",
+            options={"A": "答案甲", "B": "答案乙"},
+            providers={"first": provider("first"), "second": provider("second")},
+        )
+
+        self.assertEqual(len(result["queries"]), 2)
+        self.assertEqual(len(result["evidence"]), 4)
+        self.assertEqual(set(result["providers"]), {
+            "first", "second",
+            "game_context:first", "game_context:second",
+        })
+        self.assertEqual(
+            {item["query_route"] for item in result["evidence"]},
+            {"question", "game_context"},
+        )
 
 if __name__ == "__main__":
     unittest.main()

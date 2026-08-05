@@ -1,4 +1,4 @@
-"""Pure scene classification for evidence-backed 帮派签到和分红领取."""
+"""Platform-neutral scene classification for evidence-backed 帮派签到和分红领取."""
 
 from __future__ import annotations
 
@@ -39,6 +39,52 @@ def welfare_close_box(image_size):
         max(1, round(image_width * 0.06)),
         max(1, round(image_height * 0.10)),
     ]
+
+
+def _scaled_live_box(image_size, base_box):
+    image_width, image_height = image_size or (923, 720)
+    scale_x = image_width / 923
+    scale_y = image_height / 720
+    x, y, width, height = base_box
+    return [
+        round(x * scale_x),
+        round(y * scale_y),
+        max(1, round(width * scale_x)),
+        max(1, round(height * scale_y)),
+    ]
+
+
+def expand_menu_box(image_size):
+    """Fixed bottom-right menu button, scaled from the 923x720 live canvas."""
+    return _scaled_live_box(image_size, (878, 669, 33, 33))
+
+
+def clan_entry_box(image_size):
+    """Fixed clan button slot in the expanded bottom menu."""
+    return _scaled_live_box(image_size, (593, 658, 41, 41))
+
+
+def expanded_menu_visible(texts, image_size):
+    close_button = next(
+        (
+            item
+            for item in texts
+            if re.fullmatch(r"[Xx×`｀'’]+", normalized_text(item["text"]))
+            and box_in_region(
+                item["box"], image_size, min_x=0.93, min_y=0.85
+            )
+        ),
+        None,
+    )
+    menu_label_pattern = re.compile(r"^(强化|系统|帮派|坐骑|家园|技能|助战)$")
+    visible_labels = sum(
+        bool(menu_label_pattern.fullmatch(normalized_text(item["text"])))
+        and box_in_region(
+            item["box"], image_size, min_x=0.5, min_y=0.88
+        )
+        for item in texts
+    )
+    return bool(close_button) and visible_labels >= 2
 
 
 def classify_clan_sign_in_scene(
@@ -126,6 +172,23 @@ def classify_clan_sign_in_scene(
         min_y=0.72,
         max_y=0.95,
     )
+    dividend_zero = next(
+        (
+            item
+            for item in texts
+            if re.fullmatch(r"[0０]", normalized_text(item["text"]))
+            and box_in_region(
+                item["box"],
+                image_size,
+                min_x=0.7,
+                max_x=0.85,
+                min_y=0.7,
+                max_y=0.82,
+            )
+        ),
+        None,
+    )
+    dividend_zero_valid = bool(dividend_context_valid and dividend_zero)
     dividend_claimed = find_text(texts, r"^(今日)?已领取$")
     dividend_claimed_valid = dividend_context_valid and dividend_claimed and box_in_region(
         dividend_claimed["box"],
@@ -170,6 +233,13 @@ def classify_clan_sign_in_scene(
     )
     if sign_in_valid and header_valid and phase in {"enter", "welfare", "verify_sign_in"}:
         return {"status": "sign_in", "box": sign_in["box"]}
+
+    if completion and header_valid and dividend_zero_valid:
+        return {
+            "status": "already_completed"
+            if phase in {"enter", "welfare"}
+            else "completed"
+        }
 
     if dividend_valid and phase in {
         "enter",
@@ -244,16 +314,19 @@ def classify_clan_sign_in_scene(
         and phase in {"enter", "menu"}
         and box_in_region(clan_entry, image_size, min_x=0.55, min_y=0.72)
     ):
-        return {"status": "open_clan", "box": clan_entry}
+        return {"status": "open_clan", "box": clan_entry_box(image_size)}
     clan_text = find_text(texts, r"^帮派$")
     if (
         clan_text
         and phase == "menu"
         and box_in_region(clan_text["box"], image_size, min_x=0.55, min_y=0.72)
     ):
-        return {"status": "open_clan", "box": clan_text["box"]}
+        return {"status": "open_clan", "box": clan_entry_box(image_size)}
+    if phase in {"enter", "menu"} and expanded_menu_visible(texts, image_size):
+        return {"status": "open_clan", "box": clan_entry_box(image_size)}
 
     expand_menu = templates.get("expand_menu")
+    expand_menu_live = templates.get("expand_menu_live")
     expand_menu_text = find_text(texts, r"^\+$")
     main_screen_anchors = [
         find_text(texts, r"^任务$"),
@@ -270,6 +343,45 @@ def classify_clan_sign_in_scene(
         and box_in_region(anchor["box"], image_size, **region)
         for anchor, region in zip(main_screen_anchors, anchor_regions)
     )
+    has_task_team_tabs = visible_main_anchors >= 2
+    left_menu_anchors = [
+        find_text(texts, pattern)
+        for pattern in (r"^福利$", r"^商城$", r"^节日活动$")
+    ]
+    has_left_menu = any(
+        anchor
+        and box_in_region(
+            anchor["box"],
+            image_size,
+            max_x=0.18,
+            min_y=0.10,
+            max_y=0.40,
+        )
+        for anchor in left_menu_anchors
+    )
+    activity_toolbar = find_text(texts, r"^活动$")
+    has_activity_toolbar = bool(activity_toolbar) and box_in_region(
+        activity_toolbar["box"],
+        image_size,
+        min_x=0.18,
+        max_x=0.46,
+        max_y=0.18,
+    )
+    has_activity_toolbar = has_activity_toolbar or bool(
+        templates.get("activity_toolbar")
+    )
+    chat_tab_pattern = re.compile(r"^(当前|个人|世界|帮派|队伍)$")
+    has_chat_tab = any(
+        chat_tab_pattern.fullmatch(normalized_text(item["text"]))
+        and box_in_region(item["box"], image_size, max_x=0.18, min_y=0.75)
+        for item in texts
+    )
+    has_bottom_menu_state = bool(expand_menu_live)
+    strict_live_main_screen = (
+        has_task_team_tabs
+        and has_left_menu
+        and (has_activity_toolbar or has_chat_tab or has_bottom_menu_state)
+    )
     ocr_expand_menu = (
         expand_menu_text
         if expand_menu_text
@@ -279,13 +391,32 @@ def classify_clan_sign_in_scene(
         )
         else None
     )
-    expand_menu = expand_menu or (
-        ocr_expand_menu["box"] if ocr_expand_menu else None
-    )
+    if (
+        phase == "menu"
+        and has_task_team_tabs
+        and has_left_menu
+        and not expand_menu
+        and not expand_menu_live
+        and not ocr_expand_menu
+    ):
+        return {"status": "open_clan", "box": clan_entry_box(image_size)}
     if (
         expand_menu
-        and phase == "enter"
+        and phase in {"enter", "menu"}
         and box_in_region(expand_menu, image_size, min_x=0.88, min_y=0.75)
     ):
-        return {"status": "expand_menu", "box": expand_menu}
+        return {"status": "expand_menu", "box": expand_menu_box(image_size)}
+    if (
+        ocr_expand_menu
+        and strict_live_main_screen
+        and phase in {"enter", "menu"}
+    ):
+        return {"status": "expand_menu", "box": expand_menu_box(image_size)}
+    if (
+        expand_menu_live
+        and strict_live_main_screen
+        and phase in {"enter", "menu"}
+        and box_in_region(expand_menu_live, image_size, min_x=0.88, min_y=0.75)
+    ):
+        return {"status": "expand_menu", "box": expand_menu_box(image_size)}
     return {"status": "unknown"}

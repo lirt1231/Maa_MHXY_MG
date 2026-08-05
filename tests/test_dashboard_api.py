@@ -28,7 +28,8 @@ class DashboardApiTests(unittest.TestCase):
             {item["id"] for item in response.json()["items"]},
             {
                 "sanjieqiyuan", "keju", "keju_huishi", "zhuogui",
-                "fuli_qiandao", "bangpai_qiandao", "baotu", "yunbiao", "shimen", "kaogu",
+                "fuli_qiandao", "bangpai_qiandao", "baotu", "yunbiao", "shimen",
+                "mijingxiangyao", "kaogu",
             },
         )
         self.assertTrue(
@@ -39,9 +40,32 @@ class DashboardApiTests(unittest.TestCase):
                 for item in response.json()["items"]
             )
         )
+        categories = {
+            item["id"]: item["category"]["label"]
+            for item in response.json()["items"]
+        }
+        self.assertEqual(categories["sanjieqiyuan"], "日常任务")
+        self.assertEqual(categories["keju_huishi"], "周常任务")
+        self.assertEqual(categories["kaogu"], "常驻任务")
+        self.assertTrue(all(item["taskOrder"] > 0 for item in response.json()["items"]))
         self.assertTrue(all(item["todayStatus"] == {
             "status": "pending", "completedAt": None, "resultStatus": None,
         } for item in response.json()["items"]))
+
+    @patch("dashboard.app.open_system_settings")
+    def test_system_settings_api_uses_allowlisted_backend(self, open_settings):
+        open_settings.return_value = {"opened": True, "section": "accessibility"}
+
+        response = self.client.post("/api/system/settings/accessibility")
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json(), {"opened": True, "section": "accessibility"})
+        open_settings.assert_called_once_with("accessibility")
+
+    def test_system_settings_api_rejects_unknown_sections(self):
+        response = self.client.post("/api/system/settings/unknown")
+
+        self.assertEqual(response.status_code, 404)
 
     def test_task_api_marks_only_completed_runs_today(self):
         database = self.client.app.state.database
@@ -52,6 +76,7 @@ class DashboardApiTests(unittest.TestCase):
                 ("already", "fuli_qiandao", "succeeded", "already_completed"),
                 ("stopped", "baotu", "failed", "safe_stopped"),
                 ("limited", "yunbiao", "succeeded", "limit_reached"),
+                ("mijing-limited", "mijingxiangyao", "succeeded", "limit_reached"),
             ):
                 db.execute(
                     """INSERT INTO task_runs(
@@ -78,6 +103,7 @@ class DashboardApiTests(unittest.TestCase):
         self.assertEqual(statuses["fuli_qiandao"]["resultStatus"], "already_completed")
         self.assertEqual(statuses["baotu"]["status"], "pending")
         self.assertEqual(statuses["yunbiao"]["status"], "pending")
+        self.assertEqual(statuses["mijingxiangyao"]["status"], "pending")
 
     def test_start_requires_checklist_confirmation(self):
         response = self.client.post(
@@ -360,6 +386,22 @@ class DashboardApiTests(unittest.TestCase):
         encoded = _sse_event(payload)
         self.assertTrue(encoded.startswith("id: 42\nevent: status\n"))
         self.assertIn('"message": "恢复"', encoded)
+
+    def test_run_event_history_can_be_restored_after_page_reload(self):
+        database = self.client.app.state.database
+        run_id = "reload-history"
+        database.create_run({
+            "id": run_id, "taskId": "keju", "taskName": "科举乡试",
+            "status": "running", "options": {},
+            "startedAt": "2026-08-02T00:00:00+00:00",
+        })
+        first = database.add_event(run_id, "info", "status", "任务开始")
+        second = database.add_event(run_id, "info", "log", "正在识别题目")
+
+        response = self.client.get(f"/api/runs/{run_id}/events")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["items"], [first, second])
 
 class DashboardRestartTests(unittest.TestCase):
     def test_lifespan_recovers_abandoned_run(self):

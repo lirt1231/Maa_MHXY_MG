@@ -96,101 +96,48 @@ gameData.latestUsableByCategory.daily_tasks = gameData.items[0];
 
 const panelProps = {
   system, metrics, gameData, metricKind: "gold" as const, rangeDays: 7 as const,
-  busy: false, capturing: false, capturingDailyTasks: false,
+  busy: false, capturing: false,
   onMetricKindChange: vi.fn(), onRangeDaysChange: vi.fn(), onCapture: vi.fn(),
-  onCaptureDailyTasks: vi.fn(), onCorrect: vi.fn()
+  onCorrect: vi.fn()
 };
 
-test("defaults to raw character resources with pending fields", () => {
+test("defaults to current resources and hides unavailable fields", () => {
   render(<DataPanel {...panelProps} />);
 
-  expect(screen.getByRole("tab", { name: "角色资源" }).getAttribute("aria-selected")).toBe("true");
+  expect(screen.getByRole("tab", { name: "当前资源" }).getAttribute("aria-selected")).toBe("true");
   expect(screen.getByText("8,888")).toBeTruthy();
   expect(screen.getByText("1,200")).toBeTruthy();
-  expect(screen.getAllByText("待接入")).toHaveLength(4);
+  expect(screen.queryByText("待接入")).toBeNull();
+  expect(screen.queryByText("银币")).toBeNull();
+  expect(screen.queryByText("仙玉")).toBeNull();
+  expect(screen.queryByRole("tab", { name: "游戏日程" })).toBeNull();
   expect(screen.queryByTestId("trend-chart")).toBeNull();
 });
 
-test("shows daily task rows and a clear empty state", () => {
-  const view = render(<DataPanel {...panelProps} />);
-  fireEvent.click(screen.getByRole("tab", { name: "今日任务" }));
+test("does not relabel stale gold or seven-day data as experience for thirty days", () => {
+  render(<DataPanel
+    {...panelProps}
+    metricKind="experience"
+    rangeDays={30}
+  />);
+  fireEvent.click(screen.getByRole("tab", { name: "收益走势" }));
 
-  expect(screen.getByText("师门任务")).toBeTruthy();
-  expect(screen.getByText("10/20")).toBeTruthy();
-  expect(screen.getByText("可参与")).toBeTruthy();
-  expect(screen.getByText("可领取")).toBeTruthy();
-  expect(screen.getByText("宝图任务")).toBeTruthy();
-
-  view.rerender(<DataPanel {...panelProps} gameData={{
-    targetId: "local-primary", items: [], latestByCategory: {},
-    latestAttemptByCategory: {}, latestUsableByCategory: {}
-  }} />);
-  expect(screen.getByText("暂无今日任务快照。")).toBeTruthy();
+  const currentExperience = screen.getByText("当前经验").closest("article");
+  expect(currentExperience?.textContent).toContain("—");
+  expect(currentExperience?.textContent).toContain("正在加载对应数据");
+  expect(currentExperience?.textContent).not.toContain("160");
+  expect(screen.getAllByText("近 30 天还没有足够的数据")).toHaveLength(2);
 });
 
-test("requests a zero-input daily schedule capture", () => {
-  const onCaptureDailyTasks = vi.fn();
-  render(<DataPanel {...panelProps} onCaptureDailyTasks={onCaptureDailyTasks} />);
-  fireEvent.click(screen.getByRole("tab", { name: "今日任务" }));
-
-  fireEvent.click(screen.getByRole("button", { name: "读取当前日程" }));
-
-  expect(onCaptureDailyTasks).toHaveBeenCalledOnce();
-});
-
-test("prevents overlapping captures and requires a fully available game", () => {
+test("requires a fully available game before updating earnings", () => {
   const unavailable = { ...system, available: false };
-  const view = render(<DataPanel {...panelProps} system={unavailable} capturing={true} />);
-  fireEvent.click(screen.getByRole("tab", { name: "今日任务" }));
-  expect((screen.getByRole("button", { name: "读取当前日程" }) as HTMLButtonElement).disabled).toBe(true);
-
-  view.rerender(<DataPanel {...panelProps} capturingDailyTasks={true} />);
-  fireEvent.click(screen.getByRole("tab", { name: "历史趋势" }));
-  expect((screen.getByRole("button", { name: "立即自动采集" }) as HTMLButtonElement).disabled).toBe(true);
-});
-
-test("normalizes incomplete tasks and distinguishes partial snapshots", () => {
-  const partial = {
-    ...gameData.items[0], status: "partial" as const,
-    data: { tasks: [{ name: "未知任务" }] }
-  };
-  render(<DataPanel {...panelProps} gameData={{
-    targetId: "local-primary",
-    items: [partial],
-    latestByCategory: { daily_tasks: partial },
-    latestAttemptByCategory: { daily_tasks: partial },
-    latestUsableByCategory: { daily_tasks: null },
-  }} />);
-  fireEvent.click(screen.getByRole("tab", { name: "今日任务" }));
-
-  expect(screen.getByText("部分识别")).toBeTruthy();
-  expect(screen.getByText("未知任务")).toBeTruthy();
-  expect(screen.getAllByText("待确认")).toHaveLength(2);
-  expect(screen.getByText("最新尝试待确认，不可用于任务编排")).toBeTruthy();
-});
-
-test("does not expand legacy partial task rows without v2 evidence", () => {
-  const legacyPartial = {
-    ...gameData.items[0],
-    schemaVersion: 1,
-    status: "partial" as const,
-    data: { tasks: [{ name: "世界聊天误识别" }] },
-  };
-  render(<DataPanel {...panelProps} gameData={{
-    targetId: "local-primary",
-    items: [legacyPartial],
-    latestByCategory: { daily_tasks: legacyPartial },
-    latestAttemptByCategory: { daily_tasks: legacyPartial },
-    latestUsableByCategory: { daily_tasks: null },
-  }} />);
-  fireEvent.click(screen.getByRole("tab", { name: "今日任务" }));
-
-  expect(screen.getByText("部分识别")).toBeTruthy();
-  expect(screen.queryByText("世界聊天误识别")).toBeNull();
-  expect(screen.queryByText("最新尝试待确认，不可用于任务编排")).toBeNull();
+  render(<DataPanel {...panelProps} system={unavailable} />);
+  fireEvent.click(screen.getByRole("tab", { name: "收益走势" }));
+  expect((screen.getByRole("button", { name: "立即更新数据" }) as HTMLButtonElement).disabled).toBe(true);
 });
 
 test("keeps the latest usable resources after a failed attempt", () => {
+  const onCapture = vi.fn();
   const failedResource = {
     ...gameSnapshotMeta,
     id: 3,
@@ -202,7 +149,7 @@ test("keeps the latest usable resources after a failed attempt", () => {
     evidence: {},
     error: "未识别到背包金币",
   };
-  render(<DataPanel {...panelProps} gameData={{
+  render(<DataPanel {...panelProps} onCapture={onCapture} gameData={{
     targetId: "local-primary",
     items: [...gameData.items, failedResource],
     latestByCategory: { ...gameData.latestByCategory, character_resources: failedResource },
@@ -211,85 +158,90 @@ test("keeps the latest usable resources after a failed attempt", () => {
   }} />);
 
   expect(screen.getByText("8,888")).toBeTruthy();
-  expect(screen.getByText("最近采集失败")).toBeTruthy();
-  expect(screen.getByText("采集失败")).toBeTruthy();
-  expect(screen.getByText(/当前继续显示.*最近成功数据/)).toBeTruthy();
+  expect(screen.getByText("这次更新失败")).toBeTruthy();
+  expect(screen.getByText("角色数据更新失败")).toBeTruthy();
+  expect(screen.getByText(/请确认游戏窗口已经打开.*再试一次/)).toBeTruthy();
+  expect(screen.getByText(/现在继续显示.*更新的数据/)).toBeTruthy();
   expect(screen.getByText(/未识别到背包金币/)).toBeTruthy();
+  const details = screen.getByText("查看详细原因").closest("details");
+  expect(details?.open).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "重新更新角色数据" }));
+  expect(onCapture).toHaveBeenCalledOnce();
 });
 
-test("keeps trusted daily tasks while showing a partial attempt separately", () => {
-  const partialDaily = {
-    ...gameSnapshotMeta,
-    id: 4,
-    capturedAt: "2026-07-26T11:00:00+08:00",
-    category: "daily_tasks",
-    sourcePage: "活动面板",
-    status: "partial" as const,
-    data: { tasks: [{ name: "疑似活动", completed: 1, target: 3 }] },
-    evidence: {},
-    error: "页面证据不完整",
+test("explains a failed earnings update and reuses the existing retry action", () => {
+  const onCapture = vi.fn();
+  const failedMetrics: Metrics = {
+    ...metrics,
+    snapshots: [...metrics.snapshots, {
+      id: 4,
+      capturedAt: "2026-07-26T09:00:00+08:00",
+      gold: null,
+      level: null,
+      experience: null,
+      experienceRequired: null,
+      status: "failed",
+      corrected: false,
+      error: "OCR did not find the inventory amount",
+    }],
   };
-  render(<DataPanel {...panelProps} gameData={{
-    targetId: "local-primary",
-    items: [...gameData.items, partialDaily],
-    latestByCategory: { ...gameData.latestByCategory, daily_tasks: partialDaily },
-    latestAttemptByCategory: { ...gameData.latestAttemptByCategory, daily_tasks: partialDaily },
-    latestUsableByCategory: gameData.latestUsableByCategory,
-  }} />);
-  fireEvent.click(screen.getByRole("tab", { name: "今日任务" }));
+  render(<DataPanel {...panelProps} metrics={failedMetrics} onCapture={onCapture} />);
+  fireEvent.click(screen.getByRole("tab", { name: "收益走势" }));
 
-  expect(screen.getByText("师门任务")).toBeTruthy();
-  expect(screen.getByText("宝图任务")).toBeTruthy();
-  expect(screen.getByText("疑似活动")).toBeTruthy();
-  expect(screen.getByText("最新尝试待确认，不可用于任务编排")).toBeTruthy();
-  expect(screen.getByText(/当前继续显示.*最近成功数据/)).toBeTruthy();
-  expect(screen.getByText("最近采集部分识别")).toBeTruthy();
-  expect(screen.getAllByText("待确认")).toHaveLength(2);
+  expect(screen.getByText("游戏数据更新失败")).toBeTruthy();
+  expect(screen.getByText(/请确认游戏窗口已经打开.*再试一次/)).toBeTruthy();
+  expect(screen.getByText("OCR did not find the inventory amount")).toBeTruthy();
+  const details = screen.getByText("查看详细原因").closest("details");
+  expect(details?.open).toBe(false);
+  expect(screen.queryByRole("button", { name: "立即更新数据" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "重新更新游戏数据" }));
+  expect(onCapture).toHaveBeenCalledOnce();
 });
 
-test("keeps the latest usable daily tasks after a failed attempt", () => {
-  const failedDaily = {
-    ...gameSnapshotMeta,
-    id: 5,
-    capturedAt: "2026-07-26T12:00:00+08:00",
-    category: "daily_tasks",
-    sourcePage: "活动面板",
-    status: "failed" as const,
-    data: {},
-    evidence: {},
-    error: "未确认日程页面",
-  };
-  render(<DataPanel {...panelProps} gameData={{
-    targetId: "local-primary",
-    items: [...gameData.items, failedDaily],
-    latestByCategory: { ...gameData.latestByCategory, daily_tasks: failedDaily },
-    latestAttemptByCategory: { ...gameData.latestAttemptByCategory, daily_tasks: failedDaily },
-    latestUsableByCategory: gameData.latestUsableByCategory,
-  }} />);
-  fireEvent.click(screen.getByRole("tab", { name: "今日任务" }));
-
-  expect(screen.getByText("师门任务")).toBeTruthy();
-  expect(screen.getByText("宝图任务")).toBeTruthy();
-  expect(screen.getByText(/未确认日程页面/)).toBeTruthy();
-  expect(screen.queryByRole("table", { name: "最新尝试待确认任务" })).toBeNull();
-});
-
-test("keeps existing analytics under the history tab", () => {
+test("prioritizes plain-language earnings and keeps technical stats collapsed", () => {
   render(<DataPanel {...panelProps} />);
-  fireEvent.click(screen.getByRole("tab", { name: "历史趋势" }));
+  fireEvent.click(screen.getByRole("tab", { name: "收益走势" }));
 
+  expect(screen.getAllByText("近 7 天增加了 60")).toHaveLength(2);
+  expect(screen.getByText("金币变化")).toBeTruthy();
+  const latestChange = screen.getByText("相比上次记录").closest("article");
+  expect(latestChange?.textContent).toContain("+60");
+  expect(latestChange?.textContent).toContain("比上次增加 60");
+  const details = screen.getByText("查看详细数据").closest("details");
+  expect(details?.open).toBe(false);
   expect(screen.getByText("66.7%")).toBeTruthy();
-  expect(screen.getByText("最近采集记录")).toBeTruthy();
+  expect(screen.getByText("最近的数据记录")).toBeTruthy();
   expect(screen.getByText("已修正")).toBeTruthy();
   expect(screen.getByText("失败")).toBeTruthy();
-  expect(screen.getByText("均值 130")).toBeTruthy();
+  expect(screen.getByText("平均金币")).toBeTruthy();
+});
+
+test("does not present a level-up reset as a negative experience change", () => {
+  const experienceMetrics: Metrics = {
+    ...metrics,
+    metric: "experience",
+    current: 200,
+    change: -800,
+    stats: { ...metrics.stats, latestChange: -800 },
+    snapshots: [
+      { ...metrics.snapshots[0], experience: 1000, level: 69 },
+      { ...metrics.snapshots[2], experience: 200, level: 70 },
+    ],
+  };
+  render(<DataPanel {...panelProps} metrics={experienceMetrics} metricKind="experience" />);
+  fireEvent.click(screen.getByRole("tab", { name: "收益走势" }));
+
+  const latestChange = screen.getByText("相比上次记录").closest("article");
+  expect(latestChange?.textContent).toContain("—");
+  expect(latestChange?.textContent).toContain("等级发生变化，暂不计算跨等级差值");
+  expect(latestChange?.textContent).not.toContain("-800");
 });
 
 test("requests a 30 day range from the range control", () => {
   const onRangeDaysChange = vi.fn();
   render(<DataPanel {...panelProps} onRangeDaysChange={onRangeDaysChange} />);
 
-  fireEvent.click(screen.getByRole("tab", { name: "历史趋势" }));
+  fireEvent.click(screen.getByRole("tab", { name: "收益走势" }));
   fireEvent.click(screen.getByRole("button", { name: "近 30 天" }));
   expect(onRangeDaysChange).toHaveBeenCalledWith(30);
 });
@@ -304,9 +256,11 @@ test("exports source fields with empty values and escaped errors", () => {
   expect(csv).toContain('"2026-07-25T08:00:00+08:00","失败","","","","","否","OCR 失败，包含""引号"""');
 });
 
-test("shows the export command when snapshots exist", () => {
+test("keeps the export command inside advanced details", () => {
   render(<DataPanel {...panelProps} />);
 
-  fireEvent.click(screen.getByRole("tab", { name: "历史趋势" }));
+  fireEvent.click(screen.getByRole("tab", { name: "收益走势" }));
+  const details = screen.getByText("查看详细数据").closest("details");
+  expect(details?.open).toBe(false);
   expect(screen.getByRole("button", { name: "导出 CSV" })).toBeTruthy();
 });

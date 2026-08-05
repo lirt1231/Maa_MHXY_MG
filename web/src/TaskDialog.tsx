@@ -15,7 +15,7 @@ export function TaskDialog({ task, busy, onClose, onStart, onInspect }: {
   const [submitting, setSubmitting] = useState(false);
   const [inspecting, setInspecting] = useState(false);
   const [inspection, setInspection] = useState<TaskInspection>();
-  const [error, setError] = useState("");
+  const [error, setError] = useState<{ kind: "inspect" | "start"; detail: string }>();
   const inspectionRequest = useRef(0);
   const activeInspection = useRef(0);
   const selectAllChecks = useRef<HTMLInputElement>(null);
@@ -33,19 +33,19 @@ export function TaskDialog({ task, busy, onClose, onStart, onInspect }: {
     inspectionRequest.current += 1;
     setOptions((current) => ({ ...current, [key]: value }));
     setInspection(undefined);
-    setError("");
+    setError(undefined);
   }
 
   async function inspect() {
     const request = ++inspectionRequest.current;
     activeInspection.current = request;
-    setInspecting(true); setInspection(undefined); setError("");
+    setInspecting(true); setInspection(undefined); setError(undefined);
     try {
       const result = await onInspect(options);
       if (inspectionRequest.current === request) setInspection(result);
     } catch (reason) {
       if (inspectionRequest.current === request) {
-        setError(reason instanceof Error ? reason.message : "画面检测失败");
+        setError({ kind: "inspect", detail: reason instanceof Error ? reason.message : "画面检测失败" });
       }
     } finally {
       if (activeInspection.current === request) setInspecting(false);
@@ -53,9 +53,9 @@ export function TaskDialog({ task, busy, onClose, onStart, onInspect }: {
   }
 
   async function submit() {
-    setSubmitting(true); setError("");
+    setSubmitting(true); setError(undefined);
     try { await onStart(options); onClose(); }
-    catch (reason) { setError(reason instanceof Error ? reason.message : "启动失败"); }
+    catch (reason) { setError({ kind: "start", detail: reason instanceof Error ? reason.message : "启动失败" }); }
     finally { setSubmitting(false); }
   }
 
@@ -66,6 +66,10 @@ export function TaskDialog({ task, busy, onClose, onStart, onInspect }: {
       <h2>启动 {task.name}</h2>
       <p className="dialog-intro">{task.description}</p>
       <div className={`dialog-risk ${task.risk.level}`}><strong>{task.risk.label}</strong><span>{task.risk.summary}</span></div>
+      {task.guideImage && <figure className="task-guide">
+        <img src={task.guideImage.src} alt={task.guideImage.alt} />
+        <figcaption>{task.guideImage.caption}</figcaption>
+      </figure>}
 
       <div className="dialog-grid">
         <div>
@@ -114,7 +118,12 @@ export function TaskDialog({ task, busy, onClose, onStart, onInspect }: {
           <div className="warning-box">{task.warnings.map((warning) => <p key={warning}>⚠ {warning}</p>)}</div>
         </div>
       </div>
-      {error && <p className="error-banner" role="alert">{error}</p>}
+      {error && <section className="error-banner player-action-error" role="alert">
+        <strong>{error.kind === "inspect" ? "没有检测到可用的游戏画面" : `${task.name}没有启动`}</strong>
+        <p>{error.kind === "inspect" ? "请将游戏窗口切到前台并关闭遮挡窗口，然后重新检测。" : "请确认游戏窗口仍在前台、启动前检查仍然符合要求，然后重试。"}</p>
+        <button className="button ghost" disabled={busy || inspecting || submitting} onClick={error.kind === "inspect" ? inspect : submit}>{error.kind === "inspect" ? "重新检测" : "重新启动"}</button>
+        <details><summary>查看技术详情</summary><small>{error.detail}</small></details>
+      </section>}
       <div className="dialog-actions">
         <button className="button ghost" disabled={inspecting} onClick={onClose}>取消</button>
         <button className="button primary" disabled={!ready} onClick={submit}>{busy ? "已有任务运行中" : submitting ? "正在启动…" : "确认并启动"}</button>

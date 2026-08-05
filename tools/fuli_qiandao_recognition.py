@@ -1,4 +1,4 @@
-"""Pure scene classification and scratch gestures for 福利签到."""
+"""Platform-neutral scene classification and scratch gestures for 福利签到."""
 
 from __future__ import annotations
 

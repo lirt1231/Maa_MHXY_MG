@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import signal
 import subprocess
@@ -12,7 +13,7 @@ from typing import Callable
 
 from .database import Database, utc_now
 from .events import EventBroker
-from .registry import TASKS, validate_options
+from .registry import TASKS, ensure_task_available, validate_options
 from .user_progress import user_progress
 
 
@@ -22,12 +23,13 @@ STOP_TERM_TIMEOUT_SECONDS = 5.0
 STOP_KILL_TIMEOUT_SECONDS = 2.0
 INSPECTION_TIMEOUT_SECONDS = 15.0
 RESULT_PREFIX = "result_json="
-TASK_SUCCESS_RESULTS = {"completed", "already_completed", "limit_reached"}
+HOME_RECOVERY_PREFIX = "home_recovery_json="
+TASK_SUCCESS_RESULTS = {"completed", "already_completed"}
 TASK_RESULT_STATUSES = TASK_SUCCESS_RESULTS | {"safe_stopped", "cancelled"}
 TASK_RESULT_NUMERIC_FIELDS = {
     "questions", "answers", "clicks", "limit", "rounds", "target_rounds",
-    "actions", "steps", "ghost_progress", "max_steps", "digs", "target_digs",
-    "purchases",
+    "actions", "steps", "ghost_progress", "max_steps", "battles", "max_battles",
+    "digs", "target_digs", "purchases",
 }
 TASK_RESULT_SCHEMAS = {
     "sanjieqiyuan": {
@@ -111,6 +113,21 @@ TASK_RESULT_SCHEMAS = {
             "already_completed": {"actions", "clicks"},
         },
     },
+    "mijingxiangyao": {
+        "statuses": {
+            "completed", "already_completed", "limit_reached", "safe_stopped",
+            "cancelled",
+        },
+        "fields": {
+            "task_id", "status", "reason", "battles", "actions", "clicks",
+            "max_battles",
+        },
+        "required": {
+            "completed": {"battles", "actions", "clicks", "max_battles"},
+            "already_completed": {"battles", "actions", "clicks", "max_battles"},
+            "limit_reached": {"battles", "actions", "clicks", "max_battles"},
+        },
+    },
     "kaogu": {
         "statuses": {"completed", "already_completed", "safe_stopped", "cancelled"},
         "fields": {
@@ -159,7 +176,15 @@ SCENE_LABELS = {
     "blocked_resource": "普通运镖条件不足",
     "unsupported_delivery": "非普通镖选项",
     "progress_task": "师门任务推进页",
-    "unsupported_asset_branch": "师门资产操作分支",
+    "unsupported_asset_branch": "资产操作分支",
+    "select_mode": "秘境模式选择页",
+    "confirm_mode": "秘境模式确认页",
+    "start_challenge": "秘境挑战页",
+    "select_stage": "秘境关卡列表",
+    "enter_battle": "秘境战斗确认页",
+    "challenge_failed": "秘境挑战失败页",
+    "mode_selection_required": "秘境模式选择页",
+    "enter_dungeon": "当前秘境入口",
     "open_skills": "技能入口",
     "open_auxiliary": "辅助技能页签",
     "open_archaeology": "工坊考古入口",
@@ -175,6 +200,7 @@ SCENE_LABELS = {
     "dig": "考古挖掘按钮",
     "close_temporary_bag": "临时道具栏",
     "wait_for_dig": "等待下一次挖掘",
+    "manual_tool_required": "未检测到已选工具",
 }
 
 ACTION_LABELS = {
@@ -226,6 +252,10 @@ ACTION_LABELS = {
     "confirm_normal": "确认押送普通镖银",
     "delivery_active": "等待本轮普通运镖结束",
     "progress_task": "点击经过识别的“去完成”或“继续任务”",
+    "start_challenge": "点击经过识别的继续挑战按钮",
+    "select_stage": "选择经过识别的当前可挑战关卡",
+    "enter_battle": "点击经过识别的进入战斗按钮",
+    "enter_dungeon": "进入游戏当前已选择的秘境模式",
     "open_skills": "打开技能页面",
     "open_auxiliary": "切换到辅助技能",
     "open_archaeology": "进入工坊考古",
@@ -294,6 +324,7 @@ class RunnerManager:
                 raise RuntimeError("正在检测当前画面，请等待检测完成")
             if self._current and self._current["status"] not in TERMINAL_STATES:
                 raise RuntimeError("已有任务正在运行")
+            ensure_task_available(task_id)
             task = TASKS[task_id]
             run = {
                 "id": uuid.uuid4().hex,
@@ -304,6 +335,8 @@ class RunnerManager:
                 "options": normalized,
                 "startedAt": utc_now(),
                 "benefitStatus": "not_captured",
+                "homeRecovery": {"status": "not_requested"},
+                "failurePhase": None,
             }
             self._current = run
             self._stop_requested = False
@@ -323,6 +356,7 @@ class RunnerManager:
         normalized = validate_options(task_id, options)
         self.begin_read_only()
         try:
+            ensure_task_available(task_id)
             command = self._inspection_command(task_id, normalized)
             process = subprocess.Popen(
                 command,
@@ -438,10 +472,15 @@ class RunnerManager:
 
     def _command(self, task_id: str, options: dict) -> list[str]:
         if task_id == "sanjieqiyuan":
-            command = [sys.executable, str(ROOT / "tools/run_sanjieqiyuan_macos.py"), "--max-steps", str(options["maxSteps"]), "--input-method", "native"]
-            if options["navigation"] == "auto":
-                command.append("--navigate")
-            return command
+            return [
+                sys.executable,
+                str(ROOT / "tools/run_sanjieqiyuan_macos.py"),
+                "--max-steps",
+                "10",
+                "--input-method",
+                "native",
+                "--navigate",
+            ]
         if task_id in {"keju", "keju_huishi"}:
             exam_type = "xiangshi" if task_id == "keju" else "huishi"
             command = [
@@ -450,10 +489,8 @@ class RunnerManager:
                 "--exam-type",
                 exam_type,
                 "--max-steps",
-                str(options["maxSteps"]),
+                "10" if task_id == "keju" else "20",
             ]
-            if options["answerSource"] == "codex":
-                command.append("--use-codex")
             if options.get("waitForRoundOne", False):
                 command.append("--wait-for-round-one")
             return command
@@ -479,13 +516,64 @@ class RunnerManager:
                 sys.executable,
                 str(ROOT / "tools/run_yunbiao_macos.py"),
                 "--rounds",
-                str(options["rounds"]),
+                "3",
             ]
         if task_id == "shimen":
             return [sys.executable, str(ROOT / "tools/run_shimen_macos.py")]
+        if task_id == "mijingxiangyao":
+            return [sys.executable, str(ROOT / "tools/run_mijingxiangyao_macos.py")]
         if task_id == "kaogu":
-            return [sys.executable, str(ROOT / "tools/run_kaogu_macos.py")]
+            return [
+                sys.executable,
+                str(ROOT / "tools/run_kaogu_macos.py"),
+                "--tool-mode",
+                str(options.get("toolMode", "selected")),
+            ]
         raise ValueError("不支持的任务")
+
+    @staticmethod
+    def _recovery_command(task_id: str) -> list[str]:
+        return [
+            sys.executable,
+            str(ROOT / "tools/run_return_to_main_macos.py"),
+            "--task-id",
+            task_id,
+        ]
+
+    @staticmethod
+    def _parse_home_recovery(output_lines: list[str]) -> dict:
+        protocol = [
+            line[len(HOME_RECOVERY_PREFIX):]
+            for line in output_lines
+            if line.startswith(HOME_RECOVERY_PREFIX)
+        ]
+        if len(protocol) != 1:
+            raise RuntimeError("返回主界面进程没有返回唯一的结构化结果")
+        try:
+            result = json.loads(protocol[0])
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("返回主界面进程返回了无效结果") from exc
+        if not isinstance(result, dict) or result.get("status") not in {
+            "confirmed", "failed", "cancelled"
+        }:
+            raise RuntimeError("返回主界面结果包含未知状态")
+        for field in ("actions", "clicks"):
+            value = result.get(field, 0)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise RuntimeError(f"返回主界面结果包含无效的 {field}")
+        if result["status"] == "confirmed":
+            evidence = result.get("evidence")
+            if (
+                result.get("scene") != "main_screen"
+                or result.get("outcome") not in {"already_main", "recovered"}
+                or not isinstance(evidence, dict)
+                or not all(evidence.get(key) for key in (
+                    "targetId", "firstFrameId", "lastFrameId", "anchors"
+                ))
+                or evidence["firstFrameId"] == evidence["lastFrameId"]
+            ):
+                raise RuntimeError("返回主界面确认结果缺少双帧证据")
+        return result
 
     def _inspection_command(self, task_id: str, options: dict) -> list[str]:
         scripts = {
@@ -498,6 +586,7 @@ class RunnerManager:
             "baotu": "run_baotu_macos.py",
             "yunbiao": "run_yunbiao_macos.py",
             "shimen": "run_shimen_macos.py",
+            "mijingxiangyao": "run_mijingxiangyao_macos.py",
             "kaogu": "run_kaogu_macos.py",
         }
         command = [sys.executable, str(ROOT / "tools" / scripts[task_id]), "--inspect-scene"]
@@ -512,6 +601,11 @@ class RunnerManager:
             command.extend(["--rounds", "1"])
         elif task_id == "yunbiao":
             command.extend(["--rounds", str(options.get("rounds", 3))])
+        elif task_id == "kaogu":
+            command.extend([
+                "--tool-mode",
+                str(options.get("toolMode", "selected")),
+            ])
         return command
 
     @staticmethod
@@ -539,14 +633,13 @@ class RunnerManager:
 
         ready = False
         if task_id == "sanjieqiyuan":
-            manual = options.get("navigation") == "manual"
             actionable = {
                 "answering", "dismiss_known_popup", "close_bag_overlay",
                 "open_battle_menu", "click_join", "click_daily", "scroll_daily",
                 "click_activity",
                 "click_activity_toolbar", "click_activity_template",
             }
-            ready = scene == "answering" if manual else scene in actionable
+            ready = scene in actionable
         elif task_id in {"keju", "keju_huishi"}:
             expected_exam_type = "xiangshi" if task_id == "keju" else "huishi"
             ready = (
@@ -578,6 +671,12 @@ class RunnerManager:
                 "open_activity", "open_daily", "scroll_daily", "join_task",
                 "accept_task_dialogue", "start_task", "continue_task",
                 "progress_task", "battle", "auto_pathing",
+            }
+        elif task_id == "mijingxiangyao":
+            ready = scene in {
+                "open_activity", "open_daily", "scroll_daily", "join_task",
+                "continue_task", "enter_dungeon", "start_challenge", "select_stage",
+                "enter_battle", "battle", "auto_pathing", "wait",
             }
         elif task_id == "kaogu":
             ready = scene in {
@@ -624,8 +723,20 @@ class RunnerManager:
             summary = "科举尚未进入正式题目"
             reason = "等待正式题目出现后重新检测"
         elif scene == "unsupported_asset_branch":
-            summary = "当前师门分支需要资产操作，自动化不会继续"
+            task_label = "秘境" if task_id == "mijingxiangyao" else "师门"
+            summary = f"当前{task_label}分支需要资产操作，自动化不会继续"
             reason = f"请手动处理后重新检测；识别内容：{decision.get('reason', '未知')}"
+        elif scene == "challenge_failed" and task_id == "mijingxiangyao":
+            summary = "当前秘境挑战已经失败，自动化不会执行付费恢复"
+            reason = "请手动处理失败页面、药品或助战后重新检测"
+        elif scene in {
+            "select_mode", "confirm_mode", "mode_selection_required",
+        } and task_id == "mijingxiangyao":
+            summary = "当前需要手动选择或确认秘境模式"
+            reason = "请选择所需模式并进入当前挑战页后重新检测；自动化不会切换模式"
+        elif scene == "manual_tool_required" and task_id == "kaogu":
+            summary = "还没有检测到已手动选好的考古工具"
+            reason = decision.get("reason") or "请按提示图准备考古生产页后重新检测"
         else:
             summary = "当前画面不支持直接启动此任务"
             reason = "请按任务说明切换到主界面或指定页面后重新检测"
@@ -652,6 +763,42 @@ class RunnerManager:
         ):
             raise RuntimeError("画面检测结果包含无效的模板列表")
 
+        coordinate_evidence = {}
+        for key, length in {
+            "windowBoundsPoints": 4,
+            "contentRectPoints": 4,
+            "recognizedBoxCenterPixels": 2,
+            "predictedScreenPoint": 2,
+        }.items():
+            if key not in evidence:
+                continue
+            value = evidence[key]
+            if not isinstance(value, (list, tuple)) or len(value) != length or not all(
+                isinstance(item, (int, float))
+                and not isinstance(item, bool)
+                and math.isfinite(item)
+                for item in value
+            ):
+                raise RuntimeError(f"画面检测结果包含无效的坐标证据：{key}")
+            coordinate_evidence[key] = list(value)
+        if "scaleFactor" in evidence:
+            scale_factor = evidence["scaleFactor"]
+            if (
+                not isinstance(scale_factor, (int, float))
+                or isinstance(scale_factor, bool)
+                or not math.isfinite(scale_factor)
+                or scale_factor <= 0
+            ):
+                raise RuntimeError("画面检测结果包含无效的缩放证据")
+            coordinate_evidence["scaleFactor"] = scale_factor
+        for key in ("frameId", "captureMethod", "anchorValidation"):
+            if key not in evidence:
+                continue
+            value = evidence[key]
+            if not isinstance(value, str) or not value:
+                raise RuntimeError(f"画面检测结果包含无效的标定证据：{key}")
+            coordinate_evidence[key] = value
+
         action_label = ACTION_LABELS.get(action_key)
         if task_id == "bangpai_qiandao" and action_key == "open_welfare":
             action_label = "打开帮派福利页面"
@@ -664,6 +811,8 @@ class RunnerManager:
             ("shimen", "accept_task_dialogue"): "选择经过识别的师门 NPC 任务",
             ("shimen", "start_task"): "点击右侧师门任务正式开始",
             ("shimen", "continue_task"): "点击经过识别的师门任务栏",
+            ("mijingxiangyao", "join_task"): "点击同一卡片内的秘境降妖参加按钮",
+            ("mijingxiangyao", "continue_task"): "点击经过识别的秘境降妖任务栏",
         }
         action_label = task_action_overrides.get((task_id, action_key), action_label)
         return {
@@ -679,6 +828,7 @@ class RunnerManager:
                 "imageSize": raw.get("image_size"),
                 "ocrItemCount": ocr_count,
                 "matchedTemplates": matched_templates,
+                **coordinate_evidence,
             },
             "observedAt": utc_now(),
         }
@@ -761,6 +911,7 @@ class RunnerManager:
                 "keju": "科举乡试已达到本次最多答题数",
                 "keju_huishi": "科举会试已达到本次最多答题数",
                 "zhuogui": "捉鬼任务已达到目标轮数",
+                "mijingxiangyao": "秘境降妖已达到本次战斗场数上限",
             }.get(task_id, f"{task_name}已达到本次执行上限")
         if status == "completed":
             return {
@@ -773,6 +924,7 @@ class RunnerManager:
                 "baotu": "宝图任务完成",
                 "yunbiao": "普通运镖完成",
                 "shimen": "师门任务已启动，后续由游戏自动完成",
+                "mijingxiangyao": "秘境降妖完成",
                 "kaogu": "工坊考古完成 10 次挖掘",
             }[task_id]
         return None
@@ -782,6 +934,9 @@ class RunnerManager:
         status = "failed"
         output_lines = []
         task_result = None
+        home_recovery = {"status": "not_requested"}
+        failure_phase = "task"
+        recovery_started = False
         try:
             command = self._command(run["taskId"], run["options"])
             with self._lock:
@@ -790,6 +945,11 @@ class RunnerManager:
                     return
                 self._current["status"] = "running"
                 self._current["stage"] = "自动化运行中"
+                self.database.update_run_stage(
+                    run["id"], "running", self._current["stage"],
+                    home_recovery=home_recovery,
+                    failure_phase=None,
+                )
                 self._emit("info", "status", f"{run['taskName']}已开始", {"status": "running"})
                 self._process = subprocess.Popen(
                     command,
@@ -814,6 +974,11 @@ class RunnerManager:
                         with self._lock:
                             if self._current and self._current["id"] == run["id"]:
                                 self._current["stage"] = progress["payload"]["stage"]
+                                self.database.update_run_stage(
+                                    run["id"], "running", self._current["stage"],
+                                    home_recovery=home_recovery,
+                                    failure_phase=None,
+                                )
                         self._emit(
                             progress["level"],
                             "log",
@@ -833,12 +998,92 @@ class RunnerManager:
                 task_result = self._parse_task_result(run["taskId"], output_lines)
                 result_status = task_result["status"]
                 if result_status in TASK_SUCCESS_RESULTS and return_code == 0:
-                    status = "succeeded"
+                    with self._lock:
+                        if self._stop_requested:
+                            status = "cancelled"
+                            task_result = None
+                        else:
+                            recovery_started = True
+                            failure_phase = None
+                            home_recovery = {
+                                "status": "running",
+                                "outcome": None,
+                                "scene": None,
+                                "reason": None,
+                                "actions": 0,
+                                "clicks": 0,
+                            }
+                            run["status"] = "recovering"
+                            run["stage"] = "正在返回主界面"
+                            run["result"] = task_result
+                            run["homeRecovery"] = home_recovery
+                            self.database.update_run_stage(
+                                run["id"], "recovering", run["stage"],
+                                result=task_result,
+                                home_recovery=home_recovery,
+                                failure_phase=None,
+                            )
+                            self._emit(
+                                "info", "status", "任务已完成，正在返回主界面",
+                                {"status": "recovering", "result": task_result,
+                                 "homeRecovery": home_recovery},
+                            )
+                            self._process = subprocess.Popen(
+                                self._recovery_command(run["taskId"]),
+                                cwd=ROOT,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT,
+                                text=True,
+                                encoding="utf-8",
+                                errors="replace",
+                                bufsize=1,
+                                start_new_session=True,
+                            )
+                            process = self._process
+                    if status != "cancelled":
+                        recovery_lines = []
+                        assert process.stdout is not None
+                        for line in process.stdout:
+                            message = line.strip()
+                            if message:
+                                recovery_lines.append(message)
+                        recovery_return_code = process.wait()
+                        with self._lock:
+                            stopped = self._stop_requested
+                        if stopped:
+                            status = "cancelled"
+                            parsed = None
+                            try:
+                                parsed = self._parse_home_recovery(recovery_lines)
+                            except RuntimeError:
+                                pass
+                            home_recovery = parsed or {
+                                "status": "cancelled",
+                                "outcome": None,
+                                "scene": None,
+                                "reason": "返回主界面期间收到停止请求",
+                                "actions": 0,
+                                "clicks": 0,
+                            }
+                            home_recovery["status"] = "cancelled"
+                            failure_phase = None
+                        else:
+                            home_recovery = self._parse_home_recovery(recovery_lines)
+                            if home_recovery["status"] == "confirmed" and recovery_return_code == 0:
+                                status = "succeeded"
+                                failure_phase = None
+                            else:
+                                status = "failed"
+                                failure_phase = "recovery"
+                                error = "任务已完成，但未能返回主界面"
                 else:
                     status = "failed"
+                    failure_phase = "task"
                     error = (
                         task_result.get("reason")
                         if result_status == "safe_stopped"
+                        else "任务达到内部上限，但缺少明确完成证据"
+                        if result_status == "limit_reached"
                         else self._friendly_error(
                             run["taskId"], return_code, "\n".join(output_lines)
                         )
@@ -847,6 +1092,17 @@ class RunnerManager:
             with self._lock:
                 status = "cancelled" if self._stop_requested else "failed"
             error = None if status == "cancelled" else str(exc)
+            if status == "failed":
+                failure_phase = "recovery" if recovery_started else "task"
+                if recovery_started:
+                    home_recovery = {
+                        "status": "failed",
+                        "outcome": None,
+                        "scene": None,
+                        "reason": str(exc),
+                        "actions": home_recovery.get("actions", 0),
+                        "clicks": home_recovery.get("clicks", 0),
+                    }
         finally:
             try:
                 with self._lock:
@@ -855,7 +1111,14 @@ class RunnerManager:
                     if self._stop_requested:
                         status = "cancelled"
                         error = None
-                        if not task_result or task_result.get("status") != "cancelled":
+                        failure_phase = None
+                        if recovery_started:
+                            home_recovery = {
+                                **home_recovery,
+                                "status": "cancelled",
+                                "reason": home_recovery.get("reason") or "返回主界面期间收到停止请求",
+                            }
+                        elif not task_result or task_result.get("status") != "cancelled":
                             task_result = self._cancelled_task_result(
                                 run["taskId"], output_lines
                             )
@@ -863,16 +1126,26 @@ class RunnerManager:
                     if self._current and self._current["id"] == run["id"]:
                         self._current["status"] = status
                         self._current["stage"] = {
-                            "succeeded": "运行完成",
-                            "failed": "运行失败",
+                            "succeeded": "已确认回到主界面",
+                            "failed": (
+                                "任务完成但返回主界面失败"
+                                if failure_phase == "recovery" else "运行失败"
+                            ),
                             "cancelled": "已停止",
                         }[status]
                         self._current["error"] = error
                         self._current["result"] = task_result
+                        self._current["homeRecovery"] = home_recovery
+                        self._current["failurePhase"] = failure_phase
                         self._current["lastOperationAt"] = utc_now()
                     # Keep final persistence and publication inside the same state
                     # transition, so start() cannot replace the run in between.
-                    self.database.update_run(run["id"], status, error, task_result)
+                    self.database.update_run(
+                        run["id"], status, error, task_result,
+                        stage=run.get("stage"),
+                        home_recovery=home_recovery,
+                        failure_phase=failure_phase,
+                    )
                     level = "error" if status == "failed" else (
                         "warning" if status == "cancelled" else "info"
                     )
@@ -890,6 +1163,8 @@ class RunnerManager:
                             "status": status,
                             "error": error,
                             "result": task_result,
+                            "homeRecovery": home_recovery,
+                            "failurePhase": failure_phase,
                             "lastOperationAt": run.get("lastOperationAt"),
                         },
                     )
@@ -937,6 +1212,10 @@ class RunnerManager:
                 if result_stage == "师门任务完成"
                 else result_stage
             )
+        elif task_id == "mijingxiangyao" and '"event": "scene"' in line:
+            payload["stage"] = "正在识别并推进秘境降妖"
+        elif task_id == "mijingxiangyao" and line.startswith(RESULT_PREFIX):
+            payload["stage"] = RunnerManager._bounded_task_result_stage(line, "秘境降妖")
         elif task_id == "kaogu" and '"event": "scene"' in line:
             payload["stage"] = "正在识别并推进工坊考古"
         elif task_id == "kaogu" and line.startswith(RESULT_PREFIX):
@@ -952,6 +1231,7 @@ class RunnerManager:
         return {
             "completed": f"{label}完成",
             "already_completed": f"{label}今日已完成",
+            "limit_reached": f"{label}已达到本次执行上限",
             "safe_stopped": f"{label}已安全停止",
             "cancelled": f"{label}已取消",
         }.get(status, f"{label}正在结束")
@@ -978,7 +1258,7 @@ class RunnerManager:
         ):
             return "游戏窗口截图失败，请确认梦幻西游窗口未最小化，并检查控制台的屏幕录制权限。"
         hints = {
-            "sanjieqiyuan": "三界奇缘未能继续，请确认活动可参与且当前页面符合所选进入方式。",
+            "sanjieqiyuan": "三界奇缘未能继续，请确认活动可参与且当前画面是无遮挡的游戏主界面。",
             "keju": "科举答题已停止，请确认正式题目页面可见并检查模型或本地题库配置。",
             "keju_huishi": "科举会试答题已停止，请确认会试正式题目页面可见并检查模型或本地题库配置。",
             "zhuogui": "捉鬼流程已停止，请检查组队状态、弹窗和当前游戏页面。",
@@ -987,6 +1267,7 @@ class RunnerManager:
             "baotu": "宝图任务未能继续，请保持主界面、日常活动页或宝图任务过程完整可见。",
             "yunbiao": "普通运镖未能继续，请检查活力、镖种和当前任务页面。",
             "shimen": "师门任务未能启动，请保持活动入口、领取对话或右侧师门任务完整可见。",
+            "mijingxiangyao": "秘境降妖未能继续，请检查战斗状态；药品、助战购买和付费恢复需要手动处理。",
             "kaogu": "工坊考古未能继续，请检查技能生产页面、角色活力和洛阳铲购买状态。",
         }
         return f"{hints[task_id]}（进程代码 {return_code}）"

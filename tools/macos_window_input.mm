@@ -61,6 +61,90 @@ int resolve_target_window(
     return -4;
 }
 
+bool ax_window_matches_bounds(AXUIElementRef window_element, CGRect target_bounds)
+{
+    CFTypeRef position_value = nullptr;
+    CFTypeRef size_value = nullptr;
+    CGPoint position = CGPointZero;
+    CGSize size = CGSizeZero;
+    bool matches = false;
+    if (AXUIElementCopyAttributeValue(
+            window_element, kAXPositionAttribute, &position_value) == kAXErrorSuccess
+        && AXUIElementCopyAttributeValue(
+            window_element, kAXSizeAttribute, &size_value) == kAXErrorSuccess
+        && position_value && size_value
+        && CFGetTypeID(position_value) == AXValueGetTypeID()
+        && CFGetTypeID(size_value) == AXValueGetTypeID()
+        && AXValueGetValue(
+            (AXValueRef)position_value, (AXValueType)kAXValueCGPointType, &position)
+        && AXValueGetValue(
+            (AXValueRef)size_value, (AXValueType)kAXValueCGSizeType, &size)) {
+        constexpr double tolerance = 2.0;
+        matches = std::abs(position.x - target_bounds.origin.x) <= tolerance
+            && std::abs(position.y - target_bounds.origin.y) <= tolerance
+            && std::abs(size.width - target_bounds.size.width) <= tolerance
+            && std::abs(size.height - target_bounds.size.height) <= tolerance;
+    }
+    if (position_value) CFRelease(position_value);
+    if (size_value) CFRelease(size_value);
+    return matches;
+}
+
+int focus_target_window(pid_t owner_pid, CGRect target_bounds)
+{
+    AXUIElementRef application_element = AXUIElementCreateApplication(owner_pid);
+    if (!application_element) {
+        return -7;
+    }
+    AXError frontmost_result = AXUIElementSetAttributeValue(
+        application_element, kAXFrontmostAttribute, kCFBooleanTrue);
+    AXError raise_result = kAXErrorFailure;
+    CFTypeRef windows_value = nullptr;
+    if (AXUIElementCopyAttributeValue(
+            application_element, kAXWindowsAttribute, &windows_value) == kAXErrorSuccess
+        && windows_value
+        && CFGetTypeID(windows_value) == CFArrayGetTypeID()) {
+        CFArrayRef windows = (CFArrayRef)windows_value;
+        for (CFIndex index = 0; index < CFArrayGetCount(windows); ++index) {
+            AXUIElementRef window_element = (AXUIElementRef)CFArrayGetValueAtIndex(
+                windows, index);
+            if (ax_window_matches_bounds(window_element, target_bounds)) {
+                raise_result = AXUIElementPerformAction(window_element, kAXRaiseAction);
+                break;
+            }
+        }
+    }
+    if (windows_value) {
+        CFRelease(windows_value);
+    }
+    CFRelease(application_element);
+
+    if (frontmost_result != kAXErrorSuccess && raise_result != kAXErrorSuccess) {
+        return -7;
+    }
+    NSRunningApplication* application =
+        [NSRunningApplication runningApplicationWithProcessIdentifier:owner_pid];
+    if (!application || application.terminated) {
+        return -7;
+    }
+    [application activateWithOptions:0];
+    bool frontmost_confirmed = false;
+    for (int attempt = 0; attempt < 10; ++attempt) {
+        NSRunningApplication* frontmost =
+            NSWorkspace.sharedWorkspace.frontmostApplication;
+        if (frontmost && frontmost.processIdentifier == owner_pid) {
+            frontmost_confirmed = true;
+            break;
+        }
+        usleep(50000);
+    }
+    if (!frontmost_confirmed) {
+        return -7;
+    }
+    usleep(100000);
+    return 0;
+}
+
 } // namespace
 
 extern "C" uint32_t MaaMHXYFindWindow(const char* bundle_id_utf8, const char* window_title_utf8)
@@ -116,6 +200,154 @@ extern "C" uint32_t MaaMHXYFindWindow(const char* bundle_id_utf8, const char* wi
     }
 }
 
+extern "C" int MaaMHXYGetWindowGeometry(
+    uint32_t window_id,
+    const char* bundle_id_utf8,
+    double* output_x,
+    double* output_y,
+    double* output_width,
+    double* output_height,
+    int* output_pid)
+{
+    @autoreleasepool {
+        if (!bundle_id_utf8) {
+            return -1;
+        }
+        NSString* bundle_id = [NSString stringWithUTF8String:bundle_id_utf8];
+        CGRect bounds = CGRectZero;
+        pid_t owner_pid = 0;
+        int result = resolve_target_window(window_id, bundle_id, &bounds, &owner_pid);
+        if (result != 0) {
+            return result;
+        }
+        if (output_x) *output_x = bounds.origin.x;
+        if (output_y) *output_y = bounds.origin.y;
+        if (output_width) *output_width = bounds.size.width;
+        if (output_height) *output_height = bounds.size.height;
+        if (output_pid) *output_pid = owner_pid;
+        return 0;
+    }
+}
+
+extern "C" int MaaMHXYClickScreenPoint(
+    uint32_t window_id,
+    const char* bundle_id_utf8,
+    double screen_x,
+    double screen_y,
+    double* output_x,
+    double* output_y)
+{
+    @autoreleasepool {
+        if (!bundle_id_utf8 || !std::isfinite(screen_x) || !std::isfinite(screen_y)) {
+            return -1;
+        }
+        NSString* bundle_id = [NSString stringWithUTF8String:bundle_id_utf8];
+        CGRect bounds = CGRectZero;
+        pid_t owner_pid = 0;
+        int result = resolve_target_window(window_id, bundle_id, &bounds, &owner_pid);
+        if (result != 0) {
+            return result;
+        }
+        CGPoint point = CGPointMake(screen_x, screen_y);
+        if (!CGRectContainsPoint(bounds, point)) {
+            return -6;
+        }
+        int focus_result = focus_target_window(owner_pid, bounds);
+        if (focus_result != 0) {
+            return focus_result;
+        }
+
+        if (output_x) *output_x = point.x;
+        if (output_y) *output_y = point.y;
+        CGEventRef current_event = CGEventCreate(nullptr);
+        bool restore_cursor = current_event != nullptr;
+        CGPoint saved_position = current_event ? CGEventGetLocation(current_event) : CGPointZero;
+        if (current_event) CFRelease(current_event);
+
+        CGEventRef mouse_move = CGEventCreateMouseEvent(
+            nullptr, kCGEventMouseMoved, point, kCGMouseButtonLeft);
+        CGEventRef mouse_down = CGEventCreateMouseEvent(
+            nullptr, kCGEventLeftMouseDown, point, kCGMouseButtonLeft);
+        CGEventRef mouse_up = CGEventCreateMouseEvent(
+            nullptr, kCGEventLeftMouseUp, point, kCGMouseButtonLeft);
+        if (!mouse_move || !mouse_down || !mouse_up) {
+            if (mouse_move) CFRelease(mouse_move);
+            if (mouse_down) CFRelease(mouse_down);
+            if (mouse_up) CFRelease(mouse_up);
+            return -5;
+        }
+        CGEventSetIntegerValueField(mouse_down, kCGMouseEventClickState, 1);
+        CGEventSetIntegerValueField(mouse_up, kCGMouseEventClickState, 1);
+        CGEventPost(kCGHIDEventTap, mouse_move);
+        CGEventPost(kCGHIDEventTap, mouse_down);
+        usleep(50000);
+        CGEventPost(kCGHIDEventTap, mouse_up);
+        CFRelease(mouse_move);
+        CFRelease(mouse_down);
+        CFRelease(mouse_up);
+        usleep(180000);
+        if (restore_cursor) {
+            CGWarpMouseCursorPosition(saved_position);
+        }
+        return 0;
+    }
+}
+
+extern "C" int MaaMHXYDragScreenPoints(
+    uint32_t window_id,
+    const char* bundle_id_utf8,
+    double from_x,
+    double from_y,
+    double to_x,
+    double to_y)
+{
+    @autoreleasepool {
+        if (!bundle_id_utf8
+            || !std::isfinite(from_x) || !std::isfinite(from_y)
+            || !std::isfinite(to_x) || !std::isfinite(to_y)) {
+            return -1;
+        }
+        NSString* bundle_id = [NSString stringWithUTF8String:bundle_id_utf8];
+        CGRect bounds = CGRectZero;
+        pid_t owner_pid = 0;
+        int result = resolve_target_window(window_id, bundle_id, &bounds, &owner_pid);
+        if (result != 0) {
+            return result;
+        }
+        CGPoint from = CGPointMake(from_x, from_y);
+        CGPoint to = CGPointMake(to_x, to_y);
+        if (!CGRectContainsPoint(bounds, from) || !CGRectContainsPoint(bounds, to)) {
+            return -6;
+        }
+        int focus_result = focus_target_window(owner_pid, bounds);
+        if (focus_result != 0) {
+            return focus_result;
+        }
+
+        CGEventRef mouse_down = CGEventCreateMouseEvent(
+            nullptr, kCGEventLeftMouseDown, from, kCGMouseButtonLeft);
+        CGEventRef mouse_drag = CGEventCreateMouseEvent(
+            nullptr, kCGEventLeftMouseDragged, to, kCGMouseButtonLeft);
+        CGEventRef mouse_up = CGEventCreateMouseEvent(
+            nullptr, kCGEventLeftMouseUp, to, kCGMouseButtonLeft);
+        if (!mouse_down || !mouse_drag || !mouse_up) {
+            if (mouse_down) CFRelease(mouse_down);
+            if (mouse_drag) CFRelease(mouse_drag);
+            if (mouse_up) CFRelease(mouse_up);
+            return -5;
+        }
+        CGEventPost(kCGHIDEventTap, mouse_down);
+        usleep(80000);
+        CGEventPost(kCGHIDEventTap, mouse_drag);
+        usleep(180000);
+        CGEventPost(kCGHIDEventTap, mouse_up);
+        CFRelease(mouse_down);
+        CFRelease(mouse_drag);
+        CFRelease(mouse_up);
+        return 0;
+    }
+}
+
 extern "C" int MaaMHXYClickWindow(
     uint32_t window_id,
     const char* bundle_id_utf8,
@@ -139,11 +371,10 @@ extern "C" int MaaMHXYClickWindow(
         if (resolve_result != 0) {
             return resolve_result;
         }
-        NSRunningApplication* application =
-            [NSRunningApplication runningApplicationWithProcessIdentifier:owner_pid];
-
-        [application activateWithOptions:NSApplicationActivateAllWindows];
-        usleep(80000);
+        int focus_result = focus_target_window(owner_pid, best_bounds);
+        if (focus_result != 0) {
+            return focus_result;
+        }
 
         double normalized_x = std::clamp(source_x / source_width, 0.0, 1.0);
         double normalized_y = std::clamp(source_y / source_height, 0.0, 1.0);
@@ -230,11 +461,10 @@ extern "C" int MaaMHXYDragWindow(
         if (resolve_result != 0) {
             return resolve_result;
         }
-        NSRunningApplication* application =
-            [NSRunningApplication runningApplicationWithProcessIdentifier:owner_pid];
-
-        [application activateWithOptions:NSApplicationActivateAllWindows];
-        usleep(80000);
+        int focus_result = focus_target_window(owner_pid, best_bounds);
+        if (focus_result != 0) {
+            return focus_result;
+        }
 
         auto map_point = [&](double x, double y) {
             constexpr double title_bar_height = 28.0;

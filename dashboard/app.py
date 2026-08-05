@@ -20,7 +20,7 @@ from .game_data_contract import LOCAL_PRIMARY_TARGET_ID
 from .metrics import capture_visible_metrics
 from .registry import task_list
 from .runner import RunnerManager
-from .system import inspect_macos, launch_game
+from .system import inspect_macos, launch_game, open_system_settings
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -111,6 +111,15 @@ def create_app(database_path: Path | None = None) -> FastAPI:
         })
         return state
 
+    @app.post("/api/system/settings/{section}", status_code=202)
+    async def open_settings(section: str):
+        try:
+            return await asyncio.to_thread(open_system_settings, section)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
     @app.get("/api/tasks")
     def tasks():
         completions = database.today_task_completions()
@@ -164,6 +173,10 @@ def create_app(database_path: Path | None = None) -> FastAPI:
     @app.get("/api/runs")
     def runs(limit: int = Query(20, ge=1, le=200)):
         return {"items": database.recent_runs(limit), "summary": database.summary()}
+
+    @app.get("/api/runs/{run_id}/events")
+    def run_events(run_id: str, limit: int = Query(200, ge=1, le=300)):
+        return {"items": database.events_for_run(run_id, limit)}
 
     @app.get("/api/metrics")
     def metrics(

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from tools.run_shimen_macos import MAX_DAILY_LOADING_POLLS, run
-from tools.shimen_macos_core import classify_shimen_scene
+from tools.shimen_recognition import classify_shimen_scene
 
 
 def text(value, box=(10, 20, 80, 24)):
@@ -148,6 +148,46 @@ class ShimenSceneTests(unittest.TestCase):
         self.assertEqual(decision["status"], "start_task")
         self.assertEqual(decision["box"], [830, 180, 147, 18])
 
+    def test_current_claim_today_sidebar_is_preaccept_not_completion(self):
+        instruction = text("领取今天师门任务", (828, 175, 133, 21))
+        decision = classify_shimen_scene(
+            [
+                text("师门任务", (829, 150, 74, 19)),
+                instruction,
+            ],
+            {},
+            (1020, 718),
+        )
+
+        self.assertEqual(
+            decision,
+            {"status": "start_task", "box": instruction["box"]},
+        )
+
+    def test_ten_of_ten_final_assessment_is_a_distinct_bounded_action(self):
+        instruction = text("去找师父接受最后的考核", (830, 180, 160, 22))
+        decision = classify_shimen_scene(
+            [
+                text("师门-三界游历（10/10）", (830, 150, 175, 22)),
+                instruction,
+            ],
+            {},
+            (1020, 718),
+        )
+        self.assertEqual(
+            decision,
+            {"status": "final_assessment", "box": instruction["box"]},
+        )
+
+    def test_bare_sidebar_header_is_not_treated_as_active_task(self):
+        decision = classify_shimen_scene(
+            [text("师门任务", (829, 150, 74, 19))],
+            {},
+            (1020, 718),
+        )
+
+        self.assertNotEqual(decision["status"], "continue_task")
+
     def test_current_item_collection_dialogue_precedes_sidebar_start(self):
         decision = classify_shimen_scene(
             [
@@ -220,10 +260,10 @@ class ShimenRunnerTests(unittest.TestCase):
             ),
             scene(
                 [
-                    text("师门集物", (831, 142, 74, 18)),
-                    text("向师父领取集物任务", (831, 167, 145, 15)),
+                    text("师门-玄妙法术（1/10）", (831, 142, 171, 18)),
                 ]
             ),
+            scene([text("今日师门任务已完成")]),
         ]
         args = SimpleNamespace(inspect_scene=False, recognize_only=False, max_steps=6)
 
@@ -234,43 +274,125 @@ class ShimenRunnerTests(unittest.TestCase):
             runtime.click_box.call_args_list[0].args[0], [773, 519, 184, 22]
         )
         self.assertEqual(
-            runtime.click_box.call_args_list[1].args[0], [831, 167, 145, 15]
+            runtime.click_box.call_args_list[1].args[0], [831, 142, 171, 18]
         )
-        self.assertEqual(runtime.read_scene.call_count, 2)
+        self.assertEqual(runtime.read_scene.call_count, 3)
 
     @patch("tools.run_shimen_macos.MacOSTaskRuntime")
-    def test_existing_sidebar_task_is_clicked_once_then_handed_off(self, runtime_class):
+    def test_preaccept_sidebar_does_not_finish_before_dialogue(self, runtime_class):
         runtime = runtime_class.return_value
-        runtime.read_scene.return_value = scene(
-            [text("师门任务", (830, 180, 130, 28))]
-        )
+        runtime.read_scene.side_effect = [
+            scene([
+                text("师门任务", (829, 150, 74, 19)),
+                text("领取今天师门任务", (828, 175, 133, 21)),
+            ]),
+            scene(templates={"auto_pathing": (450, 620, 120, 30)}),
+            scene([text("师门巡逻-巡查长安", (773, 519, 184, 22))]),
+            scene([text("师门-巡逻（1/10）", (830, 180, 150, 28))]),
+            scene([text("今日师门任务已完成")]),
+        ]
         args = SimpleNamespace(inspect_scene=False, recognize_only=False, max_steps=8)
         output = io.StringIO()
 
         with redirect_stdout(output):
             self.assertEqual(run(args, Mock()), 0)
 
-        runtime.click_box.assert_called_once()
-        self.assertEqual(runtime.read_scene.call_count, 1)
+        self.assertEqual(runtime.click_box.call_count, 3)
+        self.assertEqual(runtime.read_scene.call_count, 5)
         result = next(
             json.loads(line[len("result_json="):])
             for line in output.getvalue().splitlines()
             if line.startswith("result_json=")
         )
         self.assertEqual(result["status"], "completed")
-        self.assertIn("后续由游戏自动完成", result["reason"])
+        self.assertNotIn("reason", result)
 
     @patch("tools.run_shimen_macos.MacOSTaskRuntime")
-    def test_sidebar_task_never_receives_a_second_click(self, runtime_class):
+    def test_active_sidebar_click_continues_observing_until_completion(self, runtime_class):
         runtime = runtime_class.return_value
-        runtime.read_scene.return_value = scene(
-            [text("师门-巡逻", (830, 180, 130, 28))]
-        )
+        runtime.read_scene.side_effect = [
+            scene([text("师门-巡逻", (830, 180, 130, 28))]),
+            scene(templates={"auto_pathing": (450, 620, 120, 30)}),
+            scene([text("师门任务全部完成")]),
+        ]
         args = SimpleNamespace(inspect_scene=False, recognize_only=False, max_steps=5)
 
         self.assertEqual(run(args, Mock()), 0)
         runtime.click_box.assert_called_once()
-        self.assertEqual(runtime.read_scene.call_count, 1)
+        self.assertEqual(runtime.read_scene.call_count, 3)
+
+    @patch("tools.run_shimen_macos.MacOSTaskRuntime")
+    def test_handoff_makes_following_sidebar_and_progress_read_only(self, runtime_class):
+        runtime = runtime_class.return_value
+        runtime.read_scene.return_value = scene()
+        decisions = [
+            {"status": "continue_task", "box": [830, 180, 130, 28]},
+            {"status": "continue_task", "box": [830, 180, 130, 28]},
+            {"status": "progress_task", "box": [500, 410, 100, 30]},
+            {"status": "completed"},
+        ]
+        args = SimpleNamespace(inspect_scene=False, recognize_only=False, max_steps=6)
+
+        with patch("tools.run_shimen_macos.classify_shimen_scene", side_effect=decisions):
+            self.assertEqual(run(args, Mock()), 0)
+
+        runtime.click_box.assert_called_once()
+        self.assertEqual(runtime.click_box.call_args.args[0], [830, 180, 130, 28])
+
+    @patch("tools.run_shimen_macos.MacOSTaskRuntime")
+    def test_active_task_disappearance_on_stable_main_completes(self, runtime_class):
+        runtime = runtime_class.return_value
+        runtime.read_scene.return_value = scene()
+        decisions = [
+            {"status": "continue_task", "box": [830, 180, 130, 28]},
+            {"status": "wait", "reason": "auto_pathing"},
+            *[
+                {"status": "open_activity", "box": [260, 45, 50, 22]}
+                for _ in range(5)
+            ],
+        ]
+        args = SimpleNamespace(
+            inspect_scene=False,
+            recognize_only=False,
+            max_steps=len(decisions),
+        )
+        output = io.StringIO()
+
+        with patch(
+            "tools.run_shimen_macos.classify_shimen_scene",
+            side_effect=decisions,
+        ), redirect_stdout(output):
+            self.assertEqual(run(args, Mock()), 0)
+
+        runtime.click_box.assert_called_once()
+        result = next(
+            json.loads(line[len("result_json="):])
+            for line in output.getvalue().splitlines()
+            if line.startswith("result_json=")
+        )
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(
+            result["completionEvidence"],
+            "stable_main_after_task_disappeared",
+        )
+
+    @patch("tools.run_shimen_macos.MacOSTaskRuntime")
+    def test_handoff_allows_one_explicit_final_assessment_click(self, runtime_class):
+        runtime = runtime_class.return_value
+        runtime.read_scene.return_value = scene()
+        decisions = [
+            {"status": "continue_task", "box": [830, 180, 130, 28]},
+            {"status": "final_assessment", "box": [830, 180, 160, 22]},
+            {"status": "final_assessment", "box": [830, 180, 160, 22]},
+            {"status": "completed"},
+        ]
+        args = SimpleNamespace(inspect_scene=False, recognize_only=False, max_steps=6)
+
+        with patch("tools.run_shimen_macos.classify_shimen_scene", side_effect=decisions):
+            self.assertEqual(run(args, Mock()), 0)
+
+        self.assertEqual(runtime.click_box.call_count, 2)
+        self.assertEqual(runtime.click_box.call_args.args[0], [830, 180, 160, 22])
 
     @patch("tools.run_shimen_macos.MacOSTaskRuntime")
     def test_repeated_five_step_navigation_cycle_stops_early(self, runtime_class):
@@ -307,12 +429,13 @@ class ShimenRunnerTests(unittest.TestCase):
             *[scene([daily_tab]) for _ in range(MAX_DAILY_LOADING_POLLS)],
             scene(full_page),
             scene(full_page),
-            scene([text("师门任务", (830, 180, 130, 28))]),
+            scene([text("师门-巡逻", (830, 180, 130, 28))]),
+            scene([text("师门任务全部完成")]),
         ]
         args = SimpleNamespace(
             inspect_scene=False,
             recognize_only=False,
-            max_steps=MAX_DAILY_LOADING_POLLS + 5,
+            max_steps=MAX_DAILY_LOADING_POLLS + 6,
         )
 
         self.assertEqual(run(args, Mock()), 0)

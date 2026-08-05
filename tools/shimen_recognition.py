@@ -1,4 +1,4 @@
-"""Pure scene classification for the low-risk macOS 师门 workflow."""
+"""Platform-neutral scene classification for the low-risk 师门 workflow."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ try:
         in_region,
         valid_box,
     )
-except ImportError:  # Direct execution through tools/run_shimen_macos.py.
+except ImportError:  # Direct execution through a platform runner.
     from daily_activity_navigation_core import (
         classify_daily_navigation,
         find_items,
@@ -93,7 +93,10 @@ def classify_shimen_scene(
 
     sidebar_instructions = [
         item
-        for item in find_items(texts, r"向师父领取.{0,12}任务")
+        for item in find_items(
+            texts,
+            r"(?:向师父领取.{0,12}任务|领取今天师门任务)",
+        )
         if in_region(item, image_size, min_x=0.78, min_y=0.1, max_y=0.48)
     ]
     if sidebar_instructions:
@@ -110,9 +113,25 @@ def classify_shimen_scene(
             "box": valid_box(sidebar_continue_instructions[0]),
         }
 
+    final_assessment_progress = [
+        item
+        for item in find_items(texts, r"师门\s*[-－].*\(10/10\)")
+        if in_region(item, image_size, min_x=0.78, min_y=0.1, max_y=0.48)
+    ]
+    final_assessment_instructions = [
+        item
+        for item in find_items(texts, r".*(?:师父|师傅).*最后.*考.*")
+        if in_region(item, image_size, min_x=0.78, min_y=0.1, max_y=0.48)
+    ]
+    if final_assessment_progress and final_assessment_instructions:
+        return {
+            "status": "final_assessment",
+            "box": valid_box(final_assessment_instructions[0]),
+        }
+
     sidebar_details = [
         item
-        for item in find_items(texts, r"师门任务|师门.{0,24}")
+        for item in find_items(texts, r"师门\s*[-－].+")
         if in_region(item, image_size, min_x=0.78, min_y=0.1, max_y=0.48)
     ]
     if sidebar_details:

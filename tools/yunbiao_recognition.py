@@ -1,4 +1,4 @@
-"""Pure scene classification for the bounded macOS 普通运镖 workflow."""
+"""Platform-neutral scene classification for the bounded 普通运镖 workflow."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ try:
         in_region,
         valid_box,
     )
-except ImportError:  # Direct execution through tools/run_yunbiao_macos.py.
+except ImportError:  # Direct execution through a platform runner.
     from daily_activity_navigation_core import (
         classify_daily_navigation,
         find_items,

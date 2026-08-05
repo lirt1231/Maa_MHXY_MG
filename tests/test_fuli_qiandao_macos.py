@@ -5,7 +5,7 @@ from contextlib import redirect_stdout
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from tools.fuli_qiandao_macos_core import (
+from tools.fuli_qiandao_recognition import (
     classify_welfare_scene,
     completed_scratch_page,
     scratch_box_from_ocr,
@@ -15,6 +15,8 @@ from tools.fuli_qiandao_macos_core import (
 import tools.run_fuli_qiandao_macos as welfare_runner
 from tools.run_fuli_qiandao_macos import run
 from tools.macos_task_runtime import MacOSScene, MacOSTaskRuntime
+from tools.automation_calibration import CaptureSignature, CaptureStabilityGate
+from tools.macos_window_backend import CapturedFrame
 
 
 def text(value, box=(10, 20, 80, 30)):
@@ -358,6 +360,7 @@ class WelfareRunnerTests(unittest.TestCase):
     def test_read_only_modes_emit_only_preflight_protocol(self, runtime_class):
         runtime = runtime_class.return_value
         runtime.read_scene.return_value = scene([text("福利")])
+        runtime.inspection_evidence.return_value = {}
         guard = Mock()
 
         for inspect_scene, recognize_only in ((True, False), (False, True)):
@@ -433,7 +436,24 @@ class MacOSTaskRuntimeInputTests(unittest.TestCase):
         self.runtime.native_input = Mock()
         self.runtime.target_id = "local-primary"
         self.runtime.window_id = 42
-        self.scene = MacOSScene((1020, 718), [], {})
+        signature = CaptureSignature(
+            source="maa",
+            image_size=(1020, 718),
+            source_size=(1020, 718),
+            content_rect=(0, 0, 1020, 718),
+        )
+        self.runtime.capture_gate = CaptureStabilityGate()
+        self.runtime.capture_gate.observe(signature)
+        self.frame = CapturedFrame(
+            image=Mock(),
+            signature=signature,
+            window_bounds_points=(100.0, 50.0, 1020.0, 746.0),
+            content_rect_points=(100.0, 78.0, 1020.0, 718.0),
+            scale_factor=1.0,
+            capture_method="maa",
+        )
+        self.runtime.backend = Mock(last_frame=self.frame)
+        self.scene = MacOSScene((1020, 718), [], {}, signature, self.frame)
 
     def test_click_rejects_out_of_bounds_evidence(self):
         with self.assertRaisesRegex(RuntimeError, "超出当前画面"):
@@ -452,18 +472,64 @@ class MacOSTaskRuntimeInputTests(unittest.TestCase):
             self.runtime.drag((10, 20), (1020, 30), self.scene, "测试拖动")
         self.runtime.guard.perform_input.assert_not_called()
 
+    def test_inspection_evidence_predicts_recognized_box_center_without_input(self):
+        self.runtime.backend.preview_point.return_value = (350.0, 238.0)
+
+        evidence = self.runtime.inspection_evidence(
+            self.scene,
+            {"status": "open_activity", "box": [200, 100, 100, 40]},
+        )
+
+        self.assertEqual(evidence["recognizedBoxCenterPixels"], [250, 120])
+        self.assertEqual(evidence["predictedScreenPoint"], [350.0, 238.0])
+        self.assertEqual(evidence["windowBoundsPoints"], [100.0, 50.0, 1020.0, 746.0])
+        self.assertEqual(evidence["contentRectPoints"], [100.0, 78.0, 1020.0, 718.0])
+        self.assertEqual(evidence["scaleFactor"], 1.0)
+        self.assertEqual(evidence["frameId"], self.frame.frame_id)
+        self.assertEqual(evidence["anchorValidation"], "pending")
+        self.runtime.backend.preview_point.assert_called_once_with(
+            [250, 120], self.frame
+        )
+        self.runtime.guard.perform_input.assert_not_called()
+
+    def test_inspection_evidence_without_box_has_no_predicted_point(self):
+        evidence = self.runtime.inspection_evidence(
+            self.scene,
+            {"status": "wait"},
+        )
+
+        self.assertNotIn("recognizedBoxCenterPixels", evidence)
+        self.assertNotIn("predictedScreenPoint", evidence)
+        self.runtime.backend.preview_point.assert_not_called()
+        self.runtime.guard.perform_input.assert_not_called()
+
+    def test_click_rejects_scene_from_an_older_capture(self):
+        newer = CapturedFrame(
+            image=Mock(),
+            signature=self.frame.signature,
+            window_bounds_points=self.frame.window_bounds_points,
+            content_rect_points=self.frame.content_rect_points,
+            scale_factor=1.0,
+            capture_method="maa",
+        )
+        self.runtime.backend.last_frame = newer
+
+        with self.assertRaisesRegex(RuntimeError, "不是最新截图"):
+            self.runtime.click((100, 120), self.scene, "测试点击")
+
+        self.runtime.guard.perform_input.assert_not_called()
+
     @patch("tools.macos_task_runtime.log_event")
     def test_click_uses_bound_target_and_logs_identity(self, log_event):
-        self.runtime.guard.perform_input.return_value = (300.0, 240.0)
+        self.runtime.backend.click.return_value = (300.0, 240.0)
 
         result = self.runtime.click((100, 120), self.scene, "测试点击")
 
         self.assertEqual(result, (300.0, 240.0))
-        self.runtime.guard.perform_input.assert_called_once_with(
-            self.runtime.native_input.click,
-            100,
-            120,
-            (1020, 718),
+        self.runtime.backend.click.assert_called_once_with(
+            (100, 120),
+            self.frame,
+            self.runtime.guard,
         )
         log_event.assert_called_once_with(
             "click",
@@ -472,6 +538,8 @@ class MacOSTaskRuntimeInputTests(unittest.TestCase):
             reason="测试点击",
             source=(100, 120),
             screen=(300.0, 240.0),
+            frameId=self.frame.frame_id,
+            captureMethod="maa",
         )
 
 

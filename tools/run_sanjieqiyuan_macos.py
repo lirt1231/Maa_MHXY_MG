@@ -4,19 +4,14 @@
 from __future__ import annotations
 
 import argparse
-import ctypes
-import hashlib
 import json
 import os
-import subprocess
 import sys
-import tempfile
 import time
 import re
 from pathlib import Path
 
 import numpy as np
-from PIL import Image
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,12 +27,39 @@ from maa.pipeline import JOCR, JTemplateMatch  # noqa: E402
 from maa.resource import Resource  # noqa: E402
 from maa.tasker import Tasker  # noqa: E402
 from maa.toolkit import Toolkit  # noqa: E402
-from daily_activity_scroll import DailyActivityScrollAction  # noqa: E402
 from daily_schedule_macos_core import daily_schedule_page_evidence  # noqa: E402
-from macos_cancellation import CancellationGuard, CancellationRequested  # noqa: E402
+from daily_activity_navigation_core import ACTIVITY_UNAVAILABLE_PATTERN  # noqa: E402
+from automation_workflows import WorkflowContext, WorkflowInspection  # noqa: E402
+from macos_quiz_adapter import MacOSQuizInputAdapter, MacOSQuizScene  # noqa: E402
+from quiz_workflows import QuizObservation  # noqa: E402
+from sanjieqiyuan_workflow import (  # noqa: E402
+    SanjieNavigationWorkflow,
+    SanjieqiyuanWorkflow,
+    advance_question_count,
+)
+from sanjieqiyuan_recognition import find_unique_answer_match  # noqa: E402
+try:  # noqa: E402
+    from .macos_cancellation import CancellationGuard, CancellationRequested
+    from .macos_window_adapter import (
+        CapturedFrame,
+        NativeMacOSInput,
+        SYSTEM_CAPTURE_SIZE,
+        WindowCapture,
+        system_window_capture,
+        system_window_capture_frame,
+    )
+except ImportError:  # Direct execution through tools/run_sanjieqiyuan_macos.py.
+    from macos_cancellation import CancellationGuard, CancellationRequested
+    from macos_window_adapter import (
+        CapturedFrame,
+        NativeMacOSInput,
+        SYSTEM_CAPTURE_SIZE,
+        WindowCapture,
+        system_window_capture,
+        system_window_capture_frame,
+    )
 
 
-SYSTEM_CAPTURE_SIZE = (1020, 718)
 RESULT_PREFIX = "result_json="
 SUCCESS_RESULT_STATUSES = {"completed", "already_completed", "limit_reached"}
 MAX_NAVIGATION_INPUTS = 12
@@ -57,60 +79,6 @@ def emit_result(status: str, **payload) -> None:
         flush=True,
     )
 
-
-def system_window_capture(window_id: int) -> np.ndarray:
-    """Capture only the game window without relying on Maa ScreenCaptureKit."""
-    with tempfile.TemporaryDirectory() as directory:
-        output = Path(directory) / "window.png"
-        completed = subprocess.run(
-            ["/usr/sbin/screencapture", "-x", "-l", str(window_id), str(output)],
-            capture_output=True,
-            check=False,
-            timeout=10,
-        )
-        if completed.returncode != 0:
-            raise RuntimeError("游戏窗口截图失败，请检查屏幕录制权限和窗口可见性")
-        image = Image.open(output).convert("RGB")
-        raw = np.asarray(image)
-        visible = raw.max(axis=2) > 20
-        ys, xs = np.where(visible)
-        if not len(xs):
-            raise RuntimeError("游戏窗口截图为空，请确认窗口未最小化且完整可见")
-        pixel_scale = 2 if image.width >= 1600 else 1
-        left, right = int(xs.min()), int(xs.max()) + 1
-        top = min(int(ys.max()), int(ys.min()) + 24 * pixel_scale)
-        bottom = int(ys.max()) + 1
-        content = image.crop((left, top, right, bottom)).resize(SYSTEM_CAPTURE_SIZE)
-        return np.asarray(content)[:, :, ::-1].copy()
-
-
-class WindowCapture:
-    """Use Maa when available, then keep a stable system-capture fallback."""
-
-    def __init__(self, controller, window_id, fallback=system_window_capture):
-        self.controller = controller
-        self.window_id = window_id
-        self.fallback = fallback
-        self.maa_available = True
-
-    def capture(self, guard):
-        guard.checkpoint()
-        if self.maa_available:
-            try:
-                job = self.controller.post_screencap().wait()
-                guard.checkpoint()
-                image = job.get()
-                if image is None or image.size == 0:
-                    raise RuntimeError("Maa 截图为空")
-                return image
-            except CancellationRequested:
-                raise
-            except Exception as exc:
-                self.maa_available = False
-                print(f"screencap_fallback=system reason={exc}", flush=True)
-        image = self.fallback(self.window_id)
-        guard.checkpoint()
-        return image
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -319,6 +287,16 @@ def classify_scene(scene, *, daily_tab_confirmed=False):
                 "status": "click_join",
                 "click": _center(same_row_join[0]),
             }
+        unavailable = [
+            candidate
+            for candidate in matching(ACTIVITY_UNAVAILABLE_PATTERN)
+            if _same_activity_card(item, candidate, scene["image_size"])
+        ]
+        if unavailable:
+            return {
+                "status": "unavailable",
+                "reason": unavailable[0]["text"],
+            }
         return {
             "status": "scroll_daily",
             "reason": "target_action_not_visible",
@@ -375,20 +353,15 @@ def perform_click(controller, native_input, point, image_size, guard):
     return point
 
 
-def stable_answer_click(point, image_size):
-    """Move a macOS answer-label hit into the same card's portrait body."""
+def stable_answer_click(point, image_size, question=""):
+    """Choose a reliable hit area for the current macOS answer card."""
     x, y = point
+    if str(question).strip().startswith("找出"):
+        return x, y
     width, height = image_size
     if width / height < 1.5 and height * 0.48 <= y <= height * 0.60:
         return x, round(y - height * 0.22)
     return x, y
-
-
-def advance_question_count(current_question, next_question, completed_questions):
-    """Count completed questions, not individual choices in multi-select questions."""
-    if current_question and next_question != current_question:
-        completed_questions += 1
-    return next_question, completed_questions
 
 
 def recognize_answer(
@@ -433,7 +406,15 @@ def recognize_answer(
         key=lambda item: (round(item.box[1] / 10), item.box[0]),
     )
     question_text = "".join(item.text for item in results if item.text).strip()
-    question_key = stable_question_key(question_text)
+    question_number_match = re.search(r"第\s*(\d+)\s*题", question_text)
+    question_number = (
+        int(question_number_match.group(1)) if question_number_match else None
+    )
+    question_key = (
+        f"第{question_number}题"
+        if question_number is not None
+        else stable_question_key(question_text)
+    )
     question = re.sub(r"第\d+题：|[（(]\d+/\d+[）)]", "", question_text).strip()
     answers, confidence, _ = SearchQuestions(question)
     candidates = parse_answer_candidates(answers)
@@ -442,6 +423,7 @@ def recognize_answer(
             "status": "low_confidence",
             "question": question,
             "question_key": question_key,
+            "question_number": question_number,
             "confidence": confidence,
         }
 
@@ -452,6 +434,7 @@ def recognize_answer(
             "status": "awaiting_transition",
             "question": question,
             "question_key": question_key,
+            "question_number": question_number,
             "candidates": candidates,
             "confidence": confidence,
         }
@@ -463,127 +446,155 @@ def recognize_answer(
             expected=remaining_candidates,
             roi=tuple(answer_roi),
             threshold=0.7,
-            replace=[["屍", "尸"], ["殭", "僵"]],
+            replace=[
+                ["屍", "尸"],
+                ["殭", "僵"],
+                ["戶", "户"],
+                ["僵户", "僵尸"],
+            ],
         ),
         image,
         guard,
     )
-    if answer_detail is None or not answer_detail.hit:
+    answer_match = None
+    if answer_detail is not None and answer_detail.hit:
+        answer_match = find_unique_answer_match(
+            [answer_detail.best_result],
+            remaining_candidates,
+            answer_roi,
+        )
+    elif answer_detail is not None:
+        answer_match = find_unique_answer_match(
+            getattr(answer_detail, "all_results", ()),
+            remaining_candidates,
+            answer_roi,
+        )
+    if answer_match is None:
         return {
             "status": "answer_not_found",
             "question": question,
             "question_key": question_key,
+            "question_number": question_number,
             "candidates": remaining_candidates,
             "confidence": confidence,
         }
-    x, y, width, height = answer_detail.box
-    matched_answer = answer_detail.best_result.text.strip()
-    if matched_answer not in remaining_candidates:
-        matched_answer = remaining_candidates[0]
+    x, y, width, height = answer_match.box
     return {
         "status": "ready",
         "question": question,
         "question_key": question_key,
+        "question_number": question_number,
         "click": (x + width // 2, y + height // 2),
         "image_size": (image.shape[1], image.shape[0]),
         "candidates": candidates,
-        "answer": matched_answer,
+        "answer": answer_match.candidate,
         "confidence": confidence,
     }
+
+
+class SanjieMacOSObservationSource:
+    """Adapt explicit macOS screenshots to the platform-neutral quiz contract."""
+
+    def __init__(self, tasker, capture, guard):
+        self.tasker = tasker
+        self.capture = capture
+        self.guard = guard
+
+    def observe(self, selected_question_key=None, selected_answers=frozenset()):
+        image = self.capture.capture(self.guard)
+        decision = dict(
+            recognize_answer(
+                self.tasker,
+                image,
+                self.guard,
+                selected_question_key,
+                selected_answers,
+            )
+        )
+        image_size = tuple(
+            decision.get("image_size") or (image.shape[1], image.shape[0])
+        )
+        if decision.get("status") == "ready":
+            decision["recognized_click"] = decision["click"]
+            decision["click"] = stable_answer_click(
+                decision["click"],
+                image_size,
+                decision.get("question", ""),
+            )
+        return QuizObservation(MacOSQuizScene(image_size), decision)
 
 
 def navigate_to_exam(tasker, controller, capture, native_input, timeout, guard):
     """Navigate by fresh OCR evidence until answer, completion, or a safe stop."""
     deadline = time.monotonic() + timeout
-    daily_selected = False
-    daily_scroller = DailyActivityScrollAction()
-    battle_return_attempts = 0
-    navigation_inputs = 0
-    action_counts = {}
-    while time.monotonic() < deadline:
-        guard.checkpoint()
-        scene = read_scene(
-            tasker,
-            capture,
-            guard,
-            daily_tab_confirmed=daily_selected,
-        )
-        decision = scene["decision"]
-        status = decision["status"]
-        print(
-            "scene=" + json.dumps(decision, ensure_ascii=False),
-            flush=True,
-        )
-        if status == "answering":
-            return "answering"
-        if status in ("completed", "already_completed"):
-            return status
-        if status == "open_battle_menu":
-            if battle_return_attempts == 0:
-                battle_return_attempts = 1
-            elif battle_return_attempts == 1:
-                # The expanded battle shortcut menu is dark and OCR may miss
-                # its labels. The activity icon has a stable slot below the
-                # top row, so use it only after a freshly verified battle and
-                # one successful menu-open click.
-                width, height = scene["image_size"]
-                decision = {
-                    "status": "click_activity_side_menu",
-                    "click": [round(width * 0.038), round(height * 0.161)],
-                }
-                status = decision["status"]
-                battle_return_attempts = 2
-            else:
-                raise RuntimeError("战斗快捷菜单打开后仍无法进入活动界面")
-        if status == "scroll_daily" or (status == "click_daily" and daily_selected):
-            if native_input is None:
-                raise RuntimeError("活动列表浏览要求 --input-method native")
-            step = daily_scroller.plan(scene.get("texts", []), scene["image_size"])
-            guard.perform_input(
-                native_input.drag,
-                step.start,
-                step.end,
-                scene["image_size"],
-            )
-            daily_selected = True
-            print(
-                f"navigation_scroll direction={step.direction} "
-                f"count={step.index} reason={step.reason}",
-                flush=True,
-            )
-            guard.wait(1.0)
-            continue
-        if "click" in decision:
-            signature = _navigation_action_signature(decision, scene["image_size"])
-            action_counts[signature] = action_counts.get(signature, 0) + 1
-            if action_counts[signature] > MAX_REPEATED_NAVIGATION_ACTIONS:
-                raise RuntimeError(
-                    f"检测到重复导航动作 {status}，已停止以避免死循环"
-                )
-            if navigation_inputs >= MAX_NAVIGATION_INPUTS:
-                raise RuntimeError("活动导航已达到输入上限，已停止以避免死循环")
-            screen_point = perform_click(
-                controller,
-                native_input,
-                decision["click"],
-                scene["image_size"],
+
+    class NavigationSource:
+        def observe(self, daily_tab_confirmed):
+            if time.monotonic() >= deadline:
+                raise TimeoutError("等待进入三界奇缘超时")
+            guard.checkpoint()
+            raw_scene = read_scene(
+                tasker,
+                capture,
                 guard,
+                daily_tab_confirmed=daily_tab_confirmed,
             )
-            navigation_inputs += 1
+            return QuizObservation(
+                MacOSQuizScene(
+                    tuple(raw_scene["image_size"]),
+                    list(raw_scene.get("texts", [])),
+                    {
+                        "battle": raw_scene.get("battle_box"),
+                        "activity_toolbar": raw_scene.get("activity_box"),
+                    },
+                ),
+                raw_scene["decision"],
+            )
+
+    def click_point(point, image_size, reason):
+        return perform_click(
+            controller,
+            native_input,
+            point,
+            image_size,
+            guard,
+        )
+
+    def drag_points(start, end, image_size, reason):
+        if native_input is None:
+            raise RuntimeError("活动列表浏览要求 --input-method native")
+        return guard.perform_input(native_input.drag, start, end, list(image_size))
+
+    def workflow_event(event, **payload):
+        if event == "navigation_scene":
             print(
-                f"navigation_click source={decision['click']} screen={screen_point}",
+                "scene=" + json.dumps(payload["decision"], ensure_ascii=False),
                 flush=True,
             )
-            if status == "click_daily":
-                daily_selected = True
-                daily_scroller.reset()
-            guard.wait(1.2)
-            continue
-        raise RuntimeError(
-            "当前画面没有足够证据执行安全点击："
-            + json.dumps(scene, ensure_ascii=False)
+        elif event == "navigation_action":
+            if payload["normalizedStatus"] == "scroll_daily":
+                print(
+                    f"navigation_scroll count={payload['drags']}",
+                    flush=True,
+                )
+            else:
+                print(
+                    f"navigation_click source={payload.get('source')}",
+                    flush=True,
+                )
+
+    outcome = SanjieNavigationWorkflow(
+        NavigationSource(),
+        max_inputs=MAX_NAVIGATION_INPUTS,
+        max_repeated_actions=MAX_REPEATED_NAVIGATION_ACTIONS,
+    ).execute(
+        WorkflowContext(
+            MacOSQuizInputAdapter(click_point, drag_points),
+            guard,
+            workflow_event,
         )
-    raise TimeoutError("等待进入三界奇缘超时")
+    )
+    return outcome.status
 
 
 def verify_answering_completion(tasker, capture, guard, attempts=3):
@@ -596,116 +607,6 @@ def verify_answering_completion(tasker, capture, guard, attempts=3):
         if attempt + 1 < attempts:
             guard.wait(0.5)
     return None
-
-
-class NativeMacOSInput:
-    """Point-aware macOS input for the iOS-wrapped client."""
-
-    def __init__(self, window_id=None):
-        source = ROOT / "tools/macos_window_input.mm"
-        digest = hashlib.sha256(source.read_bytes()).hexdigest()[:16]
-        library_path = Path(tempfile.gettempdir()) / f"libmaa_mhxy_input_{digest}.dylib"
-        if not library_path.exists():
-            subprocess.run(
-                [
-                    "xcrun",
-                    "clang++",
-                    "-std=c++17",
-                    "-fobjc-arc",
-                    "-dynamiclib",
-                    str(source),
-                    "-framework",
-                    "AppKit",
-                    "-framework",
-                    "ApplicationServices",
-                    "-framework",
-                    "CoreGraphics",
-                    "-framework",
-                    "Foundation",
-                    "-o",
-                    str(library_path),
-                ],
-                check=True,
-                cwd=ROOT,
-            )
-        self.library = ctypes.CDLL(str(library_path))
-        self.find_window_function = self.library.MaaMHXYFindWindow
-        self.find_window_function.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
-        self.find_window_function.restype = ctypes.c_uint32
-        self.click_function = self.library.MaaMHXYClickWindow
-        self.click_function.argtypes = [
-            ctypes.c_uint32,
-            ctypes.c_char_p,
-            ctypes.c_double,
-            ctypes.c_double,
-            ctypes.c_double,
-            ctypes.c_double,
-            ctypes.POINTER(ctypes.c_double),
-            ctypes.POINTER(ctypes.c_double),
-        ]
-        self.click_function.restype = ctypes.c_int
-        self.drag_function = self.library.MaaMHXYDragWindow
-        self.drag_function.argtypes = [
-            ctypes.c_uint32,
-            ctypes.c_char_p,
-            ctypes.c_double,
-            ctypes.c_double,
-            ctypes.c_double,
-            ctypes.c_double,
-            ctypes.c_double,
-            ctypes.c_double,
-        ]
-        self.drag_function.restype = ctypes.c_int
-        self.window_id = 0
-        if window_id is not None:
-            self.bind_window(window_id)
-
-    def find_window_id(self):
-        return int(self.find_window_function(b"com.netease.my", "梦幻西游".encode()))
-
-    def bind_window(self, window_id):
-        if isinstance(window_id, bool) or not isinstance(window_id, int) or window_id <= 0:
-            raise ValueError("原生输入需要有效的窗口编号")
-        self.window_id = window_id
-        return self.window_id
-
-    def _bound_window_id(self):
-        if not self.window_id:
-            # Compatibility for older task runners. Resolve once and keep the
-            # result so later input cannot silently switch to another window.
-            self.bind_window(self.find_window_id())
-        return self.window_id
-
-    def click(self, x, y, source_size):
-        output_x = ctypes.c_double()
-        output_y = ctypes.c_double()
-        result = self.click_function(
-            self._bound_window_id(),
-            b"com.netease.my",
-            float(x),
-            float(y),
-            float(source_size[0]),
-            float(source_size[1]),
-            ctypes.byref(output_x),
-            ctypes.byref(output_y),
-        )
-        if result != 0:
-            raise RuntimeError(f"原生窗口点击失败，错误码：{result}")
-        return output_x.value, output_y.value
-
-    def drag(self, from_point, to_point, source_size):
-        result = self.drag_function(
-            self._bound_window_id(),
-            b"com.netease.my",
-            float(from_point[0]),
-            float(from_point[1]),
-            float(to_point[0]),
-            float(to_point[1]),
-            float(source_size[0]),
-            float(source_size[1]),
-        )
-        if result != 0:
-            raise RuntimeError(f"原生窗口拖动失败，错误码：{result}")
 
 
 def main() -> int:
@@ -827,132 +728,77 @@ def run(guard: CancellationGuard, args=None) -> int:
             return 0
     else:
         print("entry_status=manual_answer_screen", flush=True)
-    current_question = None
-    selected_question_key = None
-    selected_answers = set()
-    completed_questions = 0
-    click_count = 0
-    unchanged_polls = 0
-    max_clicks = max(20, args.max_steps * 4)
-    while completed_questions < args.max_steps and click_count < max_clicks:
-        guard.checkpoint()
-        if click_count == 0:
-            guard.wait(1.5)
-        result = recognize_answer(
-            tasker,
-            capture.capture(guard),
+    source = SanjieMacOSObservationSource(tasker, capture, guard)
+
+    def click_answer(point, image_size, reason):
+        screen_point = perform_click(
+            controller,
+            native_input,
+            point,
+            image_size,
             guard,
-            selected_question_key,
-            selected_answers,
         )
-        status = result["status"]
-        question = result.get("question", "")
-        question_key = result.get("question_key", question)
         print(
-            f"click={click_count + 1} completed={completed_questions} "
-            f"status={status} question={question}",
+            f"answer_click reason={reason} source={point} screen={screen_point}",
             flush=True,
         )
-        if status == "finished":
-            questions = completed_questions + bool(current_question)
-            completion_status = verify_answering_completion(
-                tasker, capture, guard
-            )
-            if completion_status is None:
-                raise RuntimeError(
-                    "题目区域已消失，但未识别到三界奇缘完成状态，已安全停止"
-                )
-            print(
-                f"answering_complete questions={questions} "
-                f"clicks={click_count}",
-                flush=True,
-            )
-            emit_result(completion_status, questions=questions, clicks=click_count)
-            return 0
-        if status == "awaiting_transition":
-            unchanged_polls += 1
-            if unchanged_polls >= 6:
-                raise RuntimeError("本题答案已全部选择但题目持续未变化，已安全停止")
-            print(f"awaiting_question_transition retry={unchanged_polls}", flush=True)
-            guard.wait(0.5)
-            continue
-        unchanged_polls = 0
-        if status == "ready" and native_input is not None:
-            if question_key != selected_question_key:
-                selected_question_key = question_key
-                selected_answers = set()
-            current_question, completed_questions = advance_question_count(
-                current_question,
-                question,
-                completed_questions,
-            )
-            if completed_questions >= args.max_steps:
-                break
-            click_point = stable_answer_click(
-                result["click"],
-                result["image_size"],
-            )
-            if result["answer"] in selected_answers:
-                raise RuntimeError(
-                    f"检测到同一道题重复选择同一答案：{question}，已安全停止"
-                )
-            screen_point = guard.perform_input(
-                native_input.click,
-                *click_point,
-                result["image_size"],
-            )
-            selected_answers.add(result["answer"])
-            click_count += 1
-            print(
-                f"native_click source={result['click']} "
-                f"stable={click_point} screen={screen_point} "
-                f"answer={result['answer']}",
-                flush=True,
-            )
-            guard.wait(1.2)
-            continue
-        if status == "ready":
-            print(
-                "action_json="
-                + json.dumps(
-                    {
-                        "status": status,
-                        "question": question,
-                        "question_key": question_key,
-                        "click": result["click"],
-                        "image_size": result["image_size"],
-                    },
-                    ensure_ascii=False,
-                ),
-                flush=True,
-            )
-            break
-        if status == "low_confidence":
-            raise RuntimeError(
-                f"题库匹配度不足，停止答题：{question}（{result.get('confidence', 0)}%）"
-            )
-        if status == "answer_not_found":
-            raise RuntimeError(
-                f"题库答案未在当前选项中找到：{question}，候选：{result.get('candidates', [])}"
-            )
-        raise RuntimeError(f"三界奇缘进入未知识别状态：{status}")
+        return screen_point
 
-    if args.recognize_only:
+    def workflow_event(event, **payload):
+        if event == "quiz_observation":
+            print(
+                f"click={payload['clicks'] + 1} "
+                f"completed={payload['questions']} "
+                f"status={payload['status']} question={payload['question']}",
+                flush=True,
+            )
+        elif event == "answer_recognition_retry":
+            print(
+                f"answer_recognition_retry={payload['attempt']}/"
+                f"{payload['limit']} question={payload['question']}",
+                flush=True,
+            )
+
+    outcome = SanjieqiyuanWorkflow(
+        source,
+        lambda: verify_answering_completion(tasker, capture, guard),
+        max_questions=args.max_steps,
+    ).execute(
+        WorkflowContext(
+            MacOSQuizInputAdapter(click_answer),
+            guard,
+            workflow_event,
+        ),
+        preview=args.recognize_only,
+    )
+    if isinstance(outcome, WorkflowInspection):
+        print(
+            "action_json="
+            + json.dumps(
+                {
+                    **outcome.decision,
+                    "image_size": outcome.image_size,
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
         print("recognize_only_complete=true", flush=True)
         return 0
-    if click_count >= max_clicks:
-        raise RuntimeError(f"已执行 {click_count} 次选择但活动仍未完成，已停止以避免异常循环")
-    print(
-        f"question_limit_reached questions={completed_questions} clicks={click_count}",
-        flush=True,
-    )
-    emit_result(
-        "limit_reached",
-        questions=click_count,
-        clicks=click_count,
-        limit=args.max_steps,
-    )
 
+    if outcome.status in {"completed", "already_completed"}:
+        print(
+            f"answering_complete questions={outcome.payload['questions']} "
+            f"clicks={outcome.payload['clicks']}",
+            flush=True,
+        )
+    else:
+        print(
+            f"question_limit_reached questions={outcome.payload['questions']} "
+            f"clicks={outcome.payload['clicks']}",
+            flush=True,
+        )
+    emit_result(outcome.status, **outcome.payload)
     return 0
 
 

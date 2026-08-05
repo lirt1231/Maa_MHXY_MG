@@ -14,7 +14,7 @@ const task: Task = {
   steps: ["打开答题页"],
   checklist: ["窗口完整可见", "题目与选项可见"],
   warnings: ["低置信度时停止"],
-  parameters: [{ key: "maxSteps", label: "最多答题数", type: "integer", default: 20, minimum: 1, maximum: 30 }],
+  parameters: [{ key: "maxSteps", label: "最多答题数", type: "integer", default: 10, minimum: 1, maximum: 10 }],
   todayStatus: { status: "pending", completedAt: null, resultStatus: null },
 };
 
@@ -63,6 +63,39 @@ describe("TaskDialog", () => {
     expect(view.getByText("低置信度时停止", { exact: false })).toBeTruthy();
   });
 
+  it("shows the archaeology start screenshot and submits the selected tool mode", async () => {
+    const onStart = vi.fn().mockResolvedValue(undefined);
+    const archaeology: Task = {
+      ...task,
+      id: "kaogu",
+      name: "工坊考古",
+      parameters: [{
+        key: "toolMode", label: "工具方式", type: "select", default: "selected",
+        choices: [
+          { value: "selected", label: "使用游戏中已选工具（推荐）" },
+          { value: "luoyang_shovel", label: "自动选择洛阳铲（必要时购买）" },
+        ],
+      }],
+      guideImage: {
+        src: "/task-guides/kaogu-selected-tool-start.jpg",
+        alt: "工坊考古生产页，工具已选好且考古按钮可见",
+        caption: "从这个页面启动：先手动选好工具。",
+      },
+    };
+    const view = render(<TaskDialog
+      task={archaeology} busy={false} onClose={vi.fn()} onStart={onStart} onInspect={vi.fn()}
+    />);
+
+    const image = view.getByAltText(archaeology.guideImage!.alt) as HTMLImageElement;
+    expect(image.getAttribute("src")).toBe(archaeology.guideImage!.src);
+    expect(view.getByText(archaeology.guideImage!.caption)).toBeTruthy();
+    expect((view.getByRole("combobox") as HTMLSelectElement).value).toBe("selected");
+
+    fireEvent.click(view.getByLabelText("全选启动前检查"));
+    fireEvent.click(view.getByText("确认并启动"));
+    await waitFor(() => expect(onStart).toHaveBeenCalledWith({ toolMode: "selected" }));
+  });
+
   it("selects and clears every preflight check from the select-all control", () => {
     const view = render(<TaskDialog task={task} busy={false} onClose={() => undefined} onStart={vi.fn()} onInspect={vi.fn()} />);
     const selectAll = view.getByLabelText("全选启动前检查") as HTMLInputElement;
@@ -103,7 +136,7 @@ describe("TaskDialog", () => {
 
     fireEvent.click(view.getByText("检测当前画面"));
 
-    expect(onInspect).toHaveBeenCalledWith({ maxSteps: 20 });
+    expect(onInspect).toHaveBeenCalledWith({ maxSteps: 10 });
     expect(await view.findByText("可以启动")).toBeTruthy();
     expect(view.getByText("科举正式题目页")).toBeTruthy();
     expect(view.getByText("下一步：识别题目与选项后选择可靠答案")).toBeTruthy();
@@ -152,7 +185,14 @@ describe("TaskDialog", () => {
     const view = render(<TaskDialog task={task} busy={false} onClose={() => undefined} onStart={vi.fn()} onInspect={onInspect} />);
 
     fireEvent.click(view.getByText("检测当前画面"));
-    expect((await view.findByRole("alert")).textContent).toContain("画面检测超时");
+    const alert = await view.findByRole("alert");
+    expect(alert.textContent).toContain("没有检测到可用的游戏画面");
+    expect(alert.textContent).toContain("请将游戏窗口切到前台并关闭遮挡窗口");
+    const details = alert.querySelector("details") as HTMLDetailsElement;
+    expect(details.open).toBe(false);
+    expect(details.textContent).toContain("画面检测超时");
+    fireEvent.click(view.getByRole("button", { name: "重新检测" }));
+    await waitFor(() => expect(onInspect).toHaveBeenCalledTimes(2));
 
     view.rerender(<TaskDialog task={task} busy={true} onClose={() => undefined} onStart={vi.fn()} onInspect={onInspect} />);
     expect((view.getByText("检测当前画面") as HTMLButtonElement).disabled).toBe(true);

@@ -17,16 +17,17 @@ from utils import logger
 from .keju_answer_core import (
     VALID_CHOICES,
     build_verification_prompt,
+    infer_direct_evidence_option,
     knowledge_fallback,
     local_fallback,
     looks_like_answer_result,
     parse_model_decision,
+    resolve_model_decision,
     scale_roi,
-    validate_model_decision,
 )
 from .searchAnswer import search_candidates
 from .keju_knowledge import search_knowledge
-from .keju_web_search import search_web_evidence
+from .keju_web_search import clean_search_question, search_web_evidence
 
 
 if os.environ.get("MAA_DIRECT_RESOURCE") != "1":
@@ -170,6 +171,38 @@ def _sorted_ocr_text(results, row_height_threshold=20):
     return "".join(item.text for item in items)
 
 
+def _question_ocr_text(results):
+    """Drop tiny decorative OCR fragments before assembling the question area."""
+    items = []
+    for item in results:
+        text = unicodedata.normalize("NFKC", getattr(item, "text", "") or "")
+        compact_text = re.sub(r"\s+", "", text)
+        score = float(getattr(item, "score", 1.0))
+        if score < 0.6 and len(compact_text) <= 2:
+            continue
+        items.append(item)
+    return _sorted_ocr_text(items)
+
+
+def _clean_question_text(text):
+    """Remove live round/score metadata while preserving the actual question."""
+    text = unicodedata.normalize("NFKC", text or "")
+    text = re.sub(r"\s+", "", text)
+    round_match = re.search(
+        r"第\s*\d+(?:\s*/\s*\d+)?\s*题",
+        text,
+    )
+    if round_match:
+        text = text[round_match.end():]
+    for pattern in (
+        r"^正确率[:：]?\d+/\d+",
+        r"^当前得分[:：]?\d+",
+        r"^剩余时间[:：]?\d+",
+    ):
+        text = re.sub(pattern, "", text)
+    return text.strip("-—:：,，.。 ")
+
+
 def _ocr_region(context, image, name, scaled_roi):
     detail = context.run_recognition(
         name,
@@ -180,6 +213,8 @@ def _ocr_region(context, image, name, scaled_roi):
     )
     if not detail or not detail.hit:
         return ""
+    if name == "科举乡试题目-混合":
+        return _question_ocr_text(detail.all_results)
     return _sorted_ocr_text(detail.all_results)
 
 
@@ -249,12 +284,15 @@ def _request_model(url, api_key, model, prompt, timeout, extra_body=None):
         "messages": [
             {
                 "role": "system",
-                "content": "你是严谨的中文单选题答题助手，必须按要求返回 JSON。",
+                "content": (
+                    "你是严谨的中文单选题答题助手。检索证据明确时必须服从证据，"
+                    "并按要求返回包含引用和解释的 JSON。"
+                ),
             },
             {"role": "user", "content": prompt},
         ],
         "temperature": 0,
-        "max_tokens": 120,
+        "max_tokens": 220,
         "stream": False,
     }
     request_body.update(extra_body or {})
@@ -279,8 +317,9 @@ def _request_codex_model(prompt, timeout):
             "answer": {"type": "string", "enum": list(VALID_CHOICES)},
             "confidence": {"type": "number"},
             "evidence_ids": {"type": "array", "items": {"type": "string"}},
+            "reason": {"type": "string"},
         },
-        "required": ["answer", "confidence", "evidence_ids"],
+        "required": ["answer", "confidence", "evidence_ids", "reason"],
         "additionalProperties": False,
     }
     with tempfile.TemporaryDirectory(prefix="maa-keju-codex-") as temp_dir:
@@ -367,27 +406,38 @@ class KejuHybridAnswer(CustomRecognition):
             )
         question_roi, option_rois = keju_rois(image)
         with timings.track("ocr"):
-            question = _ocr_region(
+            raw_question = _ocr_region(
                 context, image, "科举乡试题目-混合", question_roi
             )
-        if not question:
+        if not raw_question:
             self.last_status = "no_question"
             return CustomRecognition.AnalyzeResult(
                 box=(0, 0, 0, 0), detail="未识别到科举题目"
             )
-        # 倒计时/活动说明页的装饰文字会落入同一 ROI。只有明确识别到
-        # “第 N/M 题”时才允许查库或调用模型，避免等待阶段浪费请求，
-        # 更重要的是杜绝把倒计时数字误当成选项后点击。
-        round_match = re.search(r"第\s*(\d+)\s*/\s*\d+\s*题", question)
-        if round_match and round_match.start() > 0:
-            question = question[round_match.start():]
-            round_match = re.match(r"第\s*(\d+)\s*/\s*\d+\s*题", question)
-        round_number = int(round_match.group(1)) if round_match else None
-        record_only_waiting = (
-            os.environ.get("MAA_KEJU_REQUIRE_ROUND_ONE") == "1"
-            and round_number != 1
+        # 题号和实时得分与题干位于同一块面板。题号用于流程控制，
+        # 但查库、联网检索和模型只接收清理后的实际题干。
+        round_match = re.search(
+            r"第\s*(\d+)(?:\s*/\s*(\d+))?\s*题",
+            raw_question,
         )
-
+        round_number = int(round_match.group(1)) if round_match else None
+        round_total = (
+            int(round_match.group(2))
+            if round_match and round_match.group(2)
+            else None
+        )
+        self.last_round_number = round_number
+        self.last_question_round = (
+            (round_number, round_total)
+            if round_number is not None and round_total is not None
+            else None
+        )
+        question = _clean_question_text(raw_question)
+        if not question:
+            self.last_status = "no_question"
+            return CustomRecognition.AnalyzeResult(
+                box=(0, 0, 0, 0), detail="未识别到科举题目正文"
+            )
         options = {}
         option_boxes = {}
         with timings.track("ocr"):
@@ -398,6 +448,16 @@ class KejuHybridAnswer(CustomRecognition):
                 options[choice] = _clean_option_text(choice, text)
                 option_boxes[choice] = box
         valid_options = {choice: text for choice, text in options.items() if text}
+        requires_round_one = os.environ.get("MAA_KEJU_REQUIRE_ROUND_ONE") == "1"
+        live_formal_without_round = (
+            round_number is None
+            and len(valid_options) == 4
+            and "剩余时间" in raw_question
+        )
+        if requires_round_one and (round_number == 1 or live_formal_without_round):
+            os.environ.pop("MAA_KEJU_REQUIRE_ROUND_ONE", None)
+            requires_round_one = False
+        record_only_waiting = requires_round_one and round_number != 1
         if len(valid_options) < 2:
             if round_number is None:
                 self.last_status = "waiting"
@@ -482,10 +542,11 @@ class KejuHybridAnswer(CustomRecognition):
                     box=tuple(target), detail=f"复用本轮答案:{cached_answer}"
                 )
 
+        retrieval_question = clean_search_question(question)
         with timings.track("local_question_bank"):
-            candidates = search_candidates(question, limit=3)
+            candidates = search_candidates(retrieval_question, limit=3)
         with timings.track("knowledge_base"):
-            knowledge_candidates = search_knowledge(question, limit=4)
+            knowledge_candidates = search_knowledge(retrieval_question, limit=4)
         node_data = context.get_node_data("活动-科举乡试-开始答题混合")
         attach = node_data.get("attach", {})
         api_key = os.environ.get("MAA_KEJU_API_KEY", "").strip() or str(
@@ -537,6 +598,7 @@ class KejuHybridAnswer(CustomRecognition):
 
         web_result = {
             "query": "",
+            "queries": [],
             "evidence": [],
             "providers": {},
             "elapsed_ms": 0,
@@ -553,13 +615,14 @@ class KejuHybridAnswer(CustomRecognition):
             provider_names = tuple(
                 name.strip()
                 for name in os.environ.get(
-                    "MAA_KEJU_WEB_SEARCH_PROVIDERS", "bing,so360"
+                    "MAA_KEJU_WEB_SEARCH_PROVIDERS", "duckduckgo,bing_rss"
                 ).split(",")
                 if name.strip()
             )
             with timings.track("web_search"):
                 web_result = search_web_evidence(
                     question,
+                    options=valid_options,
                     timeout=web_timeout,
                     limit_per_provider=web_limit,
                     provider_names=provider_names,
@@ -568,8 +631,10 @@ class KejuHybridAnswer(CustomRecognition):
         model_answer = None
         model_confidence = 0.0
         model_evidence_ids = []
+        model_reason = ""
         model_error = None
         model_source = None
+        force_model_answer = expected_exam_type == "huishi"
         minimum_confidence = float(
             os.environ.get(
                 "MAA_KEJU_MODEL_MIN_CONFIDENCE",
@@ -579,22 +644,40 @@ class KejuHybridAnswer(CustomRecognition):
         valid_web_ids = {item["id"] for item in web_result["evidence"]}
 
         def accept_model_decision(decision, label):
-            nonlocal model_answer, model_confidence, model_evidence_ids, model_error
+            nonlocal model_answer, model_confidence, model_evidence_ids
+            nonlocal model_reason, model_error, model_source
             if decision:
                 model_confidence = decision["confidence"]
                 model_evidence_ids = decision["evidence_ids"]
-            model_answer, model_error = validate_model_decision(
+                model_reason = decision["reason"]
+            model_answer, forced_guess, model_error = resolve_model_decision(
                 decision,
                 valid_web_ids,
                 minimum_confidence,
                 label,
+                evidence=web_result["evidence"],
+                options=valid_options,
+                question=question,
+                force_answer=force_model_answer,
             )
+            if forced_guess:
+                model_source = "huishi_forced_model_guess"
+            elif model_error and model_error.startswith("证据直接纠偏"):
+                correction = infer_direct_evidence_option(
+                    web_result["evidence"], valid_options
+                )
+                if correction:
+                    model_source = "web_evidence_direct_override"
+                    model_evidence_ids = correction["evidence_ids"]
+                    model_reason = model_error
 
         if trusted_local_answer:
             model_error = "题库精确命中，跳过远端模型"
         elif trusted_knowledge_answer:
             model_error = "知识库高置信度命中，跳过远端模型"
-        elif api_key and url and model and web_result["evidence"]:
+        elif api_key and url and model and (
+            web_result["evidence"] or force_model_answer
+        ):
             try:
                 with timings.track("parse_decision"):
                     prompt = build_verification_prompt(
@@ -607,6 +690,7 @@ class KejuHybridAnswer(CustomRecognition):
                             if item["similarity"] >= 50
                         ],
                         web_result["evidence"],
+                        force_answer=force_model_answer,
                     )
                 with timings.track("model_request"):
                     model_content = _request_model(
@@ -622,10 +706,13 @@ class KejuHybridAnswer(CustomRecognition):
                         model_content, tuple(valid_options)
                     )
                     accept_model_decision(model_decision, "模型")
-                model_source = "web_search_verified_model"
+                if model_answer and model_source is None:
+                    model_source = "web_search_verified_model"
             except (requests.RequestException, KeyError, IndexError, ValueError) as exc:
                 model_error = f"{type(exc).__name__}: {exc}"
-        elif os.environ.get("MAA_KEJU_USE_CODEX") == "1" and web_result["evidence"]:
+        elif os.environ.get("MAA_KEJU_USE_CODEX") == "1" and (
+            web_result["evidence"] or force_model_answer
+        ):
             try:
                 with timings.track("parse_decision"):
                     prompt = build_verification_prompt(
@@ -638,6 +725,7 @@ class KejuHybridAnswer(CustomRecognition):
                             if item["similarity"] >= 50
                         ],
                         web_result["evidence"],
+                        force_answer=force_model_answer,
                     )
                 codex_timeout = float(os.environ.get("MAA_KEJU_CODEX_TIMEOUT", "120"))
                 with timings.track("model_request"):
@@ -649,7 +737,8 @@ class KejuHybridAnswer(CustomRecognition):
                         model_content, tuple(valid_options)
                     )
                     accept_model_decision(model_decision, "Codex")
-                model_source = "web_search_verified_codex"
+                if model_answer and model_source is None:
+                    model_source = "web_search_verified_codex"
             except (OSError, subprocess.SubprocessError, ValueError) as exc:
                 model_error = f"{type(exc).__name__}: {exc}"
         else:
@@ -731,6 +820,7 @@ class KejuHybridAnswer(CustomRecognition):
                     ],
                     "web_search": {
                         "query": web_result["query"],
+                        "queries": web_result.get("queries", []),
                         "elapsed_ms": web_result["elapsed_ms"],
                         "providers": web_result["providers"],
                         "evidence": web_result["evidence"],
@@ -739,6 +829,7 @@ class KejuHybridAnswer(CustomRecognition):
                     "source": source,
                     "model_confidence": model_confidence,
                     "model_evidence_ids": model_evidence_ids,
+                    "model_reason": model_reason,
                     "model_error": model_error,
                 },
                 ensure_ascii=False,

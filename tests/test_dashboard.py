@@ -5,17 +5,25 @@ import unittest
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from dashboard.database import Database
 from dashboard.metrics import (
+    _resolve_game_window,
     parse_backpack_gold,
     parse_number,
     parse_profile_metrics,
     parse_visible_metrics,
 )
-from dashboard.registry import TASKS, task_list, validate_options
-from dashboard.system import _game_is_running
+from dashboard.registry import (
+    TASKS,
+    TASK_CATEGORIES,
+    ensure_task_available,
+    task_availability,
+    task_list,
+    validate_options,
+)
+from dashboard.system import _game_is_running, _screen_capture_is_available, open_system_settings
 
 
 class TaskRegistryTests(unittest.TestCase):
@@ -24,12 +32,46 @@ class TaskRegistryTests(unittest.TestCase):
             set(TASKS),
             {
                 "sanjieqiyuan", "keju", "keju_huishi", "zhuogui",
-                "fuli_qiandao", "bangpai_qiandao", "baotu", "yunbiao", "shimen", "kaogu",
+                "fuli_qiandao", "bangpai_qiandao", "baotu", "yunbiao", "shimen",
+                "mijingxiangyao", "kaogu",
             },
         )
         self.assertTrue(all(task["checklist"] for task in task_list()))
         self.assertTrue(all(task["steps"] for task in task_list()))
         self.assertTrue(all(task["risk"]["level"] in {"low", "medium", "high"} for task in task_list()))
+
+    def test_tasks_have_product_categories_and_stable_group_order(self):
+        items = task_list(date(2026, 8, 4))
+        categories = {
+            task["id"]: task["category"]["id"] for task in items
+        }
+
+        self.assertEqual(TASK_CATEGORIES["daily"]["label"], "日常任务")
+        self.assertEqual(TASK_CATEGORIES["weekly"]["label"], "周常任务")
+        self.assertEqual(TASK_CATEGORIES["repeatable"]["label"], "常驻任务")
+        self.assertEqual(
+            {task_id for task_id, category in categories.items() if category == "daily"},
+            {
+                "fuli_qiandao", "bangpai_qiandao", "sanjieqiyuan", "keju",
+                "baotu", "shimen", "yunbiao", "mijingxiangyao",
+            },
+        )
+        self.assertEqual(
+            {task_id for task_id, category in categories.items() if category == "weekly"},
+            {"keju_huishi"},
+        )
+        self.assertEqual(
+            {task_id for task_id, category in categories.items() if category == "repeatable"},
+            {"zhuogui", "kaogu"},
+        )
+        self.assertEqual(
+            [task["id"] for task in items],
+            [
+                "fuli_qiandao", "bangpai_qiandao", "sanjieqiyuan", "keju",
+                "baotu", "shimen", "yunbiao", "mijingxiangyao",
+                "keju_huishi", "zhuogui", "kaogu",
+            ],
+        )
 
     def test_defaults_and_integer_bounds_are_applied(self):
         self.assertEqual(
@@ -51,33 +93,84 @@ class TaskRegistryTests(unittest.TestCase):
             validate_options("zhuogui", {"formation": "无敌阵"})
         with self.assertRaisesRegex(ValueError, "未知参数"):
             validate_options("keju", {"apiKey": "must-not-be-accepted"})
+        with self.assertRaisesRegex(ValueError, "未知参数"):
+            validate_options("keju", {"answerSource": "codex"})
+        with self.assertRaisesRegex(ValueError, "未知参数"):
+            validate_options("keju", {"maxSteps": 11})
 
     def test_task_specific_defaults(self):
         self.assertEqual(validate_options("fuli_qiandao", {}), {})
         self.assertEqual(validate_options("bangpai_qiandao", {}), {})
         self.assertEqual(validate_options("baotu", {}), {})
-        self.assertEqual(validate_options("yunbiao", {}), {"rounds": 3})
-        with self.assertRaisesRegex(ValueError, "1–3"):
+        self.assertEqual(validate_options("yunbiao", {}), {})
+        with self.assertRaisesRegex(ValueError, "未知参数"):
             validate_options("yunbiao", {"rounds": 4})
         self.assertEqual(validate_options("shimen", {}), {})
+        self.assertEqual(validate_options("mijingxiangyao", {}), {})
+        with self.assertRaisesRegex(ValueError, "未知参数"):
+            validate_options("mijingxiangyao", {"maxBattles": 26})
 
     def test_sect_task_discloses_game_handoff_after_start(self):
         task = TASKS["shimen"]
-        self.assertIn("后续流程交给游戏自动完成", task["summary"])
-        self.assertTrue(any("不再监控" in warning for warning in task["warnings"]))
+        self.assertIn("只读监控", task["summary"])
+        self.assertTrue(any("不会继续点击" in warning for warning in task["warnings"]))
+        self.assertIn("明确完成证据", task["warnings"][0])
         self.assertEqual(task["risk"]["level"], "low")
         self.assertEqual(
             validate_options("sanjieqiyuan", {}),
-            {"maxSteps": 10, "navigation": "auto"},
+            {},
         )
         self.assertEqual(
             validate_options("keju", {}),
-            {"maxSteps": 20, "answerSource": "configured"},
+            {},
         )
         self.assertEqual(
             validate_options("keju_huishi", {}),
-            {"maxSteps": 20, "answerSource": "configured", "waitForRoundOne": True},
+            {"waitForRoundOne": True},
         )
+
+    def test_exam_availability_uses_weekday_and_xiangshi_start_time(self):
+        friday = date(2026, 7, 31)
+        saturday = date(2026, 8, 1)
+        sunday = date(2026, 8, 2)
+        friday_before_open = datetime(2026, 7, 31, 16, 59)
+        friday_at_open = datetime(2026, 7, 31, 17, 0)
+
+        self.assertFalse(task_availability("keju_huishi", friday)["available"])
+        self.assertTrue(task_availability("keju_huishi", saturday)["available"])
+        self.assertTrue(task_availability("keju", friday)["available"])
+        self.assertFalse(task_availability("keju", friday_before_open)["available"])
+        self.assertTrue(task_availability("keju", friday_at_open)["available"])
+        self.assertFalse(task_availability("keju", saturday)["available"])
+        self.assertFalse(task_availability("keju", sunday)["available"])
+        self.assertEqual(
+            task_availability("keju", saturday)["label"],
+            "周一至周五 17:00 后开放",
+        )
+        with self.assertRaisesRegex(ValueError, "仅在每周六开放"):
+            ensure_task_available("keju_huishi", friday)
+        with self.assertRaisesRegex(ValueError, "周一至周五 17:00 后开放"):
+            ensure_task_available("keju", saturday)
+        with self.assertRaisesRegex(ValueError, "周一至周五 17:00 后开放"):
+            ensure_task_available("keju", friday_before_open)
+        ensure_task_available("keju", friday_at_open)
+        ensure_task_available("keju_huishi", saturday)
+
+        huishi = {
+            task["id"]: task for task in task_list(friday)
+        }["keju_huishi"]
+        self.assertEqual(huishi["availability"]["label"], "仅每周六开放")
+        self.assertFalse(huishi["availability"]["available"])
+
+    def test_mijing_discloses_combat_and_blocks_asset_purchases(self):
+        task = TASKS["mijingxiangyao"]
+        self.assertEqual(task["risk"]["level"], "medium")
+        self.assertIn("连续自动战斗", task["risk"]["summary"])
+        self.assertTrue(any("不购买或使用药品" in warning for warning in task["warnings"]))
+        self.assertTrue(any("不购买或更换助战" in warning for warning in task["warnings"]))
+        self.assertTrue(any("付费恢复" in item for item in task["checklist"]))
+        self.assertTrue(any("沿用游戏当前已选择" in warning for warning in task["warnings"]))
+        self.assertTrue(any("安全停止" in warning for warning in task["warnings"]))
 
     def test_xiangshi_and_huishi_are_separate_tasks(self):
         xiangshi = TASKS["keju"]
@@ -85,8 +178,28 @@ class TaskRegistryTests(unittest.TestCase):
 
         self.assertEqual(xiangshi["name"], "科举乡试")
         self.assertEqual(huishi["name"], "科举会试")
+        self.assertEqual(
+            {parameter["key"] for parameter in xiangshi["parameters"]},
+            set(),
+        )
+        self.assertNotIn(
+            "answerSource",
+            {parameter["key"] for parameter in huishi["parameters"]},
+        )
         self.assertNotIn("会试", "".join(xiangshi["steps"] + xiangshi["checklist"]))
         self.assertNotIn("乡试", "".join(huishi["steps"] + huishi["checklist"]))
+
+    def test_sanjie_always_starts_from_the_main_screen(self):
+        task = TASKS["sanjieqiyuan"]
+
+        self.assertEqual(
+            {parameter["key"] for parameter in task["parameters"]},
+            set(),
+        )
+        self.assertIn("自动点击“活动”", task["description"])
+        self.assertTrue(any("游戏主界面" in item for item in task["checklist"]))
+        with self.assertRaisesRegex(ValueError, "未知参数"):
+            validate_options("sanjieqiyuan", {"navigation": "manual"})
 
     def test_clan_sign_in_discloses_dividend_claiming(self):
         task = TASKS["bangpai_qiandao"]
@@ -95,6 +208,30 @@ class TaskRegistryTests(unittest.TestCase):
 
 
 class MetricParsingTests(unittest.TestCase):
+    def test_metric_capture_uses_native_window_when_maa_enumeration_is_unavailable(self):
+        toolkit = SimpleNamespace(find_desktop_windows=lambda: [])
+        native_input = Mock()
+        native_input.find_window_id.return_value = 466
+        native_input_class = Mock(return_value=native_input)
+
+        window_id, resolved_input = _resolve_game_window(toolkit, native_input_class)
+
+        self.assertEqual(window_id, 466)
+        self.assertIs(resolved_input, native_input)
+        native_input_class.assert_called_once_with()
+        native_input.bind_window.assert_called_once_with(466)
+
+    def test_metric_capture_rejects_multiple_matching_windows(self):
+        toolkit = SimpleNamespace(
+            find_desktop_windows=lambda: [
+                SimpleNamespace(hwnd=1, class_name="com.netease.my", window_name="梦幻西游"),
+                SimpleNamespace(hwnd=2, class_name="com.netease.my", window_name="梦幻西游"),
+            ]
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "多个梦幻西游窗口"):
+            _resolve_game_window(toolkit, Mock())
+
     def test_chinese_punctuation_and_full_width_digits(self):
         self.assertEqual(parse_number("金币 １，２３４，５６７"), 1234567)
 
@@ -126,6 +263,27 @@ class MetricParsingTests(unittest.TestCase):
 
 
 class SystemInspectionTests(unittest.TestCase):
+    @patch("dashboard.system.sys.platform", "darwin")
+    @patch("dashboard.system.subprocess.run")
+    def test_opens_only_allowlisted_privacy_settings(self, run):
+        run.return_value = SimpleNamespace(returncode=0, stderr="")
+
+        result = open_system_settings("screen-capture")
+
+        self.assertEqual(result, {"opened": True, "section": "screen-capture"})
+        run.assert_called_once_with(
+            [
+                "/usr/bin/open",
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        with self.assertRaisesRegex(ValueError, "不支持"):
+            open_system_settings("other")
+
     @patch("dashboard.system.subprocess.run")
     def test_game_process_detection_does_not_require_window_capture(self, run):
         run.return_value = SimpleNamespace(returncode=0, stdout='ASN:0x0-0x1-"梦幻西游":\n')
@@ -142,6 +300,35 @@ class SystemInspectionTests(unittest.TestCase):
     def test_missing_game_process_returns_false(self, run):
         run.return_value = SimpleNamespace(returncode=0, stdout="\n")
         self.assertFalse(_game_is_running())
+
+    def test_reported_screen_capture_permission_does_not_probe(self):
+        probe = Mock()
+
+        self.assertTrue(
+            _screen_capture_is_available(True, 123, capture_probe=probe)
+        )
+        probe.assert_not_called()
+
+    def test_successful_window_capture_resolves_stale_permission_result(self):
+        probe = Mock(
+            return_value=SimpleNamespace(image=SimpleNamespace(size=1020 * 718 * 3))
+        )
+
+        self.assertTrue(
+            _screen_capture_is_available(False, 123, capture_probe=probe)
+        )
+        probe.assert_called_once_with(123)
+
+    def test_failed_window_capture_keeps_permission_unavailable(self):
+        probe = Mock(side_effect=RuntimeError("capture failed"))
+
+        self.assertFalse(
+            _screen_capture_is_available(False, 123, capture_probe=probe)
+        )
+        self.assertFalse(
+            _screen_capture_is_available(False, 0, capture_probe=probe)
+        )
+        probe.assert_called_once_with(123)
 
 
 class DatabaseTests(unittest.TestCase):
@@ -514,6 +701,20 @@ class DatabaseTests(unittest.TestCase):
         second = self.database.add_event("run-events", "info", "log", "第一题")
         resumed = self.database.events_after(first["id"])
         self.assertEqual([event["id"] for event in resumed], [second["id"]])
+
+    def test_run_event_history_is_chronological_and_bounded(self):
+        run_id = "run-history"
+        self.database.create_run({
+            "id": run_id, "taskId": "keju", "taskName": "科举乡试",
+            "status": "running", "options": {},
+            "startedAt": datetime.now(timezone.utc).isoformat(),
+        })
+        events = [
+            self.database.add_event(run_id, "info", "log", f"步骤 {index}")
+            for index in range(5)
+        ]
+
+        self.assertEqual(self.database.events_for_run(run_id, limit=3), events[-3:])
 
     def test_successful_snapshot_satisfies_daily_reminder(self):
         self.assertFalse(self.database.metric_collected_today())

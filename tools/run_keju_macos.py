@@ -18,6 +18,15 @@ sys.path.insert(0, str(ROOT / "agent"))
 sys.path.insert(0, str(ROOT / "tools"))
 
 from macos_cancellation import CancellationGuard, CancellationRequested  # noqa: E402
+from automation_workflows import WorkflowContext, WorkflowInspection  # noqa: E402
+from keju_workflow import (  # noqa: E402
+    KejuWorkflow,
+    parse_question_round,
+    should_end_loop,
+    stable_question_key,
+)
+from macos_quiz_adapter import MacOSQuizInputAdapter, MacOSQuizScene  # noqa: E402
+from quiz_workflows import QuizObservation  # noqa: E402
 from maa.pipeline import JCustomRecognition  # noqa: E402
 
 
@@ -63,7 +72,7 @@ def parse_args():
         default="xiangshi",
         help="严格限定为科举乡试或科举会试，不允许混用页面",
     )
-    parser.add_argument("--max-steps", type=int, default=20)
+    parser.add_argument("--max-steps", type=int)
     parser.add_argument("--delay", type=float, default=3.0)
     parser.add_argument("--recognize-only", action="store_true")
     parser.add_argument(
@@ -90,7 +99,13 @@ def parse_args():
         "--model",
         default=os.environ.get("MAA_KEJU_MODEL", ""),
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.max_steps is None:
+        args.max_steps = 10 if args.exam_type == "xiangshi" else 20
+    maximum = 10 if args.exam_type == "xiangshi" else 30
+    if args.max_steps < 1 or args.max_steps > maximum:
+        parser.error(f"--max-steps 必须在 1–{maximum} 之间")
+    return args
 
 
 def load_local_model_config():
@@ -118,24 +133,6 @@ def read_keychain_password(service, account):
         check=False,
     )
     return result.stdout.strip() if result.returncode == 0 else ""
-
-
-def stable_question_key(question: str) -> str:
-    """Remove the live round/timer prefix so one question is clicked only once."""
-    round_match = re.search(r"第\s*(\d+)\s*/\s*\d+\s*题", question or "")
-    if round_match:
-        return f"round:{round_match.group(1)}"
-    text = re.sub(r"^第\s*\d+\s*/\s*\d+\s*题", "", question or "")
-    text = re.sub(r"^剩余时间\s*\d*", "", text)
-    return re.sub(r"\s+", "", text)
-
-
-def parse_question_round(question: str) -> tuple[int, int] | None:
-    """Return the current and total question numbers for a formal round."""
-    match = re.search(r"第\s*(\d+)\s*/\s*(\d+)\s*题", question or "")
-    if not match:
-        return None
-    return int(match.group(1)), int(match.group(2))
 
 
 def _title_texts(texts: list[dict], image_size: tuple[int, int]) -> list[str]:
@@ -170,27 +167,13 @@ def classify_keju_inspection(
 ) -> dict:
     joined = "".join(re.sub(r"\s+", "", item.get("text", "")) for item in texts)
     exam_type = detect_exam_type(texts, image_size)
-    if re.search(r"第\d+/\d+题", joined):
+    if re.search(r"第\d+(?:/\d+)?题", joined):
         return {"status": "formal_question_ready", "examType": exam_type}
     if re.search(r"课堂复习|等待答题|即将开始|准备开始", joined):
         return {"status": "waiting_for_question", "examType": exam_type}
     if exam_type:
         return {"status": "exam_page_without_question", "examType": exam_type}
     return {"status": "unknown", "examType": None}
-
-
-def should_end_loop(
-    answered: int,
-    max_steps: int,
-    question_round: tuple[int, int] | None = None,
-) -> bool:
-    """Decide completion from answered questions, including the final round."""
-    if answered >= max_steps:
-        return True
-    if question_round is None:
-        return False
-    current, total = question_round
-    return current >= total
 
 
 def recognize_keju_frame(tasker, capture, recognizer, guard):
@@ -238,6 +221,81 @@ def recognize_keju_frame(tasker, capture, recognizer, guard):
     return detail.nodes[-1].recognition
 
 
+class KejuMacOSObservationSource:
+    """Wrap the macOS/Maa recognizer without leaking it into the workflow."""
+
+    def __init__(self, tasker, capture, recognizer, guard, exam_type: str):
+        self.tasker = tasker
+        self.capture = capture
+        self.recognizer = recognizer
+        self.guard = guard
+        self.exam_type = exam_type
+        self.step = 0
+
+    def observe(self, selected_question_key=None, selected_answers=frozenset()):
+        self.step += 1
+        recognize_keju_frame(
+            self.tasker,
+            self.capture,
+            self.recognizer,
+            self.guard,
+        )
+        status = getattr(self.recognizer, "last_status", "unknown")
+        question = getattr(self.recognizer, "last_question", "")
+        image_size = getattr(self.recognizer, "last_image_size", None)
+        if not image_size:
+            image_size = self.capture.last_signature.image_size
+        decision = {
+            "status": status,
+            "question": question,
+            "question_key": stable_question_key(question),
+            "question_round": getattr(
+                self.recognizer,
+                "last_question_round",
+                None,
+            ) or parse_question_round(question),
+            "question_number": getattr(
+                self.recognizer,
+                "last_round_number",
+                None,
+            ),
+            "options": getattr(self.recognizer, "last_options", {}),
+            "answer": getattr(self.recognizer, "last_answer", ""),
+            "source": getattr(self.recognizer, "last_source", ""),
+            "click": getattr(self.recognizer, "last_click", None),
+        }
+        if status == "wrong_exam_type":
+            expected_label = EXAM_LABELS[self.exam_type]
+            observed_type = getattr(self.recognizer, "last_exam_type", None)
+            observed_label = EXAM_LABELS.get(observed_type, "其他考试")
+            decision["reason"] = (
+                f"当前是科举{observed_label}页面，不能启动科举{expected_label}"
+            )
+        elif status == "unverified_exam_type":
+            expected_label = EXAM_LABELS[self.exam_type]
+            decision["reason"] = (
+                f"无法确认当前是科举{expected_label}页面，已停止且未执行点击"
+            )
+        print(
+            json.dumps(
+                {
+                    "step": self.step,
+                    "status": status,
+                    "question": question,
+                    "options": decision["options"],
+                    "answer": decision["answer"],
+                    "source": decision["source"],
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+        return QuizObservation(
+            MacOSQuizScene(tuple(image_size)),
+            decision,
+        )
+
+
 def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | None:
     progress = progress if progress is not None else {
         "answers": 0,
@@ -266,7 +324,7 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
     from maa.resource import Resource
     from maa.tasker import Tasker
     from maa.toolkit import Toolkit
-    from run_sanjieqiyuan_macos import NativeMacOSInput, WindowCapture
+    from macos_window_adapter import NativeMacOSInput, WindowCapture
 
     local_config = load_local_model_config()
     os.environ["MAA_DIRECT_RESOURCE"] = "1"
@@ -353,118 +411,70 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
 
     capture = WindowCapture(controller, window_id)
     native_input = NativeMacOSInput(window_id)
-    last_question = None
-    step = 0
-    answered = 0
-    waiting_polls = 0
-    same_question_polls = 0
-    while not should_end_loop(answered, args.max_steps):
-        step += 1
-        guard.checkpoint()
-        recognize_keju_frame(tasker, capture, recognizer, guard)
-        status = getattr(recognizer, "last_status", "unknown")
-        payload = {
-            "step": step,
-            "status": status,
-            "question": getattr(recognizer, "last_question", ""),
-            "options": getattr(recognizer, "last_options", {}),
-            "answer": getattr(recognizer, "last_answer", ""),
-            "source": getattr(recognizer, "last_source", ""),
-        }
-        print(json.dumps(payload, ensure_ascii=False), flush=True)
+    source = KejuMacOSObservationSource(
+        tasker,
+        capture,
+        recognizer,
+        guard,
+        args.exam_type,
+    )
 
-        if status == "ready":
-            question = recognizer.last_question
-            question_round = parse_question_round(question)
-            question_key = stable_question_key(question)
-            if question_key == last_question:
-                same_question_polls += 1
-                if same_question_polls >= MAX_SAME_QUESTION_POLLS:
-                    raise RuntimeError(
-                        "同一道科举题连续未变化，已停止以避免重复识别或点击"
-                    )
-                print("same_question_waiting=true", flush=True)
-                guard.wait(min(args.delay, 1.0))
-                continue
-            same_question_polls = 0
-            waiting_polls = 0
-            if args.recognize_only:
-                print(
-                    "action_json="
-                    + json.dumps(
-                        {
-                            **payload,
-                            "click": recognizer.last_click,
-                            "image_size": recognizer.last_image_size,
-                        },
-                        ensure_ascii=False,
-                    ),
-                    flush=True,
-                )
-                return None
-            screen_point = guard.perform_input(
-                native_input.click,
-                *recognizer.last_click,
-                recognizer.last_image_size,
-            )
-            print(
-                f"native_click answer={recognizer.last_answer} "
-                f"source={recognizer.last_click} screen={screen_point}",
-                flush=True,
-            )
-            last_question = question_key
-            answered += 1
-            progress["answers"] = answered
-            progress["clicks"] = answered
+    def click_answer(point, image_size, reason):
+        screen_point = guard.perform_input(
+            native_input.click,
+            *point,
+            image_size,
+        )
+        print(
+            f"native_click reason={reason} source={point} screen={screen_point}",
+            flush=True,
+        )
+        return screen_point
+
+    def workflow_event(event, **payload):
+        if event == "quiz_answered":
+            progress["answers"] = payload["answers"]
+            progress["clicks"] = payload["clicks"]
+            question_round = payload.get("questionRound")
             if question_round and question_round[0] == 1:
                 os.environ.pop("MAA_KEJU_REQUIRE_ROUND_ONE", None)
-            if should_end_loop(answered, args.max_steps, question_round):
-                if question_round and question_round[0] < question_round[1]:
-                    break
-                if question_round:
-                    print("final_question_answered=true", flush=True)
-                    return task_result(
-                        "completed",
-                        exam_type=args.exam_type,
-                        answers=answered,
-                        clicks=answered,
-                        limit=args.max_steps,
-                    )
-            guard.wait(args.delay)
-            continue
-
-        if status == "no_question":
-            raise RuntimeError("科举页面未识别到题目或明确完成状态，已保留页面")
-        if status == "waiting":
-            waiting_polls += 1
-            if waiting_polls >= MAX_WAITING_POLLS:
-                raise RuntimeError("科举页面长时间未出现可答题目，已安全停止")
+        elif event == "same_question_waiting":
+            print("same_question_waiting=true", flush=True)
+        elif event == "waiting_for_formal_question":
             print("waiting_for_formal_question=true", flush=True)
-            guard.wait(min(args.delay, 1.0))
-            continue
-        if status == "unreliable":
-            raise RuntimeError("当前题目无法可靠决策，已保留页面")
-        if status == "wrong_exam_type":
-            expected_label = EXAM_LABELS[args.exam_type]
-            observed_type = getattr(recognizer, "last_exam_type", None)
-            observed_label = EXAM_LABELS.get(observed_type, "其他考试")
-            raise RuntimeError(
-                f"当前是科举{observed_label}页面，不能启动科举{expected_label}"
-            )
-        if status == "unverified_exam_type":
-            expected_label = EXAM_LABELS[args.exam_type]
-            raise RuntimeError(
-                f"无法确认当前是科举{expected_label}页面，已停止且未执行点击"
-            )
-        raise RuntimeError(f"未处理的科举状态：{status}")
 
-    print(f"达到本次最大答题数：{args.max_steps}", flush=True)
+    runtime = MacOSQuizInputAdapter(click_answer)
+    outcome = KejuWorkflow(
+        source,
+        max_answers=args.max_steps,
+        delay=args.delay,
+        max_waiting_polls=MAX_WAITING_POLLS,
+        max_same_question_polls=MAX_SAME_QUESTION_POLLS,
+    ).execute(
+        WorkflowContext(runtime, guard, workflow_event),
+        preview=args.recognize_only,
+    )
+    if isinstance(outcome, WorkflowInspection):
+        print(
+            "action_json="
+            + json.dumps(
+                {
+                    **outcome.decision,
+                    "image_size": outcome.image_size,
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+        return None
+    if outcome.status == "completed":
+        print("final_question_answered=true", flush=True)
+    else:
+        print(f"达到本次最大答题数：{args.max_steps}", flush=True)
     return task_result(
-        "limit_reached",
+        outcome.status,
         exam_type=args.exam_type,
-        answers=answered,
-        clicks=answered,
-        limit=args.max_steps,
+        **outcome.payload,
     )
 
 

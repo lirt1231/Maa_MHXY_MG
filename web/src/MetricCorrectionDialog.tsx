@@ -13,10 +13,10 @@ export function MetricCorrectionDialog({ snapshot, onClose, onSave }: {
     experienceRequired: snapshot.experienceRequired?.toString() || ""
   });
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<string>();
 
   async function save() {
-    setSaving(true); setError("");
+    setSaving(true); setError(undefined);
     const payload = Object.fromEntries(
       Object.entries(values).map(([key, value]) => [key, value === "" ? null : Number(value)])
     );
@@ -33,7 +33,12 @@ export function MetricCorrectionDialog({ snapshot, onClose, onSave }: {
       <div className="correction-grid">
         {([['gold','金币'],['level','等级'],['experience','当前经验'],['experienceRequired','升级所需经验']] as const).map(([key,label]) => <label className="field" key={key}><span>{label}</span><input min={key === 'level' ? 1 : 0} type="number" value={values[key]} onChange={(event) => setValues({ ...values, [key]: event.target.value })} /></label>)}
       </div>
-      {error && <p className="error-banner">{error}</p>}
+      {error && <section className="error-banner player-action-error" role="alert">
+        <strong>修正记录没有保存</strong>
+        <p>请检查填写的数值是否正确，然后重新保存。</p>
+        <button className="button ghost" disabled={saving} onClick={save}>重新保存</button>
+        <details><summary>查看技术详情</summary><small>{error}</small></details>
+      </section>}
       <div className="dialog-actions"><button className="button ghost" onClick={onClose}>取消</button><button className="button primary" disabled={saving} onClick={save}>{saving ? "保存中…" : "保存修正"}</button></div>
     </section>
   </div>;

@@ -12,21 +12,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
-from bangpai_qiandao_macos_core import classify_clan_sign_in_scene  # noqa: E402
+from automation_workflows import (  # noqa: E402
+    WorkflowContext,
+    WorkflowInspection,
+    WorkflowResult,
+)
+from bangpai_qiandao_recognition import classify_clan_sign_in_scene  # noqa: E402
+from bangpai_qiandao_workflow import ClanSignInWorkflow  # noqa: E402
 from macos_cancellation import CancellationGuard, CancellationRequested  # noqa: E402
 from macos_task_runtime import MacOSTaskRuntime, log_event  # noqa: E402
 
 
-TEMPLATES = {
-    "expand_menu": ["zonghe/jiahao.png"],
-    "clan_entry": ["qiandao/bangpai.png", "qiandao/bangpai2.png"],
-    "clan_header": [
-        "qiandao/bangpai_jiemian_panduan.png",
-        "qiandao/bangpai_jiemian_panduan2.png",
-    ],
-    "clan_welfare": ["qiandao/bangpaifuli.png"],
-    "welfare_header": ["qiandao/fuli.png"],
-}
 RESULT_PREFIX = "result_json="
 RESULT_STATUSES = {"completed", "already_completed", "safe_stopped", "cancelled"}
 
@@ -57,105 +53,23 @@ def parse_args():
 
 def run(args, guard: CancellationGuard) -> int:
     runtime = MacOSTaskRuntime(guard)
-    phase = "enter"
-    unknown_polls = 0
-    idle_polls = 0
-    sign_in_attempts = 0
-    dividend_attempts = 0
-    confirmation_attempts = 0
-    welfare_close_attempts = 0
-    actions = 0
-    clicks = 0
-
-    for step in range(1, args.max_steps + 1):
-        scene = runtime.read_scene(TEMPLATES)
-        decision = classify_clan_sign_in_scene(
-            scene.texts, scene.templates, phase, scene.image_size
+    outcome = ClanSignInWorkflow(
+        max_steps=args.max_steps,
+        classifier=classify_clan_sign_in_scene,
+    ).execute(
+        WorkflowContext(runtime, guard, log_event, runtime.inspection_evidence),
+        inspect=args.inspect_scene or args.recognize_only,
+    )
+    if isinstance(outcome, WorkflowInspection):
+        print(
+            "preflight_json=" + json.dumps(outcome.to_payload(), ensure_ascii=False),
+            flush=True,
         )
-        status = decision["status"]
-        log_event("scene", step=step, phase=phase, status=status)
-        if args.inspect_scene or args.recognize_only:
-            print(
-                "preflight_json=" + json.dumps(
-                    {
-                        "image_size": scene.image_size,
-                        "decision": decision,
-                        "texts": scene.texts,
-                        "templates": scene.templates,
-                    },
-                    ensure_ascii=False,
-                ),
-                flush=True,
-            )
-            return 0
-
-        unknown_polls = unknown_polls + 1 if status == "unknown" else 0
-        idle_polls = idle_polls + 1 if status == "clan_idle" else 0
-
-        if status == "completed":
-            emit_result("completed", actions=actions, clicks=clicks)
-            return 0
-        if status == "already_completed":
-            emit_result("already_completed", actions=actions, clicks=clicks)
-            return 0
-        if status == "no_clan":
-            raise RuntimeError("当前角色未加入帮派，无法执行帮派签到")
-        if status == "expand_menu":
-            runtime.click_box(decision["box"], scene, "展开主界面菜单")
-            actions += 1
-            clicks += 1
-            phase = "menu"
-        elif status == "close_known_welfare_overlay":
-            welfare_close_attempts += 1
-            if welfare_close_attempts > 1:
-                raise RuntimeError("福利页面关闭后仍未变化，已安全停止")
-            runtime.click_box(decision["box"], scene, "关闭上一任务遗留的福利页面")
-            actions += 1
-            clicks += 1
-            phase = "enter"
-        elif status == "open_clan":
-            runtime.click_box(decision["box"], scene, "打开帮派")
-            actions += 1
-            clicks += 1
-            phase = "clan"
-        elif status == "open_welfare":
-            runtime.click_box(decision["box"], scene, "打开帮派福利")
-            actions += 1
-            clicks += 1
-            phase = "welfare"
-        elif status == "sign_in":
-            sign_in_attempts += 1
-            if sign_in_attempts > 1:
-                raise RuntimeError("帮派签到按钮点击后仍未变化，已安全停止")
-            runtime.click_box(decision["box"], scene, "执行帮派签到")
-            actions += 1
-            clicks += 1
-            phase = "verify_sign_in"
-        elif status == "sign_in_confirmed":
-            phase = "check_dividend"
-        elif status == "claim_dividend":
-            dividend_attempts += 1
-            if dividend_attempts > 1:
-                raise RuntimeError("帮派分红按钮点击后仍未变化，已安全停止")
-            runtime.click_box(decision["box"], scene, "领取帮派分红")
-            actions += 1
-            clicks += 1
-            phase = "dividend_confirm"
-        elif status == "confirm_dividend":
-            confirmation_attempts += 1
-            if confirmation_attempts > 1:
-                raise RuntimeError("帮派分红确认后页面仍未变化，已安全停止")
-            runtime.click_box(decision["box"], scene, "确认领取帮派分红")
-            actions += 1
-            clicks += 1
-            phase = "verify_dividend"
-        elif status == "clan_idle" and idle_polls >= 4:
-            raise RuntimeError("帮派页面未显示可识别的福利入口，已安全停止")
-        elif status == "unknown" and unknown_polls >= 3:
-            raise RuntimeError("连续三次无法识别帮派签到页面，已停止以避免无证据点击")
-        guard.wait(1.5 if status == "close_known_welfare_overlay" else 0.8)
-
-    raise RuntimeError("帮派签到超过最大识别步骤，已安全停止")
+        return 0
+    if not isinstance(outcome, WorkflowResult):
+        raise RuntimeError("帮派签到 Workflow 返回了未知结果")
+    emit_result(outcome.status, **outcome.payload)
+    return 0
 
 
 def main() -> int:

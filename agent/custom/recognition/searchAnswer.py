@@ -51,7 +51,11 @@ def load_question_bank(path):
                 )
             elif answer.strip():
                 processed_answers.append(answer.strip())
-        question_bank[question.strip()] = processed_answers
+        question_key = question.strip()
+        merged_answers = question_bank.setdefault(question_key, [])
+        for answer in processed_answers:
+            if answer not in merged_answers:
+                merged_answers.append(answer)
     return question_bank
 
 

@@ -6,6 +6,7 @@ import json
 import math
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Mapping
 
 from maa.controller import (
     MacOSController,
@@ -17,8 +18,22 @@ from maa.resource import Resource
 from maa.tasker import Tasker
 from maa.toolkit import Toolkit
 
-from macos_cancellation import CancellationGuard
-from run_sanjieqiyuan_macos import NativeMacOSInput, WindowCapture
+try:
+    from .automation_calibration import CaptureSignature, CaptureStabilityGate
+    from .automation_geometry import center, valid_box
+    from .macos_cancellation import CancellationGuard
+    from .macos_window_adapter import (
+        LegacyMacOSWindowBackend,
+        NativeMacOSInput,
+        WindowCapture,
+    )
+    from .macos_window_backend import CapturedFrame
+except ImportError:  # Direct execution through tools/run_*.py.
+    from automation_calibration import CaptureSignature, CaptureStabilityGate
+    from automation_geometry import center, valid_box
+    from macos_cancellation import CancellationGuard
+    from macos_window_adapter import LegacyMacOSWindowBackend, NativeMacOSInput, WindowCapture
+    from macos_window_backend import CapturedFrame
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,6 +44,8 @@ class MacOSScene:
     image_size: tuple[int, int]
     texts: list[dict]
     templates: dict[str, tuple[int, int, int, int] | None]
+    capture_signature: CaptureSignature | None = None
+    frame: CapturedFrame | None = None
 
 
 def box_center(box):
@@ -86,6 +103,14 @@ class MacOSTaskRuntime:
             raise RuntimeError("初始化 Maa Tasker 失败")
         guard.bind_tasker(self.tasker)
         self.capture = WindowCapture(self.controller, self.window_id)
+        self.backend = LegacyMacOSWindowBackend(
+            target_id=self.target_id,
+            window_id=self.window_id,
+            controller=self.controller,
+            capture_driver=self.capture,
+            native_input=self.native_input,
+        )
+        self.capture_gate = CaptureStabilityGate()
 
     def _recognize(self, kind, params, image):
         task = self.tasker.post_recognition(kind, params, image).wait()
@@ -97,8 +122,22 @@ class MacOSTaskRuntime:
             return None
         return detail.nodes[-1].recognition
 
-    def read_scene(self, templates: dict[str, list[str]] | None = None) -> MacOSScene:
-        image = self.capture.capture(self.guard)
+    def read_scene(
+        self,
+        templates: dict[str, list[str] | Mapping[str, Any]] | None = None,
+    ) -> MacOSScene:
+        frame = self.backend.capture(self.guard)
+        image = frame.image
+        first_capture = self.capture_gate.baseline is None
+        signature = self.capture_gate.observe(frame.signature)
+        if first_capture:
+            log_event(
+                "capture_calibration_locked",
+                targetId=self.target_id,
+                windowId=self.window_id,
+                **signature.to_payload(),
+                **frame.geometry_payload(),
+            )
         height, width = image.shape[:2]
         ocr = self._recognize(
             "OCR",
@@ -110,27 +149,56 @@ class MacOSTaskRuntime:
             for item in ocr.filtered_results
         ]
         matches = {}
-        for name, template_files in (templates or {}).items():
+        for name, template_spec in (templates or {}).items():
+            threshold = 0.72
+            template_files = template_spec
+            if isinstance(template_spec, Mapping):
+                template_files = template_spec.get("templates", [])
+                threshold = float(template_spec.get("threshold", threshold))
             detail = self._recognize(
                 "TemplateMatch",
                 JTemplateMatch(
                     template=template_files,
                     roi=(0, 0, width, height),
-                    threshold=[0.72],
+                    threshold=[threshold],
                 ),
                 image,
             )
             matches[name] = tuple(detail.box) if detail is not None and detail.hit else None
-        return MacOSScene((width, height), texts, matches)
+        return MacOSScene((width, height), texts, matches, signature, frame)
+
+    def _validate_scene_calibration(self, scene: MacOSScene) -> None:
+        self.capture_gate.validate(scene.capture_signature)
+        if scene.frame is None:
+            raise RuntimeError("当前场景缺少原始截图帧，已阻止输入")
+        if self.backend.last_frame is None or self.backend.last_frame.frame_id != scene.frame.frame_id:
+            raise RuntimeError("当前场景已不是最新截图，已阻止使用过期证据输入")
+
+    def inspection_evidence(self, scene: MacOSScene, decision) -> dict:
+        """Build a read-only coordinate preview from the exact recognized frame."""
+        self._validate_scene_calibration(scene)
+        evidence = {
+            **scene.frame.geometry_payload(),
+            "anchorValidation": "pending",
+        }
+        box = valid_box({"box": decision.get("box")})
+        if box is None:
+            return evidence
+        point = center({"box": box})
+        self._validate_point(point, scene.image_size, "预检预测点")
+        screen_point = self.backend.preview_point(point, scene.frame)
+        evidence.update(
+            {
+                "recognizedBoxCenterPixels": point,
+                "predictedScreenPoint": list(screen_point),
+            }
+        )
+        return evidence
 
     def click(self, point, scene: MacOSScene, reason: str):
         self._validate_point(point, scene.image_size, reason)
-        screen_point = self.guard.perform_input(
-            self.native_input.click,
-            point[0],
-            point[1],
-            scene.image_size,
-        )
+        self._validate_scene_calibration(scene)
+        screen_point = self.backend.click(point, scene.frame, self.guard)
         log_event(
             "click",
             targetId=self.target_id,
@@ -138,6 +206,8 @@ class MacOSTaskRuntime:
             reason=reason,
             source=point,
             screen=screen_point,
+            frameId=scene.frame.frame_id,
+            captureMethod=scene.frame.capture_method,
         )
         return screen_point
 
@@ -151,12 +221,8 @@ class MacOSTaskRuntime:
     def drag(self, start, end, scene: MacOSScene, reason: str):
         self._validate_point(start, scene.image_size, reason)
         self._validate_point(end, scene.image_size, reason)
-        self.guard.perform_input(
-            self.native_input.drag,
-            start,
-            end,
-            scene.image_size,
-        )
+        self._validate_scene_calibration(scene)
+        self.backend.drag(start, end, scene.frame, self.guard)
         log_event(
             "drag",
             targetId=self.target_id,
@@ -164,6 +230,8 @@ class MacOSTaskRuntime:
             reason=reason,
             start=start,
             end=end,
+            frameId=scene.frame.frame_id,
+            captureMethod=scene.frame.capture_method,
         )
 
     @staticmethod

@@ -64,11 +64,43 @@ class SceneClassificationTests(unittest.TestCase):
 
     def test_team_quick_panel_has_safe_create_action(self):
         decision = classify_scene(
-            [item("请组建或加入队"), item("创建", 820, 380), item("找队", 910, 380)],
+            [
+                item("请组建或加入队伍", 830, 250, 140),
+                item("创建", 805, 340, 70, 31),
+                item("找队", 920, 340, 44, 25),
+            ],
             self.image_size,
         )
         self.assertEqual(decision["status"], "team_quick_panel")
-        self.assertEqual(decision["create"], (860, 392))
+        self.assertEqual(decision["create"], (840, 355))
+
+    def test_team_quick_panel_accepts_current_live_create_ocr_variant(self):
+        decision = classify_scene(
+            [
+                item("请组建或加入队伍", 831, 251, 139, 18),
+                item("玩创建", 805, 340, 70, 31),
+                item("找队", 921, 341, 43, 25),
+            ],
+            (1020, 718),
+        )
+
+        self.assertEqual(decision["status"], "team_quick_panel")
+        self.assertEqual(decision["create"], (840, 355))
+
+    def test_team_quick_panel_without_create_evidence_is_not_actionable(self):
+        decision = classify_scene(
+            [
+                item("请组建或加入队伍", 831, 251, 139, 18),
+                item("找队", 921, 341, 43, 25),
+            ],
+            (1020, 718),
+        )
+
+        self.assertEqual(decision["status"], "unknown")
+        self.assertEqual(
+            decision["reason"],
+            "team_quick_panel_missing_action_evidence",
+        )
 
     def test_created_team_panel_enters_full_team_page(self):
         decision = classify_scene(
@@ -165,12 +197,20 @@ class SceneClassificationTests(unittest.TestCase):
 
     def test_formation_menu_requires_multiple_visible_formations(self):
         decision = classify_scene(
-            [item("天覆阵", 300, 200), item("虎翼阵", 500, 200)],
+            [
+                item("天覆阵", 220, 240),
+                item("虎翼阵", 220, 175),
+                item("2级天覆阵", 430, 175),
+                item("保存阵法", 460, 500),
+            ],
             self.image_size,
         )
 
         self.assertEqual(decision["status"], "formation_menu")
-        self.assertEqual(decision["formations"]["虎翼阵"], (540, 212))
+        self.assertEqual(decision["formations"]["天覆阵"], (260, 252))
+        self.assertEqual(decision["formations"]["虎翼阵"], (260, 187))
+        self.assertEqual(decision["selected_formation"], "天覆阵")
+        self.assertEqual(decision["save"], (500, 512))
         self.assertEqual(formation_name("5级虎翼阵"), "虎翼阵")
 
         single = classify_scene([item("虎翼阵", 500, 200)], self.image_size)
@@ -255,6 +295,8 @@ class SceneClassificationTests(unittest.TestCase):
                 item("20", 602, 274, 25, 22),
                 item("115级", 689, 274, 65, 22),
                 item("90-115", 710, 330),
+                item("队伍描述：", 598, 357, 74, 20),
+                item("最多10个字", 604, 388, 89, 23),
                 item("确定", 450, 580),
             ],
             self.image_size,
@@ -267,7 +309,23 @@ class SceneClassificationTests(unittest.TestCase):
         self.assertEqual(decision["current_min_level"], 20)
         self.assertEqual(decision["current_max_level"], 115)
         self.assertIsNotNone(decision["range_90_115"])
+        self.assertEqual(decision["description"], (648, 399))
+        self.assertIsNone(decision["keyboard_confirm"])
         self.assertIsNotNone(decision["confirm"])
+
+    def test_target_dialog_distinguishes_keyboard_and_dialog_confirm(self):
+        decision = classify_scene(
+            [
+                item("调整目标"),
+                item("队伍描述：", 598, 357, 74, 20),
+                item("确定", 930, 30, 60, 24),
+                item("确定", 477, 528, 64, 24),
+            ],
+            (1020, 718),
+        )
+
+        self.assertEqual(decision["keyboard_confirm"], (960, 42))
+        self.assertEqual(decision["confirm"], (509, 540))
 
     def test_unknown_state_has_no_click(self):
         decision = classify_scene([item("普通民宅")], self.image_size)

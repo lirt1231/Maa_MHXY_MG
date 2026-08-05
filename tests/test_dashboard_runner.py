@@ -58,6 +58,15 @@ class _FinishedProcess:
         return self.return_code
 
 
+def _confirmed_recovery_process():
+    return _FinishedProcess([
+        'home_recovery_json={"status":"confirmed","outcome":"recovered",'
+        '"scene":"main_screen","actions":2,"clicks":1,'
+        '"evidence":{"targetId":"local-primary","firstFrameId":"first",'
+        '"lastFrameId":"last","anchors":["task","team","bag"]}}'
+    ])
+
+
 class RunnerStopBarrierTests(unittest.TestCase):
     def setUp(self):
         self.temporary_directory = tempfile.TemporaryDirectory()
@@ -281,14 +290,14 @@ class RunnerTaskContractTests(unittest.TestCase):
         self.assertTrue(command[-1].endswith("tools/run_shimen_macos.py"))
         self.assertEqual(len(command), 2)
 
+    def test_mijing_runs_until_explicit_completion(self):
+        command = self.manager._command("mijingxiangyao", {})
+        self.assertTrue(command[1].endswith("tools/run_mijingxiangyao_macos.py"))
+        self.assertEqual(command[2:], [])
+
     def test_imperial_exam_commands_keep_exam_types_separate(self):
-        xiangshi_options = {
-            "maxSteps": 20,
-            "answerSource": "configured",
-        }
+        xiangshi_options = {}
         huishi_options = {
-            "maxSteps": 20,
-            "answerSource": "configured",
             "waitForRoundOne": True,
         }
 
@@ -299,8 +308,81 @@ class RunnerTaskContractTests(unittest.TestCase):
         self.assertNotIn("huishi", xiangshi)
         self.assertIn("huishi", huishi)
         self.assertNotIn("xiangshi", huishi)
+        self.assertNotIn("--use-codex", xiangshi)
+        self.assertNotIn("--use-codex", huishi)
+        self.assertEqual(xiangshi[xiangshi.index("--max-steps") + 1], "10")
         self.assertNotIn("--wait-for-round-one", xiangshi)
         self.assertIn("--wait-for-round-one", huishi)
+
+    def test_sanjie_always_uses_automatic_main_screen_navigation(self):
+        command = self.manager._command("sanjieqiyuan", {})
+
+        self.assertTrue(command[1].endswith("tools/run_sanjieqiyuan_macos.py"))
+        self.assertEqual(
+            command[2:],
+            ["--max-steps", "10", "--input-method", "native", "--navigate"],
+        )
+
+    def test_huishi_start_checks_weekly_availability_before_spawning(self):
+        with patch(
+            "dashboard.runner.ensure_task_available",
+            side_effect=ValueError("科举会试仅在每周六开放，请在周六再运行。"),
+        ) as ensure_available, patch("dashboard.runner.subprocess.Popen") as popen:
+            with self.assertRaisesRegex(ValueError, "仅在每周六开放"):
+                self.manager.start(
+                    "keju_huishi",
+                    {"waitForRoundOne": True},
+                    checklist_confirmed=True,
+                )
+
+        ensure_available.assert_called_once_with("keju_huishi")
+        popen.assert_not_called()
+
+    def test_xiangshi_start_checks_opening_time_before_spawning(self):
+        with patch(
+            "dashboard.runner.ensure_task_available",
+            side_effect=ValueError(
+                "科举乡试仅在周一至周五 17:00 后开放，请在开放时间再运行。"
+            ),
+        ) as ensure_available, patch("dashboard.runner.subprocess.Popen") as popen:
+            with self.assertRaisesRegex(ValueError, "17:00 后开放"):
+                self.manager.start(
+                    "keju",
+                    {},
+                    checklist_confirmed=True,
+                )
+
+        ensure_available.assert_called_once_with("keju")
+        popen.assert_not_called()
+
+    def test_huishi_inspection_checks_weekly_availability_before_spawning(self):
+        with patch(
+            "dashboard.runner.ensure_task_available",
+            side_effect=ValueError("科举会试仅在每周六开放，请在周六再运行。"),
+        ) as ensure_available, patch("dashboard.runner.subprocess.Popen") as popen:
+            with self.assertRaisesRegex(ValueError, "仅在每周六开放"):
+                self.manager.inspect(
+                    "keju_huishi",
+                    {"waitForRoundOne": True},
+                )
+
+        ensure_available.assert_called_once_with("keju_huishi")
+        popen.assert_not_called()
+        self.assertFalse(self.manager.inspecting)
+
+    def test_xiangshi_inspection_checks_opening_time_before_spawning(self):
+        with patch(
+            "dashboard.runner.ensure_task_available",
+            side_effect=ValueError(
+                "科举乡试仅在周一至周五 17:00 后开放，请在开放时间再运行。"
+            ),
+        ) as ensure_available, patch("dashboard.runner.subprocess.Popen") as popen:
+            with self.assertRaisesRegex(ValueError, "17:00 后开放"):
+                self.manager.inspect("keju", {})
+
+        ensure_available.assert_called_once_with("keju")
+        popen.assert_not_called()
+        self.assertFalse(self.manager.inspecting)
 
     def test_welfare_progress_and_failure_copy_are_specific(self):
         payload = self.manager._progress_payload(
@@ -367,7 +449,10 @@ class RunnerTaskContractTests(unittest.TestCase):
         process = _FinishedProcess([
             'result_json={"task_id":"sanjieqiyuan","status":"completed","questions":10,"clicks":10}'
         ])
-        with patch("dashboard.runner.subprocess.Popen", return_value=process):
+        with patch(
+            "dashboard.runner.subprocess.Popen",
+            side_effect=[process, _confirmed_recovery_process()],
+        ):
             self.manager.start("sanjieqiyuan", {}, checklist_confirmed=True)
             current = self._wait_for_terminal()
 
@@ -423,6 +508,10 @@ class RunnerTaskContractTests(unittest.TestCase):
                 "actions": 8, "clicks": 6,
             },
             "shimen": {"status": "completed", "actions": 20, "clicks": 20},
+            "mijingxiangyao": {
+                "status": "limit_reached", "battles": 18, "actions": 40,
+                "clicks": 22, "max_battles": 18,
+            },
         }
         for task_id, payload in fixtures.items():
             with self.subTest(task_id=task_id):
@@ -470,34 +559,45 @@ class RunnerTaskContractTests(unittest.TestCase):
 
     def test_remaining_task_results_are_persisted(self):
         fixtures = [
-            ("keju", {}, {"status": "completed", "answers": 15, "clicks": 15, "limit": 20}),
+            ("keju", {}, {"status": "completed", "answers": 10, "clicks": 10, "limit": 10}),
             ("keju_huishi", {}, {"status": "completed", "answers": 15, "clicks": 15, "limit": 20}),
             ("zhuogui", {"rounds": 2}, {"status": "completed", "rounds": 2, "target_rounds": 2, "steps": 24}),
             ("fuli_qiandao", {}, {"status": "completed", "actions": 5, "clicks": 3}),
             ("bangpai_qiandao", {}, {"status": "already_completed", "actions": 0, "clicks": 0}),
             ("baotu", {}, {"status": "completed", "actions": 8, "clicks": 6}),
             (
-                "yunbiao", {"rounds": 3},
+                "yunbiao", {},
                 {"status": "completed", "rounds": 3, "target_rounds": 3, "actions": 8, "clicks": 6},
             ),
             ("shimen", {}, {"status": "completed", "actions": 20, "clicks": 20}),
+            (
+                "mijingxiangyao", {},
+                {
+                    "status": "completed", "battles": 18, "actions": 40,
+                    "clicks": 22, "max_battles": 18,
+                },
+            ),
         ]
-        for task_id, options, payload in fixtures:
-            with self.subTest(task_id=task_id):
-                process = _FinishedProcess([
-                    "result_json=" + json.dumps(
-                        {"task_id": task_id, **payload}, ensure_ascii=False
+        with patch("dashboard.runner.ensure_task_available"):
+            for task_id, options, payload in fixtures:
+                with self.subTest(task_id=task_id):
+                    process = _FinishedProcess([
+                        "result_json=" + json.dumps(
+                            {"task_id": task_id, **payload}, ensure_ascii=False
+                        )
+                    ])
+                    with patch(
+                        "dashboard.runner.subprocess.Popen",
+                        side_effect=[process, _confirmed_recovery_process()],
+                    ):
+                        self.manager.start(task_id, options, checklist_confirmed=True)
+                        current = self._wait_for_terminal()
+                    self.assertEqual(current["status"], "succeeded")
+                    self.assertEqual(current["result"]["status"], payload["status"])
+                    self.assertEqual(
+                        self.manager.database.recent_runs(1)[0]["result"],
+                        current["result"],
                     )
-                ])
-                with patch("dashboard.runner.subprocess.Popen", return_value=process):
-                    self.manager.start(task_id, options, checklist_confirmed=True)
-                    current = self._wait_for_terminal()
-                self.assertEqual(current["status"], "succeeded")
-                self.assertEqual(current["result"]["status"], payload["status"])
-                self.assertEqual(
-                    self.manager.database.recent_runs(1)[0]["result"],
-                    current["result"],
-                )
 
 
 class RunnerInspectionTests(unittest.TestCase):
@@ -520,6 +620,9 @@ class RunnerInspectionTests(unittest.TestCase):
             "baotu": ["run_baotu_macos.py", "--inspect-scene"],
             "yunbiao": ["run_yunbiao_macos.py", "--inspect-scene", "--rounds", "3"],
             "shimen": ["run_shimen_macos.py", "--inspect-scene"],
+            "mijingxiangyao": [
+                "run_mijingxiangyao_macos.py", "--inspect-scene",
+            ],
         }
         for task_id, suffix in expected.items():
             with self.subTest(task_id=task_id):
@@ -549,8 +652,11 @@ class RunnerInspectionTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "唯一"):
             self.manager._parse_inspection("fuli_qiandao", {}, f"{line}\n{line}")
 
+    @patch("dashboard.runner.ensure_task_available")
     @patch("dashboard.runner.subprocess.Popen")
-    def test_inspection_is_transient_and_uses_finite_timeout(self, popen):
+    def test_inspection_is_transient_and_uses_finite_timeout(
+        self, popen, _ensure_available
+    ):
         process = popen.return_value
         process.returncode = 0
         process.communicate.return_value = (
@@ -626,6 +732,45 @@ class RunnerInspectionTests(unittest.TestCase):
         self.assertEqual(result["sceneLabel"], "日常任务卡片")
         self.assertIn("宝图任务", result["proposedAction"])
 
+    def test_parser_preserves_read_only_coordinate_preview_evidence(self):
+        output = (
+            'preflight_json={"image_size":[923,720],'
+            '"decision":{"status":"open_activity","box":[250,40,50,20]},'
+            '"texts":[{"text":"活动"}],"templates":{},"evidence":{'
+            '"frameId":"frame-1","captureMethod":"maa",'
+            '"windowBoundsPoints":[-1786,-106,1051,820],'
+            '"contentRectPoints":[-1786,-105.8483,1051,819.8483],'
+            '"scaleFactor":0.8782112274,"anchorValidation":"pending",'
+            '"recognizedBoxCenterPixels":[275,50],'
+            '"predictedScreenPoint":[-1472.9,-48.9]}}'
+        )
+
+        result = self.manager._parse_inspection("baotu", {}, output)
+
+        self.assertEqual(result["evidence"]["frameId"], "frame-1")
+        self.assertEqual(result["evidence"]["captureMethod"], "maa")
+        self.assertEqual(result["evidence"]["anchorValidation"], "pending")
+        self.assertEqual(result["evidence"]["recognizedBoxCenterPixels"], [275, 50])
+        self.assertEqual(result["evidence"]["predictedScreenPoint"], [-1472.9, -48.9])
+
+    def test_parser_remains_compatible_without_coordinate_preview(self):
+        output = (
+            'preflight_json={"image_size":[1020,718],'
+            '"decision":{"status":"open_activity","box":[250,40,50,20]},'
+            '"texts":[{"text":"活动"}],"templates":{}}'
+        )
+
+        result = self.manager._parse_inspection("baotu", {}, output)
+
+        self.assertEqual(
+            result["evidence"],
+            {
+                "imageSize": [1020, 718],
+                "ocrItemCount": 1,
+                "matchedTemplates": [],
+            },
+        )
+
     def test_parser_accepts_active_ordinary_escort(self):
         output = (
             'preflight_json={"image_size":[1020,718],'
@@ -648,6 +793,51 @@ class RunnerInspectionTests(unittest.TestCase):
         self.assertIn("资产操作", result["summary"])
         self.assertIn("购买一件装备", result["reason"])
 
+    def test_parser_accepts_mijing_stage_and_blocks_asset_branch(self):
+        stage = (
+            'preflight_json={"image_size":[1020,718],'
+            '"decision":{"status":"select_stage","box":[780,220,90,35]},'
+            '"proposed_action":"select_stage",'
+            '"texts":[{"text":"第18关"}],"templates":{}}'
+        )
+        ready = self.manager._parse_inspection(
+            "mijingxiangyao", {"maxBattles": 18}, stage
+        )
+        self.assertTrue(ready["canStart"])
+        self.assertEqual(ready["sceneLabel"], "秘境关卡列表")
+        self.assertIn("当前可挑战关卡", ready["proposedAction"])
+
+        current_mode = (
+            'preflight_json={"image_size":[1020,718],'
+            '"decision":{"status":"enter_dungeon","box":[700,220,120,30]},'
+            '"texts":[{"text":"云乐游"},{"text":"秘境降妖"}],"templates":{}}'
+        )
+        dungeon = self.manager._parse_inspection("mijingxiangyao", {}, current_mode)
+        self.assertTrue(dungeon["canStart"])
+        self.assertIn("当前已选择", dungeon["proposedAction"])
+
+        asset = (
+            'preflight_json={"image_size":[1020,718],'
+            '"decision":{"status":"unsupported_asset_branch",'
+            '"reason":"购买助战"},'
+            '"texts":[{"text":"购买助战"}],"templates":{}}'
+        )
+        blocked = self.manager._parse_inspection("mijingxiangyao", {}, asset)
+        self.assertFalse(blocked["canStart"])
+        self.assertIn("秘境分支需要资产操作", blocked["summary"])
+        self.assertIn("购买助战", blocked["reason"])
+
+        mode = (
+            'preflight_json={"image_size":[1020,718],'
+            '"decision":{"status":"mode_selection_required",'
+            '"reason":"请手动选择后重新启动任务"},'
+            '"texts":[{"text":"选择模式"}],"templates":{}}'
+        )
+        manual = self.manager._parse_inspection("mijingxiangyao", {}, mode)
+        self.assertFalse(manual["canStart"])
+        self.assertIn("手动选择", manual["summary"])
+        self.assertIsNone(manual["proposedAction"])
+
     def test_parser_allows_sanjie_activity_list_scroll(self):
         output = (
             'preflight_json={"image_size":[1020,718],'
@@ -657,7 +847,7 @@ class RunnerInspectionTests(unittest.TestCase):
         )
 
         result = self.manager._parse_inspection(
-            "sanjieqiyuan", {"navigation": "auto"}, output
+            "sanjieqiyuan", {}, output
         )
 
         self.assertTrue(result["canStart"])
@@ -675,9 +865,12 @@ class RunnerInspectionTests(unittest.TestCase):
             with self.subTest(payload=payload), self.assertRaisesRegex(RuntimeError, "无效|缺少"):
                 self.manager._parse_inspection("keju", {}, f"preflight_json={payload}")
 
+    @patch("dashboard.runner.ensure_task_available")
     @patch("dashboard.runner.os.killpg")
     @patch("dashboard.runner.subprocess.Popen")
-    def test_inspection_timeout_stops_process_group_and_releases_lock(self, popen, killpg):
+    def test_inspection_timeout_stops_process_group_and_releases_lock(
+        self, popen, killpg, _ensure_available
+    ):
         process = popen.return_value
         process.pid = 43210
         process.communicate.side_effect = subprocess.TimeoutExpired(["inspect"], 15.0)

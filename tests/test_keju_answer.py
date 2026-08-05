@@ -2,6 +2,7 @@ import sys
 import tempfile
 import unittest
 import json
+import os
 from unittest.mock import Mock, patch
 
 import numpy as np
@@ -17,11 +18,14 @@ from keju_answer_core import (  # noqa: E402
     answer_to_option,
     build_verification_prompt,
     knowledge_fallback,
+    infer_direct_evidence_option,
     local_fallback,
     looks_like_answer_result,
     parse_model_answer,
     parse_model_decision,
+    resolve_model_decision,
     scale_roi,
+    validate_forced_model_decision,
     validate_model_decision,
 )
 from searchAnswer import (  # noqa: E402
@@ -54,6 +58,19 @@ class QuestionBankTests(unittest.TestCase):
             bank = load_question_bank(path)
         self.assertEqual(bank["题目一"], ["答案甲", "答案乙"])
 
+    def test_duplicate_question_entries_merge_answers_instead_of_overwriting(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "bank.txt"
+            path.write_text(
+                '"动态题":["答案甲","答案乙"]\n'
+                '"动态题":["答案丙，答案甲"]',
+                encoding="utf-8",
+            )
+
+            bank = load_question_bank(path)
+
+        self.assertEqual(bank["动态题"], ["答案甲", "答案乙", "答案丙"])
+
     def test_new_huishi_questions_are_available_in_runtime_bank(self):
         bank = load_question_bank(RECOGNITION_DIR / "tiku.txt")
         expected = {
@@ -69,9 +86,28 @@ class QuestionBankTests(unittest.TestCase):
             "古代五音——宫、商、角、徵、羽相当于现代简谱上的？": ["1、2、3、5、6"],
             "汽车品牌“劳斯莱斯”创始于哪个国家？": ["英国"],
             "与“四大名旦”同时期，专攻“花旦”行的表演艺术流派是？": ["筱派"],
+            "古琴最初只有五根弦，代表着金、木、水、火、土。后来又增加了两根弦，这两根弦代表阴、阳？": ["不是"],
+            "下列选项中不属于传统知识产权范畴的是？": ["使用权"],
+            "星盘技能“平衡之力”可以给人物一共提供多少属性？": ["10"],
+            "下列神兽中，初始技能没有感知的是？": ["超级赤焰兽"],
+            "火车连续发出两声长鸣，这表示？": ["倒退"],
+            "《红楼梦》中王熙凤讲“子放鞭炮”的笑话是在什么": ["元宵节"],
         }
         for question, answers in expected.items():
             self.assertEqual(bank[question], answers)
+
+    def test_guqin_true_false_question_uses_local_answer_instead_of_model(self):
+        question = (
+            "古琴最初只有五根弦，代表着金、木、水、火、土。"
+            "后来又增加了两根弦，这两根弦代表阴、阳？"
+        )
+        bank = load_question_bank(RECOGNITION_DIR / "tiku.txt")
+        candidates = search_candidates(question, 3, bank)
+
+        self.assertEqual(
+            local_fallback(candidates, {"A": "是的", "B": "不是"}),
+            "B",
+        )
 
     def test_live_round_and_timer_noise_is_removed_before_matching(self):
         clean = "我国古代信奉的“火神”是以下哪位？"
@@ -130,6 +166,140 @@ class HybridAnswerTests(unittest.TestCase):
         self.assertIn("direct_answer", prompt)
         self.assertIn("9 个徒弟", prompt)
         self.assertIn("evidence_ids", prompt)
+        self.assertIn("必须采用该结论", prompt)
+        self.assertIn("判断题必须逐字比较", prompt)
+        self.assertIn("已有明确总计时", prompt)
+        self.assertIn("严禁相加", prompt)
+        self.assertIn("绝不能选择数值最接近的选项", prompt)
+        self.assertIn("没有、不含、不属于", prompt)
+        self.assertIn("不能证明该项不存在", prompt)
+        self.assertIn("不得照抄输出示例中的数值", prompt)
+        self.assertIn("reason", prompt)
+
+    def test_prompt_removes_timer_ui_noise_from_question(self):
+        prompt = build_verification_prompt(
+            "剩余时间20星盘技能平衡之力一共提供多少属性?",
+            {"A": "10", "B": "8", "C": "14", "D": "12"},
+            [],
+        )
+
+        self.assertNotIn("剩余时间", prompt)
+        self.assertIn("星盘技能平衡之力一共提供多少属性", prompt)
+
+    def test_prompt_explicitly_prevents_the_guqin_evidence_inversion(self):
+        prompt = build_verification_prompt(
+            "古琴后来增加的两根弦代表阴、阳？",
+            {"A": "是的", "B": "不是"},
+            [],
+            [],
+            [{
+                "id": "web-2",
+                "provider": "so360",
+                "kind": "result",
+                "title": "古琴七弦答案",
+                "snippet": "后来增加的两根弦代表文、武。",
+                "url": "https://example.com/guqin",
+                "rank": 1,
+            }],
+        )
+        self.assertIn("文、武", prompt)
+        self.assertIn("阴、阳", prompt)
+        self.assertIn("应选择“不是”", prompt)
+
+    def test_huishi_prompt_requires_an_answer_without_fabricating_citations(self):
+        prompt = build_verification_prompt(
+            "冷门会试题",
+            {"A": "甲", "B": "乙", "C": "丙", "D": "丁"},
+            [],
+            [],
+            [],
+            force_answer=True,
+        )
+
+        self.assertIn("限时会试", prompt)
+        self.assertIn("必须选择最可能的一个选项", prompt)
+        self.assertIn("不得伪造引用", prompt)
+
+    def test_huishi_can_transparently_force_a_reasoned_model_guess(self):
+        guess = {
+            "answer": "D",
+            "confidence": 0.35,
+            "evidence_ids": [],
+            "reason": "检索结果无关，根据游戏知识低置信度选择D。",
+        }
+
+        self.assertIsNone(validate_model_decision(guess, set())[0])
+        self.assertEqual(
+            validate_forced_model_decision(guess, ("A", "B", "C", "D")),
+            ("D", None),
+        )
+
+    def test_forced_model_guess_still_requires_an_explanation(self):
+        answer, error = validate_forced_model_decision({
+            "answer": "B",
+            "confidence": 0.2,
+            "evidence_ids": [],
+            "reason": "",
+        })
+
+        self.assertIsNone(answer)
+        self.assertIn("猜测依据", error)
+
+    def test_same_uncited_guess_stops_xiangshi_but_answers_huishi(self):
+        guess = {
+            "answer": "D",
+            "confidence": 0.35,
+            "evidence_ids": [],
+            "reason": "检索结果未覆盖选项，根据排除法低置信度选择D。",
+        }
+        kwargs = {
+            "decision": guess,
+            "valid_evidence_ids": set(),
+            "minimum_confidence": 0.62,
+            "label": "模型",
+            "evidence": [],
+            "options": {"A": "甲", "B": "乙", "C": "丙", "D": "丁"},
+        }
+
+        xiangshi = resolve_model_decision(**kwargs, force_answer=False)
+        huishi = resolve_model_decision(**kwargs, force_answer=True)
+
+        self.assertIsNone(xiangshi[0])
+        self.assertFalse(xiangshi[1])
+        self.assertEqual(huishi[0], "D")
+        self.assertTrue(huishi[1])
+        self.assertIn("限时会试强制作答", huishi[2])
+
+    def test_unique_repeated_web_option_overrides_unsupported_model_choice(self):
+        evidence = [
+            {"id": "web-1", "title": "历史事件", "snippet": "国民政府宣布迁都重庆。"},
+            {"id": "web-2", "title": "抗战史", "snippet": "1937年11月迁都重庆市。"},
+        ]
+        options = {"A": "成都", "B": "长沙", "C": "重庆", "D": "武汉"}
+        decision = {
+            "answer": "D", "confidence": 0.95,
+            "evidence_ids": ["web-1"], "reason": "错误选择武汉。",
+        }
+
+        inferred = infer_direct_evidence_option(evidence, options)
+        answer, forced, error = resolve_model_decision(
+            decision, {"web-1", "web-2"}, 0.62, "模型",
+            evidence=evidence, options=options, force_answer=True,
+        )
+
+        self.assertEqual(inferred, {"answer": "C", "evidence_ids": ["web-1", "web-2"]})
+        self.assertEqual(answer, "C")
+        self.assertFalse(forced)
+        self.assertIn("证据直接纠偏", error)
+
+    def test_multiple_supported_options_do_not_trigger_direct_override(self):
+        evidence = [
+            {"id": "web-1", "title": "说法甲", "snippet": "可能是成都，也可能是重庆。"},
+            {"id": "web-2", "title": "说法乙", "snippet": "成都与重庆均被讨论。"},
+        ]
+        options = {"A": "成都", "B": "长沙", "C": "重庆", "D": "武汉"}
+
+        self.assertIsNone(infer_direct_evidence_option(evidence, options))
 
     def test_parse_json_and_plain_model_answers(self):
         self.assertEqual(parse_model_answer('{"answer":"C","confidence":0.9}'), "C")
@@ -138,31 +308,185 @@ class HybridAnswerTests(unittest.TestCase):
 
     def test_structured_model_decision_preserves_confidence_and_citations(self):
         decision = parse_model_decision(
-            '{"answer":"C","confidence":0.91,"evidence_ids":["web-1", "web-3"]}'
+            '{"answer":"C","confidence":0.91,"evidence_ids":["web-1", "web-3"],'
+            '"reason":"web-1 明确支持 C。"}'
         )
         self.assertEqual(decision["answer"], "C")
         self.assertEqual(decision["confidence"], 0.91)
         self.assertEqual(decision["evidence_ids"], ["web-1", "web-3"])
+        self.assertEqual(decision["reason"], "web-1 明确支持 C。")
 
     def test_model_decision_requires_confidence_and_valid_web_citation(self):
-        low = {"answer": "C", "confidence": 0.4, "evidence_ids": ["web-1"]}
+        low = {
+            "answer": "C",
+            "confidence": 0.4,
+            "evidence_ids": ["web-1"],
+            "reason": "证据支持 C。",
+        }
         answer, error = validate_model_decision(low, {"web-1"}, 0.62)
         self.assertIsNone(answer)
         self.assertIn("置信度不足", error)
 
-        uncited = {"answer": "C", "confidence": 0.9, "evidence_ids": ["web-9"]}
+        unexplained = {
+            "answer": "C",
+            "confidence": 0.9,
+            "evidence_ids": ["web-1"],
+            "reason": "",
+        }
+        answer, error = validate_model_decision(unexplained, {"web-1"}, 0.62)
+        self.assertIsNone(answer)
+        self.assertIn("没有提供证据解释", error)
+
+        uncited = {
+            "answer": "C",
+            "confidence": 0.9,
+            "evidence_ids": ["web-9"],
+            "reason": "证据支持 C。",
+        }
         answer, error = validate_model_decision(uncited, {"web-1"}, 0.62)
         self.assertIsNone(answer)
         self.assertIn("没有引用", error)
 
-        verified = {"answer": "C", "confidence": 0.9, "evidence_ids": ["web-1"]}
+        verified = {
+            "answer": "C",
+            "confidence": 0.9,
+            "evidence_ids": ["web-1"],
+            "reason": "web-1 明确支持 C。",
+        }
         self.assertEqual(
             validate_model_decision(verified, {"web-1"}, 0.62),
             ("C", None),
         )
 
+    def test_model_decision_rejects_unsupported_option_guess(self):
+        decision = {
+            "answer": "D",
+            "confidence": 0.95,
+            "evidence_ids": ["web-1", "web-2"],
+            "reason": "把10点和额外2点拼成12点。",
+        }
+        evidence = [
+            {
+                "id": "web-1",
+                "title": "星盘调整",
+                "snippet": "每条属性加2点，合10点。",
+                "url": "https://ds.163.com/a",
+            },
+            {
+                "id": "web-2",
+                "title": "平衡之力",
+                "snippet": "所有属性点加2。",
+                "url": "https://my.163.com/b",
+            },
+        ]
+
+        answer, error = validate_model_decision(
+            decision,
+            {"web-1", "web-2"},
+            0.62,
+            evidence=evidence,
+            options={"A": "10", "B": "8", "C": "14", "D": "12"},
+        )
+
+        self.assertIsNone(answer)
+        self.assertIn("未明确支持", error)
+
+    def test_negative_skill_question_requires_a_complete_list_without_target(self):
+        question = "下列神兽中初始技能没有感知的是"
+        options = {"A": "超级大熊猫", "D": "超级赤焰兽"}
+        evidence = [
+            {
+                "id": "web-a", "title": "超级大熊猫技能",
+                "snippet": "超级大熊猫必带5个技能，包括高级连击、高级感知等。",
+            },
+            {
+                "id": "web-d", "title": "超级赤焰兽技能",
+                "snippet": "超级赤焰兽必带5个技能：八凶法阵、高级法术连击、高级法术波动、神佑复生、火属性吸收。",
+            },
+        ]
+
+        wrong = validate_model_decision(
+            {"answer": "A", "confidence": 0.95, "evidence_ids": ["web-a"], "reason": "A没有感知。"},
+            {"web-a", "web-d"}, evidence=evidence, options=options, question=question,
+        )
+        right = validate_model_decision(
+            {"answer": "D", "confidence": 0.95, "evidence_ids": ["web-d"], "reason": "D的完整必带列表没有感知。"},
+            {"web-a", "web-d"}, evidence=evidence, options=options, question=question,
+        )
+
+        self.assertIsNone(wrong[0])
+        self.assertEqual(right, ("D", None))
+
+    def test_model_decision_remaps_external_answer_letter_by_text(self):
+        evidence = [{
+            "id": "web-1",
+            "title": "火车鸣笛题",
+            "snippet": "A.前进 C.倒退 B.停留 D.故障 答案:C",
+            "url": "https://example.com/train",
+        }]
+        wrong = {
+            "answer": "C",
+            "confidence": 0.95,
+            "evidence_ids": ["web-1"],
+            "reason": "直接沿用网页字母C。",
+        }
+        correct = {**wrong, "answer": "B", "reason": "网页C对应倒退，映射为当前B。"}
+        options = {"A": "故障", "B": "倒退", "C": "停留", "D": "前进"}
+
+        self.assertIsNone(validate_model_decision(
+            wrong,
+            {"web-1"},
+            evidence=evidence,
+            options=options,
+        )[0])
+        self.assertEqual(validate_model_decision(
+            correct,
+            {"web-1"},
+            evidence=evidence,
+            options=options,
+        ), ("B", None))
+
     def test_fullwidth_option_prefix_is_removed(self):
         self.assertEqual(keju_hybrid._clean_option_text("B", "Ｂ６"), "6")
+
+    def test_question_ocr_drops_low_confidence_decorative_fragments(self):
+        results = [
+            SimpleNamespace(text="1", box=[394, 196, 24, 21], score=0.21),
+            SimpleNamespace(text=",i", box=[412, 200, 12, 14], score=0.50),
+            SimpleNamespace(text="第3题", box=[415, 193, 63, 28], score=1.0),
+            SimpleNamespace(
+                text="正确率：1/2当前得分：10",
+                box=[622, 200, 243, 20],
+                score=1.0,
+            ),
+            SimpleNamespace(
+                text="召唤灵内丹，最高可以升至几级？",
+                box=[389, 230, 290, 22],
+                score=0.98,
+            ),
+        ]
+
+        raw_question = keju_hybrid._question_ocr_text(results)
+
+        self.assertNotIn(",i", raw_question)
+        self.assertEqual(
+            keju_hybrid._clean_question_text(raw_question),
+            "召唤灵内丹,最高可以升至几级?",
+        )
+
+    def test_question_cleanup_handles_round_without_total_and_icon_noise(self):
+        self.assertEqual(
+            keju_hybrid._clean_question_text(
+                "国第2题正确率：1/1当前得分：10“环装”指的是多少级的普通装备？"
+            ),
+            '“环装”指的是多少级的普通装备?',
+        )
+        self.assertEqual(
+            keju_hybrid._clean_question_text(
+                "第4/15题剩余时间12白娘娘盗仙草盗的是？"
+            ),
+            "白娘娘盗仙草盗的是?",
+        )
 
     def test_local_fallback_requires_both_confidences(self):
         self.assertEqual(local_fallback(self.candidates, self.options), "A")
@@ -193,6 +517,14 @@ class HybridAnswerTests(unittest.TestCase):
             looks_like_answer_result(
                 "第5/15题剩余时间8扫一扫使用什么技术？",
                 {"A": "图像识别", "B": "语音识别", "C": "人脸识别", "D": "文字识别"},
+            )
+        )
+
+    def test_live_question_with_bare_numeric_options_is_not_a_result_page(self):
+        self.assertFalse(
+            looks_like_answer_result(
+                "以下哪一年是国际天文年？",
+                {"A": "2008", "B": "2009", "C": "2010", "D": "2012"},
             )
         )
 
@@ -245,13 +577,62 @@ class HybridAnswerTests(unittest.TestCase):
             patch.dict("os.environ", {
                 "MAA_KEJU_EXAM_TYPE": "xiangshi",
                 "MAA_KEJU_RECOGNIZE_ONLY": "1",
+                "MAA_KEJU_REQUIRE_ROUND_ONE": "1",
             }),
             patch.object(
                 keju_hybrid,
                 "_ocr_region",
                 side_effect=[
                     "科举乡试",
-                    "身上滑腻腻喜欢钻河底张嘴吐泡泡可以测天气打一动物",
+                    "剩余时间20身上滑腻腻喜欢钻河底张嘴吐泡泡可以测天气打一动物",
+                ],
+            ),
+            patch.object(
+                keju_hybrid,
+                "_ocr_region_with_box",
+                side_effect=lambda *_args: next(option_results),
+            ),
+            patch.object(keju_hybrid, "search_candidates", return_value=candidates),
+            patch.object(keju_hybrid, "search_knowledge", return_value=[]),
+        ):
+            recognizer._analyze(
+                context,
+                SimpleNamespace(image=image),
+                keju_hybrid._StageTimings(),
+            )
+            self.assertNotIn("MAA_KEJU_REQUIRE_ROUND_ONE", os.environ)
+
+        self.assertEqual(recognizer.last_status, "ready")
+        self.assertEqual(recognizer.last_answer, "A")
+        self.assertEqual(recognizer.last_options["A"], "泥鳅")
+
+    def test_recognizer_preserves_raw_round_metadata_after_cleaning_question(self):
+        recognizer = object.__new__(keju_hybrid.KejuHybridAnswer)
+        image = np.ones((720, 923, 3), dtype=np.uint8)
+        context = SimpleNamespace(get_node_data=lambda _name: {"attach": {}})
+        option_results = iter([
+            ("A.五行", [340, 315, 225, 80]),
+            ("B.人物", [570, 315, 230, 80]),
+            ("C.星宿", [340, 395, 225, 75]),
+            ("D.动物", [570, 395, 230, 75]),
+        ])
+        candidates = [{
+            "question": "人生不相见动如参与商里的参与商是指什么",
+            "answers": ["星宿"],
+            "similarity": 100,
+        }]
+
+        with (
+            patch.dict("os.environ", {
+                "MAA_KEJU_EXAM_TYPE": "huishi",
+                "MAA_KEJU_RECOGNIZE_ONLY": "1",
+            }),
+            patch.object(
+                keju_hybrid,
+                "_ocr_region",
+                side_effect=[
+                    "科举会试",
+                    "第15/15题剩余时间20人生不相见动如参与商里的参与商是指什么",
                 ],
             ),
             patch.object(
@@ -268,9 +649,8 @@ class HybridAnswerTests(unittest.TestCase):
                 keju_hybrid._StageTimings(),
             )
 
-        self.assertEqual(recognizer.last_status, "ready")
-        self.assertEqual(recognizer.last_answer, "A")
-        self.assertEqual(recognizer.last_options["A"], "泥鳅")
+        self.assertEqual(recognizer.last_round_number, 15)
+        self.assertEqual(recognizer.last_question_round, (15, 15))
 
     def test_recognizer_prefers_explicit_argv_image(self):
         image = np.ones((20, 30, 3), dtype=np.uint8)

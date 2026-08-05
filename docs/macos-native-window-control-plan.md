@@ -1,6 +1,6 @@
 # macOS 原生窗口控制后端替换规划
 
-状态：规划已确认，待实施（2026-07-28）
+状态：阶段 1 首批与阶段 3 坐标映射首批已完成，阶段 2 原生截图尚未开始（2026-07-30）
 
 ## 1. 目标与结论
 
@@ -33,11 +33,11 @@
 
 已确认的现状：
 
-- 实机任务启动时，Maa `ScreenCaptureKit` 多次稳定出现 `screencap failed`，随后才能进入系统截图回退。
+- Maa `ScreenCaptureKit` 曾出现失败并进入系统截图回退；2026-07-30 两次只读实机探测均直接取得 `923×720` Maa 帧，仍需长时间采样确认稳定性。
 - 回退截图每帧启动一个 `screencapture` 子进程、写临时 PNG、重新读取并裁剪，延迟高且依赖黑边启发式。
 - 输入层已经是本地 Objective-C++ `CGEvent`，并且会绑定单一窗口 ID，不需要完全重写。
-- 输入坐标映射仍固定扣除 28 点标题栏高度，在不同窗口装饰、Retina 缩放和未来标定结果下容易漂移。
-- 截图、输入和标定没有共享同一份内容矩形元数据，问题发生时难以判断是识别偏差还是坐标偏差。
+- 已迁移到统一 backend 的 runtime 不再固定扣除 28 点标题栏，而是让识别 Scene 携带同一 `CapturedFrame` 的内容矩形；尚未迁移的旧 runner 仍保留兼容路径。
+- 截图、输入和只读坐标预测已共享同一份帧元数据；四锚点视觉验证和配置持久化尚未完成。
 - Computer Use 对同一游戏窗口的截图在本轮实机诊断中保持稳定，说明改成本地原生控制层有明确价值。
 
 ## 3. 范围
@@ -118,6 +118,7 @@ class MacOSWindowBackend(Protocol):
     def bind(self, target_id: str) -> WindowTarget: ...
     def health(self) -> dict: ...
     def capture(self, guard) -> CapturedFrame: ...
+    def preview_point(self, point, frame: CapturedFrame) -> tuple[float, float]: ...
     def click(self, point, frame: CapturedFrame, guard) -> tuple[float, float]: ...
     def drag(self, start, end, frame: CapturedFrame, guard) -> None: ...
 ```
@@ -177,6 +178,8 @@ class MacOSWindowBackend(Protocol):
 
 ### 阶段 0：基线测量
 
+状态：部分完成。已取得 Maa `923×720`、负坐标副屏窗口和系统 fallback 元数据，200 帧及双尺寸基线未完成。
+
 - 记录当前 Maa、系统回退和 Computer Use 辅助诊断下的截图成功率、尺寸和延迟。
 - 选取主界面、活动页、战斗页和弹窗页作为固定样本。
 - 明确最低支持 macOS 版本和 ScreenCaptureKit API 可用范围。
@@ -185,6 +188,8 @@ class MacOSWindowBackend(Protocol):
 
 ### 阶段 1：统一后端接口
 
+状态：首批完成。`MacOSTaskRuntime` 已接入；科举、三界奇缘和指标采集仍待逐项迁移。
+
 - 新增 `MacOSWindowBackend`、`WindowTarget` 和 `CapturedFrame`。
 - 用 `LegacyWindowBackend` 包装现有 `WindowCapture + NativeMacOSInput`。
 - `MacOSTaskRuntime`、科举、三界奇缘和指标采集改为依赖接口，行为不变。
@@ -192,6 +197,8 @@ class MacOSWindowBackend(Protocol):
 提交：`refactor: abstract macos window backend`
 
 ### 阶段 2：原生截图后端
+
+状态：未开始。当前统一接口内部仍使用 Maa 截图及系统命令 fallback。
 
 - 在原生桥中实现按窗口 ID 的 ScreenCaptureKit 单帧截图。
 - 返回原始帧和完整坐标元数据。
@@ -202,10 +209,14 @@ class MacOSWindowBackend(Protocol):
 
 ### 阶段 3：统一坐标与输入
 
+状态：首批完成，实机锚点验收未完成。
+
 - 把现有 CGEvent 点击/拖动并入新后端。
 - 使用内容矩形替代固定标题栏高度。
 - 接入窗口标定签名和输入前漂移门控。
 - 覆盖多显示器负坐标、1x/2x 缩放和窗口移动。
+
+实现证据：Objective-C++ 桥已提供屏幕点点击/拖动和实时窗口几何查询；统一 backend 以 `content_rect_points` 映射帧像素。输入前会复核 PID、尺寸和 frame ID，窗口仅移动时更新原点，resize 时旧帧与只读预测均失效。预检协议输出窗口边界、内容矩形、缩放、frame ID、识别框中心和预测屏幕点；四锚点未完成前明确输出 `anchorValidation: pending`，且预览不发送输入。
 
 提交：`feat: use frame-aware native macos input mapping`
 
@@ -298,4 +309,4 @@ class MacOSWindowBackend(Protocol):
 
 ## 13. 推荐实施顺序
 
-先完成阶段 0 和阶段 1，以不改变行为的方式建立接口和基线；随后实现原生截图，并用影子模式验证。原生截图稳定后再改坐标映射和输入，最后逐任务灰度切换。不要一次性删除 Maa 控制路径，也不要把底层迁移与秘境、运镖等任务状态机修复合并提交。
+下一步先采集无遮挡主界面的四锚点样本并完成只读可视化确认，再在第二种窗口尺寸验证预测误差和 resize 失效。随后迁移科举、三界奇缘、捉鬼及指标采集到统一 backend；阶段 2 实现原生 ScreenCaptureKit 后端后再进入影子对比和默认切换。Maa 控制路径在原生后端通过完整矩阵前继续保留。

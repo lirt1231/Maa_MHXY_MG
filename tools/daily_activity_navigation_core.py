@@ -1,43 +1,15 @@
-"""Pure navigation decisions for macOS daily-activity task runners."""
+"""Platform-neutral navigation decisions for daily-activity workflows."""
 
 from __future__ import annotations
 
 import re
 
 try:
+    from .automation_geometry import center, in_region, valid_box
     from .daily_schedule_macos_core import daily_schedule_page_evidence, normalize_text
 except ImportError:  # Direct execution through tools/run_*.py.
+    from automation_geometry import center, in_region, valid_box
     from daily_schedule_macos_core import daily_schedule_page_evidence, normalize_text
-
-
-def valid_box(item):
-    box = item.get("box") if isinstance(item, dict) else None
-    if not isinstance(box, (list, tuple)) or len(box) != 4:
-        return None
-    if not all(isinstance(value, (int, float)) for value in box):
-        return None
-    if box[2] <= 0 or box[3] <= 0:
-        return None
-    return list(box)
-
-
-def center(item):
-    x, y, width, height = valid_box(item)
-    return [round(x + width / 2), round(y + height / 2)]
-
-
-def in_region(item, image_size, *, min_x=0, max_x=1, min_y=0, max_y=1):
-    box = valid_box(item)
-    if box is None or not image_size or len(image_size) != 2:
-        return False
-    image_width, image_height = image_size
-    if image_width <= 0 or image_height <= 0:
-        return False
-    x, y = center(item)
-    return (
-        min_x <= x / image_width <= max_x
-        and min_y <= y / image_height <= max_y
-    )
 
 
 def find_items(texts, pattern, image_size=None, region=None):
@@ -66,6 +38,12 @@ def same_activity_card(anchor, candidate, image_size):
     )
 
 
+ACTIVITY_UNAVAILABLE_PATTERN = (
+    r"(?:\d{1,2}[:：]\d{2}开启|未开启|尚未开启|暂未开放|"
+    r"明日开启|等级不足|不可参与|已锁定|活动已结束)"
+)
+
+
 def classify_daily_navigation(
     texts,
     templates,
@@ -86,6 +64,13 @@ def classify_daily_navigation(
         return {"status": "open_daily", "box": valid_box(daily_tabs[0])}
 
     targets = find_items(texts, target_pattern)
+    visible_card_actions = find_items(
+        texts,
+        r"参加|前往|去完成|领取任务|完成|已完成|全部完成",
+        image_size,
+        {"min_x": 0.42, "max_x": 0.95, "min_y": 0.15, "max_y": 0.82},
+    )
+    loaded_card_list = len(visible_card_actions) >= 2
     confirmed_daily_page = bool(daily_page) or bool(
         daily_tab_confirmed and daily_tabs
     )
@@ -93,7 +78,7 @@ def classify_daily_navigation(
         target = targets[0]
         completed = [
             item
-            for item in find_items(texts, r"已完成|全部完成")
+            for item in find_items(texts, r"完成|已完成|全部完成")
             if same_activity_card(target, item, image_size)
         ]
         if completed:
@@ -105,9 +90,19 @@ def classify_daily_navigation(
         ]
         if actions:
             return {"status": "join_task", "box": valid_box(actions[0])}
+        unavailable = [
+            item
+            for item in find_items(texts, ACTIVITY_UNAVAILABLE_PATTERN)
+            if same_activity_card(target, item, image_size)
+        ]
+        if unavailable:
+            return {
+                "status": "unavailable",
+                "reason": normalize_text(unavailable[0].get("text", "")),
+            }
         return {"status": "scroll_daily", "reason": "target_action_not_visible"}
 
-    if daily_page:
+    if daily_page or (daily_tab_confirmed and daily_tabs and loaded_card_list):
         return {"status": "scroll_daily", "reason": "target_not_visible"}
 
     if daily_tab_confirmed and daily_tabs:
@@ -172,6 +167,7 @@ def classify_daily_navigation(
 
 
 __all__ = [
+    "ACTIVITY_UNAVAILABLE_PATTERN",
     "center",
     "classify_daily_navigation",
     "find_items",

@@ -44,4 +44,27 @@ describe("InspectionEvidence", () => {
     expect(view.getAllByText("未提供")).toHaveLength(3);
     expect(view.getByText("未命中")).toBeTruthy();
   });
+
+  it("shows read-only coordinate prediction when frame evidence exists", () => {
+    const view = render(<InspectionEvidence inspection={{
+      ...inspection,
+      evidence: {
+        ...inspection.evidence,
+        frameId: "frame-1",
+        captureMethod: "maa",
+        windowBoundsPoints: [-1786, -106, 1051, 820],
+        contentRectPoints: [-1786, -105.8483, 1051, 819.8483],
+        scaleFactor: 0.8782112274,
+        anchorValidation: "pending",
+        recognizedBoxCenterPixels: [275, 50],
+        predictedScreenPoint: [-1472.9, -48.9],
+      },
+    }} />);
+
+    expect(view.getByText("maa · 0.878211x")).toBeTruthy();
+    expect(view.getByText("待验证")).toBeTruthy();
+    expect(view.getByText("275, 50 px")).toBeTruthy();
+    expect(view.getByText("-1472.9, -48.9 pt")).toBeTruthy();
+    expect(view.getByText("frame-1")).toBeTruthy();
+  });
 });

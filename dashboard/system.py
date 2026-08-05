@@ -8,6 +8,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 GAME_BUNDLE_ID = "com.netease.my"
+SYSTEM_SETTINGS_URLS = {
+    "screen-capture": "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+    "accessibility": "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+}
 
 
 def _game_is_running() -> bool:
@@ -20,6 +24,28 @@ def _game_is_running() -> bool:
         timeout=3,
     )
     return completed.returncode == 0 and bool(completed.stdout.strip())
+
+
+def _screen_capture_is_available(
+    permission_granted: bool,
+    window_id: int,
+    *,
+    capture_probe=None,
+) -> bool:
+    if permission_granted:
+        return True
+    if not window_id:
+        return False
+    if capture_probe is None:
+        from tools.macos_window_adapter import system_window_capture_frame
+
+        capture_probe = system_window_capture_frame
+    try:
+        frame = capture_probe(window_id)
+    except Exception:
+        return False
+    image = getattr(frame, "image", None)
+    return image is not None and bool(getattr(image, "size", 0))
 
 
 def inspect_macos() -> dict:
@@ -57,8 +83,12 @@ def inspect_macos() -> dict:
         result["windowFound"] = bool(windows or native_window_id)
         result["gameRunning"] = result["gameRunning"] or bool(windows)
         result["windowName"] = "梦幻西游" if result["windowFound"] else None
-        result["screenCapturePermission"] = Toolkit.macos_check_permission(
+        reported_screen_capture_permission = Toolkit.macos_check_permission(
             MaaMacOSPermissionEnum.ScreenCapture
+        )
+        result["screenCapturePermission"] = _screen_capture_is_available(
+            reported_screen_capture_permission,
+            native_window_id or (windows[0].hwnd if windows else 0),
         )
         result["accessibilityPermission"] = Toolkit.macos_check_permission(
             MaaMacOSPermissionEnum.Accessibility
@@ -93,3 +123,18 @@ def launch_game(timeout: float = 20) -> dict:
             return state
         time.sleep(0.8)
     raise RuntimeError("游戏已经启动，但等待窗口出现超时；请检查登录界面")
+
+
+def open_system_settings(section: str) -> dict:
+    url = SYSTEM_SETTINGS_URLS.get(section)
+    if not url:
+        raise ValueError("不支持的系统设置页面")
+    if sys.platform != "darwin":
+        raise RuntimeError("打开系统设置仅支持 macOS")
+    completed = subprocess.run(
+        ["/usr/bin/open", url], capture_output=True, text=True, check=False, timeout=5
+    )
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or "系统无法打开隐私与安全性设置"
+        raise RuntimeError(detail)
+    return {"opened": True, "section": section}

@@ -5,8 +5,11 @@ from contextlib import redirect_stdout
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from tools.bangpai_qiandao_macos_core import (
+from tools.bangpai_qiandao_recognition import (
+    clan_entry_box,
     classify_clan_sign_in_scene,
+    expand_menu_box,
+    expanded_menu_visible,
     welfare_close_box,
 )
 import tools.run_bangpai_qiandao_macos as clan_runner
@@ -88,11 +91,81 @@ class ClanSignInSceneTests(unittest.TestCase):
             text("队伍", (970, 106, 45, 25)),
             text("包裹", (971, 620, 33, 16)),
             text("+", (966, 658, 43, 46)),
+            text("福利", (10, 134, 36, 18)),
+            text("当前", (8, 675, 37, 18)),
         ]
 
         self.assertEqual(
             classify_clan_sign_in_scene(texts, {}, "enter", (1020, 718)),
-            {"status": "expand_menu", "box": [966, 658, 43, 46]},
+            {"status": "expand_menu", "box": expand_menu_box((1020, 718))},
+        )
+
+    def test_current_live_plus_template_requires_three_main_screen_regions(self):
+        live_plus = {"expand_menu_live": (870, 653, 50, 62)}
+        current_main = [
+            text("任务", (787, 116, 38, 22)),
+            text("队伍", (881, 117, 37, 19)),
+            text("福利", (11, 134, 35, 18)),
+            text("活动", (242, 66, 26, 14)),
+        ]
+        self.assertEqual(
+            classify_clan_sign_in_scene(
+                current_main, live_plus, "enter", (923, 720)
+            ),
+            {"status": "expand_menu", "box": expand_menu_box((923, 720))},
+        )
+        for texts in (current_main[:2], current_main[2:]):
+            with self.subTest(texts=texts):
+                self.assertEqual(
+                    classify_clan_sign_in_scene(
+                        texts, live_plus, "enter", (923, 720)
+                    )["status"],
+                    "unknown",
+                )
+
+    def test_fixed_clan_slot_requires_menu_phase_and_main_screen_regions(self):
+        current_main = [
+            text("任务", (787, 116, 38, 22)),
+            text("队伍", (881, 117, 37, 19)),
+            text("福利", (11, 134, 35, 18)),
+            text("活动", (242, 66, 26, 14)),
+        ]
+        self.assertEqual(
+            classify_clan_sign_in_scene(
+                current_main, {}, "menu", (923, 720)
+            ),
+            {"status": "open_clan", "box": clan_entry_box((923, 720))},
+        )
+        for texts, phase in (
+            (current_main[:2], "menu"),
+            (current_main[2:], "menu"),
+            (current_main, "enter"),
+        ):
+            with self.subTest(texts=texts, phase=phase):
+                self.assertEqual(
+                    classify_clan_sign_in_scene(
+                        texts, {}, phase, (923, 720)
+                    )["status"],
+                    "unknown",
+                )
+
+    def test_menu_phase_retries_expand_while_plus_is_still_visible(self):
+        current_main = [
+            text("任务", (787, 116, 38, 22)),
+            text("队伍", (881, 117, 37, 19)),
+            text("福利", (11, 134, 35, 18)),
+            text("活动", (242, 66, 26, 14)),
+        ]
+        decision = classify_clan_sign_in_scene(
+            current_main,
+            {"expand_menu_live": (885, 666, 28, 35)},
+            "menu",
+            (923, 720),
+        )
+
+        self.assertEqual(
+            decision,
+            {"status": "expand_menu", "box": expand_menu_box((923, 720))},
         )
 
     def test_ocr_plus_requires_main_screen_anchors_and_entry_phase(self):
@@ -120,7 +193,51 @@ class ClanSignInSceneTests(unittest.TestCase):
         decision = classify_clan_sign_in_scene(
             [text(" 帮 派 ", (800, 620, 70, 60))], {}, "menu"
         )
-        self.assertEqual(decision, {"status": "open_clan", "box": [800, 620, 70, 60]})
+        self.assertEqual(
+            decision,
+            {"status": "open_clan", "box": clan_entry_box(None)},
+        )
+
+    def test_opens_fixed_clan_slot_from_strict_expanded_menu_evidence(self):
+        texts = [
+            text("强化", (538, 687, 40, 20)),
+            text("家园", (785, 690, 32, 15)),
+            text("技能", (847, 689, 31, 16)),
+            text("X", (975, 670, 18, 22)),
+        ]
+
+        self.assertTrue(expanded_menu_visible(texts, (1020, 718)))
+        self.assertTrue(expanded_menu_visible(
+            [*texts[:-1], text("``", (975, 670, 18, 21))],
+            (1020, 718),
+        ))
+        for phase in ("enter", "menu"):
+            with self.subTest(phase=phase):
+                self.assertEqual(
+                    classify_clan_sign_in_scene(texts, {}, phase, (1020, 718)),
+                    {"status": "open_clan", "box": clan_entry_box((1020, 718))},
+                )
+
+    def test_fixed_clan_slot_requires_close_button_and_multiple_menu_labels(self):
+        labels = [
+            text("家园", (785, 690, 32, 15)),
+            text("技能", (847, 689, 31, 16)),
+        ]
+        close_button = text("X", (975, 670, 18, 22))
+
+        for texts, phase in (
+            (labels, "menu"),
+            ([labels[0], close_button], "menu"),
+            ([*labels, text("X", (100, 100, 18, 22))], "menu"),
+            ([*labels, close_button], "clan"),
+        ):
+            with self.subTest(texts=texts, phase=phase):
+                self.assertNotEqual(
+                    classify_clan_sign_in_scene(
+                        texts, {}, phase, (1020, 718)
+                    )["status"],
+                    "open_clan",
+                )
 
     def test_clan_header_and_welfare_template_are_both_required(self):
         self.assertEqual(
@@ -254,6 +371,42 @@ class ClanSignInSceneTests(unittest.TestCase):
                     "claim_dividend",
                 )
 
+    def test_zero_dividend_finishes_without_clicking_claim_button(self):
+        zero_dividend = welfare_texts(
+            text("已签到", (749, 455, 62, 26)),
+            text("0", (783, 540, 12, 16)),
+            text("领取分红", (739, 578, 82, 22)),
+        )
+
+        self.assertEqual(
+            classify_clan_sign_in_scene(
+                zero_dividend, {}, "enter", (1020, 718)
+            )["status"],
+            "already_completed",
+        )
+        for phase in ("verify_sign_in", "check_dividend", "verify_dividend"):
+            with self.subTest(phase=phase):
+                self.assertEqual(
+                    classify_clan_sign_in_scene(
+                        zero_dividend, {}, phase, (1020, 718)
+                    )["status"],
+                    "completed",
+                )
+
+    def test_zero_outside_dividend_card_does_not_hide_claim(self):
+        decision = classify_clan_sign_in_scene(
+            welfare_texts(
+                text("已签到", (749, 455, 62, 26)),
+                text("0", (448, 193, 19, 18)),
+                text("领取分红", (739, 578, 82, 22)),
+            ),
+            {},
+            "enter",
+            (1020, 718),
+        )
+
+        self.assertEqual(decision["status"], "claim_dividend")
+
     def test_dividend_confirmation_requires_expected_phase_and_region(self):
         confirmation = text("领取", (475, 550, 70, 40))
         self.assertEqual(
@@ -370,9 +523,9 @@ class ClanSignInRunnerTests(unittest.TestCase):
             [call.args[0] for call in runtime.click_box.call_args_list],
             [
                 welfare_close_box((1020, 718)),
-                (940, 630, 50, 50),
-                (800, 620, 70, 60),
-                (880, 350, 60, 90),
+                expand_menu_box((1020, 718)),
+                clan_entry_box((1020, 718)),
+                [880, 350, 60, 90],
             ],
         )
         self.assertEqual(
@@ -424,9 +577,9 @@ class ClanSignInRunnerTests(unittest.TestCase):
         self.assertEqual(
             [call.args[0] for call in runtime.click_box.call_args_list],
             [
-                (940, 630, 50, 50),
-                (800, 620, 70, 60),
-                (880, 350, 60, 90),
+                expand_menu_box((1020, 718)),
+                clan_entry_box((1020, 718)),
+                [880, 350, 60, 90],
                 [700, 460, 150, 50],
             ],
         )
@@ -559,6 +712,7 @@ class ClanSignInRunnerTests(unittest.TestCase):
         runtime.read_scene.return_value = scene(
             templates={"clan_entry": (800, 620, 70, 60)}
         )
+        runtime.inspection_evidence.return_value = {}
         guard = Mock()
 
         for inspect_scene, recognize_only in ((True, False), (False, True)):

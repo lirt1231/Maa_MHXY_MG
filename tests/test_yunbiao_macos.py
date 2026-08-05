@@ -3,10 +3,10 @@ import json
 import unittest
 from contextlib import redirect_stdout
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 from tools.run_yunbiao_macos import run
-from tools.yunbiao_macos_core import classify_yunbiao_scene
+from tools.yunbiao_recognition import classify_yunbiao_scene
 
 
 def text(value, box=(10, 20, 80, 24)):
@@ -176,6 +176,93 @@ class YunbiaoRunnerTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["rounds"], 3)
+
+    @patch("tools.run_yunbiao_macos.MacOSTaskRuntime")
+    def test_final_round_completes_after_stable_main_screen_without_more_input(
+        self, runtime_class
+    ):
+        runtime = runtime_class.return_value
+        normal = scene([text("押送普通镖银", (760, 300, 160, 28))])
+        confirm = scene([text("确定", (480, 390, 80, 30))])
+        active = scene([text("距离运镖完成：42秒", (120, 20, 180, 25))])
+        main = scene(
+            [
+                text("指引", (199, 48, 34, 20)),
+                text("排行", (323, 49, 37, 19)),
+                text("活动", (263, 45, 37, 16)),
+            ]
+        )
+        runtime.read_scene.side_effect = [normal, confirm, active, main, main]
+        args = SimpleNamespace(
+            inspect_scene=False, recognize_only=False, rounds=1, max_steps=6
+        )
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            self.assertEqual(run(args, Mock()), 0)
+
+        self.assertEqual(runtime.click_box.call_count, 2)
+        result = next(
+            json.loads(line[len("result_json="):])
+            for line in output.getvalue().splitlines()
+            if line.startswith("result_json=")
+        )
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["rounds"], 1)
+
+    @patch("tools.run_yunbiao_macos.MacOSTaskRuntime")
+    def test_transient_main_during_final_delivery_resets_confirmation(
+        self, runtime_class
+    ):
+        runtime = runtime_class.return_value
+        normal = scene([text("押送普通镖银", (760, 300, 160, 28))])
+        confirm = scene([text("确定", (480, 390, 80, 30))])
+        active = scene([text("距离运镖完成：42秒", (120, 20, 180, 25))])
+        main = scene(
+            [
+                text("指引", (199, 48, 34, 20)),
+                text("排行", (323, 49, 37, 19)),
+                text("活动", (263, 45, 37, 16)),
+            ]
+        )
+        runtime.read_scene.side_effect = [
+            normal, confirm, active, main, active, main, main,
+        ]
+        args = SimpleNamespace(
+            inspect_scene=False, recognize_only=False, rounds=1, max_steps=8
+        )
+        waiter = Mock()
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            self.assertEqual(run(args, waiter), 0)
+
+        self.assertEqual(runtime.click_box.call_count, 2)
+        self.assertEqual(waiter.wait.call_args_list.count(call(3.0)), 2)
+
+    @patch("tools.run_yunbiao_macos.MacOSTaskRuntime")
+    def test_main_screen_cannot_complete_before_final_delivery_was_seen(
+        self, runtime_class
+    ):
+        runtime = runtime_class.return_value
+        normal = scene([text("押送普通镖银", (760, 300, 160, 28))])
+        confirm = scene([text("确定", (480, 390, 80, 30))])
+        main = scene(
+            [
+                text("指引", (199, 48, 34, 20)),
+                text("排行", (323, 49, 37, 19)),
+                text("活动", (263, 45, 37, 16)),
+            ]
+        )
+        runtime.read_scene.side_effect = [normal, confirm, main, main]
+        args = SimpleNamespace(
+            inspect_scene=False, recognize_only=False, rounds=1, max_steps=4
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "超过最大识别步骤"):
+            run(args, Mock())
+
+        self.assertEqual(runtime.click_box.call_count, 2)
 
     @patch("tools.run_yunbiao_macos.MacOSTaskRuntime")
     def test_repeated_normal_option_stops_before_second_click(self, runtime_class):

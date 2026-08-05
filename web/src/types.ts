@@ -15,11 +15,29 @@ export type Task = {
   summary: string;
   description: string;
   status: string;
+  category?: {
+    id: "daily" | "weekly" | "repeatable";
+    label: string;
+    order: number;
+  };
+  taskOrder?: number;
+  schedule?: {
+    weekdays: number[];
+    startTime?: string;
+    label: string;
+    unavailableReason: string;
+  };
   risk: { level: "low" | "medium" | "high"; label: string; summary: string };
   steps: string[];
   checklist: string[];
   warnings: string[];
   parameters: TaskParameter[];
+  guideImage?: { src: string; alt: string; caption: string };
+  availability?: {
+    available: boolean;
+    label: string | null;
+    reason: string | null;
+  };
   todayStatus: {
     status: "completed" | "pending";
     completedAt: string | null;
@@ -41,6 +59,14 @@ export type TaskInspection = {
     imageSize?: [number, number] | null;
     ocrItemCount?: number;
     matchedTemplates?: string[];
+    frameId?: string;
+    captureMethod?: string;
+    windowBoundsPoints?: [number, number, number, number];
+    contentRectPoints?: [number, number, number, number];
+    scaleFactor?: number;
+    anchorValidation?: string;
+    recognizedBoxCenterPixels?: [number, number];
+    predictedScreenPoint?: [number, number];
   };
   observedAt: string;
 };
@@ -58,6 +84,24 @@ export type Run = {
   error?: string | null;
   result?: TaskRunResult | null;
   benefitStatus?: string;
+  failurePhase?: "task" | "recovery" | null;
+  homeRecovery?: {
+    status: "not_requested" | "running" | "confirmed" | "failed" | "cancelled";
+    outcome?: "already_main" | "recovered" | null;
+    scene?: string | null;
+    reason?: string | null;
+    actions?: number;
+    clicks?: number;
+    confirmedAt?: string | null;
+    evidence?: {
+      targetId: string;
+      firstFrameId: string;
+      lastFrameId: string;
+      anchors: string[];
+      imageSize?: [number, number];
+      captureMethod?: string;
+    };
+  };
 };
 
 type TaskRunProgress = {

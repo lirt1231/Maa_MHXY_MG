@@ -40,63 +40,109 @@ const REWARD_STATUS_LABELS: Record<DailyTaskItem["rewardStatus"], string> = {
 
 function SnapshotMeta({ snapshot }: { snapshot: GameDataSnapshot }) {
   const status = {
-    success: { label: "采集成功", className: "succeeded" },
-    partial: { label: "部分识别", className: "partial" },
-    failed: { label: "采集失败", className: "failed" },
+    success: { label: "已更新", className: "succeeded" },
+    partial: { label: "部分内容待确认", className: "partial" },
+    failed: { label: "更新失败", className: "failed" },
   }[snapshot.status];
   return <div className="raw-data-meta">
-    <span>来源：{snapshot.sourcePage || "未知页面"}</span>
-    <span>采集：<time dateTime={snapshot.capturedAt}>{formatTime(snapshot.capturedAt)}</time></span>
+    <span>更新于 <time dateTime={snapshot.capturedAt}>{formatTime(snapshot.capturedAt)}</time></span>
     <span className={`raw-data-status ${status.className}`}>{status.label}</span>
   </div>;
 }
 
+export function DataUpdateError({
+  title, guidance, fallback, technicalError, retryLabel, retrying, disabled, onRetry
+}: {
+  title: string;
+  guidance: string;
+  fallback?: string;
+  technicalError?: string | null;
+  retryLabel: string;
+  retrying: boolean;
+  disabled: boolean;
+  onRetry: () => void;
+}) {
+  return <section className="raw-data-error" role="alert">
+    <strong>{title}</strong>
+    <p>{guidance}</p>
+    {fallback && <p>{fallback}</p>}
+    <button className="button" disabled={disabled || retrying} onClick={onRetry}>
+      {retrying ? "正在重新更新…" : retryLabel}
+    </button>
+    {technicalError && <details>
+      <summary>查看详细原因</summary>
+      <small className="capture-error">{technicalError}</small>
+    </details>}
+  </section>;
+}
+
 function LatestAttemptNotice({
-  latestAttempt, usableSnapshot
+  latestAttempt, usableSnapshot, subject, guidance, retryLabel, retrying, disabled, onRetry
 }: {
   latestAttempt?: GameDataSnapshot | null;
   usableSnapshot?: GameDataSnapshot | null;
+  subject: string;
+  guidance: string;
+  retryLabel: string;
+  retrying: boolean;
+  disabled: boolean;
+  onRetry: () => void;
 }) {
   if (!latestAttempt || latestAttempt.status === "success") return null;
-  const status = latestAttempt.status === "partial" ? "部分识别" : "采集失败";
   const fallback = usableSnapshot
-    ? `当前继续显示 ${formatTime(usableSnapshot.capturedAt)} 的最近成功数据。`
-    : "当前没有可替代的成功数据。";
-  return <p className="raw-data-error">
-    最近尝试：<strong>{status}</strong>（{formatTime(latestAttempt.capturedAt)}）。
-    {latestAttempt.error ? `${latestAttempt.error} ` : ""}{fallback}
-  </p>;
+    ? `现在继续显示 ${formatTime(usableSnapshot.capturedAt)} 更新的数据。`
+    : "暂时没有之前的数据可以显示。";
+  return <DataUpdateError
+    title={latestAttempt.status === "partial" ? `${subject}没有更新完整` : `${subject}更新失败`}
+    guidance={guidance}
+    fallback={fallback}
+    technicalError={latestAttempt.error}
+    retryLabel={retryLabel}
+    retrying={retrying}
+    disabled={disabled}
+    onRetry={onRetry}
+  />;
 }
 
 export function CharacterResourcesView({
-  snapshot, latestAttempt
+  snapshot, latestAttempt, capturing, disabled, onCapture
 }: {
   snapshot?: GameDataSnapshot | null;
   latestAttempt?: GameDataSnapshot | null;
+  capturing: boolean;
+  disabled: boolean;
+  onCapture: () => void;
 }) {
   const resources = [
-    ["金币", snapshot ? formatNumber(snapshot.data.gold) : "—", false],
-    ["角色等级", snapshot ? formatNumber(snapshot.data.level) : "—", false],
-    ["当前经验", snapshot ? formatNumber(snapshot.data.experience) : "—", false],
-    ["升级所需经验", snapshot ? formatNumber(snapshot.data.experienceRequired) : "—", false],
-    ["银币", "待接入", true],
-    ["仙玉", "待接入", true],
-    ["活力", "待接入", true],
-    ["评分", "待接入", true]
+    ["金币", snapshot ? formatNumber(snapshot.data.gold) : "—"],
+    ["角色等级", snapshot ? formatNumber(snapshot.data.level) : "—"],
+    ["当前经验", snapshot ? formatNumber(snapshot.data.experience) : "—"],
+    ["升级还需经验", snapshot ? formatNumber(snapshot.data.experienceRequired) : "—"],
   ] as const;
 
   return <section className="raw-data-section" role="tabpanel" id="data-panel-resources" aria-labelledby="data-tab-resources">
     <div className="panel-heading">
-      <div><span className="eyebrow">CHARACTER RESOURCES</span><h2>角色资源</h2></div>
+      <div><span className="eyebrow">当前数据</span><h2>角色资源</h2></div>
       {snapshot && <SnapshotMeta snapshot={snapshot} />}
     </div>
-    <LatestAttemptNotice latestAttempt={latestAttempt} usableSnapshot={snapshot} />
+    <LatestAttemptNotice
+      latestAttempt={latestAttempt}
+      usableSnapshot={snapshot}
+      subject="角色数据"
+      guidance="请确认游戏窗口已经打开并且没有被其他窗口遮挡，然后再试一次。"
+      retryLabel="重新更新角色数据"
+      retrying={capturing}
+      disabled={disabled}
+      onRetry={onCapture}
+    />
     {snapshot ? <>
-      {snapshot.error && <p className="raw-data-error">{snapshot.error}</p>}
-      <dl className="resource-ledger">{resources.map(([label, value, pending]) => <div key={label} className={pending ? "pending" : ""}>
+      {snapshot.error && latestAttempt?.status === "success" && <details>
+        <summary>查看记录说明</summary><small className="capture-error">{snapshot.error}</small>
+      </details>}
+      <dl className="resource-ledger">{resources.map(([label, value]) => <div key={label}>
         <dt>{label}</dt><dd>{value}</dd>
       </div>)}</dl>
-    </> : <div className="raw-data-empty">暂无角色资源快照，完成一次数据采集后将在这里显示。</div>}
+    </> : <div className="raw-data-empty">还没有角色数据，完成一次自动记录后会显示在这里。</div>}
   </section>;
 }
 
@@ -135,18 +181,27 @@ export function DailyTasksView({
   const pendingTasks = latestAttempt?.status === "partial" && latestAttempt.schemaVersion >= 2
     ? readDailyTasks(latestAttempt)
     : [];
+  const updateNeedsAttention = Boolean(latestAttempt && latestAttempt.status !== "success");
   return <section className="raw-data-section" role="tabpanel" id="data-panel-daily" aria-labelledby="data-tab-daily">
     <div className="panel-heading">
-      <div><span className="eyebrow">DAILY TASKS</span><h2>今日任务</h2></div>
+      <div><span className="eyebrow">游戏日程</span><h2>今日任务</h2></div>
       <div className="raw-data-actions">
         {snapshot && <SnapshotMeta snapshot={snapshot} />}
-        <button className="button" disabled={disabled || capturing} onClick={onCapture}>
-          {capturing ? "正在读取…" : "读取当前日程"}
-        </button>
+        {!updateNeedsAttention && <button className="button" disabled={disabled || capturing} onClick={onCapture}>
+          {capturing ? "正在更新…" : "更新游戏日程"}
+        </button>}
       </div>
     </div>
-    <LatestAttemptNotice latestAttempt={latestAttempt} usableSnapshot={snapshot} />
-    {snapshot?.error && latestAttempt?.id === snapshot.id && <p className="raw-data-error">{snapshot.error}</p>}
+    <LatestAttemptNotice
+      latestAttempt={latestAttempt}
+      usableSnapshot={snapshot}
+      subject="游戏日程"
+      guidance="请确认游戏已经打开并停留在可操作状态，然后重新更新游戏日程。"
+      retryLabel="重新更新游戏日程"
+      retrying={capturing}
+      disabled={disabled}
+      onRetry={onCapture}
+    />
     {tasks.length ? <div className="daily-task-table-wrap"><table className="daily-task-table">
       <thead><tr><th>任务</th><th>进度</th><th>状态</th><th>奖励</th></tr></thead>
       <tbody>{tasks.map((task, index) => <tr key={task.taskId || `${task.name}-${index}`}>
@@ -156,11 +211,11 @@ export function DailyTasksView({
         <td>{REWARD_STATUS_LABELS[task.rewardStatus]}</td>
       </tr>)}</tbody>
     </table></div> : <div className="raw-data-empty">{snapshot
-      ? "本次采集未返回今日任务列表。"
-      : "暂无今日任务快照。"}</div>}
+      ? "这次没有读到今日任务，请确认游戏日程页面可以正常打开。"
+      : "还没有今日任务记录。"}</div>}
     {pendingTasks.length > 0 && <div className="daily-task-table-wrap">
       <div className="raw-data-meta">
-        <span>最新尝试待确认，不可用于任务编排</span>
+        <span>下面是这次读到但还不能确认的内容</span>
       </div>
       <table className="daily-task-table" aria-label="最新尝试待确认任务">
         <thead><tr><th>待确认任务</th><th>进度</th><th>状态</th><th>奖励</th></tr></thead>

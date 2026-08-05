@@ -57,6 +57,52 @@ class UserProgressTranslationTests(unittest.TestCase):
         ):
             self.assertIsNone(user_progress("keju", line))
 
+    def test_game_driven_monitor_reports_read_only_auto_completion(self):
+        started = user_progress(
+            "baotu",
+            json.dumps({
+                "event": "game_auto_monitor_started",
+                "task": "宝图任务",
+                "reason": "任务已接取",
+            }, ensure_ascii=False),
+        )
+        observing = user_progress(
+            "shimen",
+            json.dumps({
+                "event": "game_auto_monitor",
+                "task": "师门任务",
+                "status": "continue_task",
+            }, ensure_ascii=False),
+        )
+
+        self.assertEqual(
+            started["message"],
+            "宝图任务正在由游戏自动完成，请勿操作游戏窗口",
+        )
+        self.assertEqual(
+            observing["message"],
+            "师门任务正在由游戏自动完成，请勿操作游戏窗口",
+        )
+
+    def test_baotu_sidebar_scene_does_not_claim_a_read_only_click(self):
+        progress = user_progress(
+            "baotu",
+            '{"event":"scene","status":"continue_task"}',
+        )
+
+        self.assertEqual(progress["message"], "已识别到宝图任务正在执行")
+
+    def test_monitoring_scene_keeps_the_do_not_touch_reminder(self):
+        progress = user_progress(
+            "shimen",
+            '{"event":"scene","status":"continue_task","monitoring":true}',
+        )
+
+        self.assertEqual(
+            progress["message"],
+            "师门任务正在由游戏自动完成，请勿操作游戏窗口",
+        )
+
 
 class _FinishedProcess:
     def __init__(self, lines):
@@ -72,6 +118,17 @@ class _FinishedProcess:
 
 
 class UserProgressBoundaryTests(unittest.TestCase):
+    def test_final_delivery_candidate_has_completion_copy(self):
+        progress = user_progress(
+            "yunbiao",
+            '{"event":"scene","status":"final_delivery_main_candidate"}',
+        )
+
+        self.assertEqual(
+            progress["message"],
+            "最后一轮普通运镖已结束，正在确认任务完成",
+        )
+
     def test_runner_publishes_only_friendly_deduplicated_progress(self):
         with tempfile.TemporaryDirectory() as directory:
             database = Database(Path(directory) / "dashboard.sqlite3")

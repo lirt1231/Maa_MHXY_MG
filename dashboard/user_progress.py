@@ -25,6 +25,7 @@ SCENE_MESSAGES = {
     "delivery_active": "普通运镖进行中",
     "select_normal": "正在选择普通镖银",
     "confirm_normal": "正在确认普通运镖",
+    "final_delivery_main_candidate": "最后一轮普通运镖已结束，正在确认任务完成",
     "open_welfare": "正在打开福利页面",
     "open_scratch": "正在打开每日刮刮乐",
     "scratch_ready": "刮奖页面已就绪，正在完成刮奖",
@@ -113,7 +114,15 @@ def _structured_message(task_id: str, data: dict) -> str | None:
     event = data.get("event")
     if event == "target_bound":
         return "已连接到游戏窗口"
+    if event in {"game_auto_monitor_started", "game_auto_monitor"}:
+        task = str(data.get("task", "任务")).strip() or "任务"
+        return f"{task}正在由游戏自动完成，请勿操作游戏窗口"
     if event == "scene":
+        if data.get("monitoring") and task_id in {"baotu", "shimen"}:
+            task = "宝图任务" if task_id == "baotu" else "师门任务"
+            return f"{task}正在由游戏自动完成，请勿操作游戏窗口"
+        if task_id == "baotu" and data.get("status") == "continue_task":
+            return "已识别到宝图任务正在执行"
         return _scene_message(data.get("status"), data.get("reason"))
     if event in {"click", "drag"}:
         reason = str(data.get("reason", "")).strip()

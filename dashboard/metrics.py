@@ -179,24 +179,35 @@ def _ensure_main(tasker, native_input, window_id: int) -> list[dict]:
     raise RuntimeError("自动返回游戏主界面失败")
 
 
+def _resolve_game_window(toolkit, native_input_class):
+    windows = [
+        item for item in toolkit.find_desktop_windows()
+        if item.class_name == "com.netease.my" and item.window_name == "梦幻西游"
+    ]
+    if len(windows) > 1:
+        raise RuntimeError("检测到多个梦幻西游窗口，无法保证采集数据属于同一角色")
+    window_id = windows[0].hwnd if windows else 0
+    native_input = native_input_class(window_id) if window_id else native_input_class()
+    if not window_id:
+        window_id = native_input.find_window_id()
+    if not window_id:
+        raise RuntimeError("未找到已打开且可见的梦幻西游窗口")
+    native_input.bind_window(window_id)
+    return window_id, native_input
+
+
 def capture_visible_metrics() -> dict:
     """Navigate through bag/profile pages, OCR both metrics, and restore the main page."""
     from maa.controller import MacOSController, MaaMacOSInputMethodEnum, MaaMacOSScreencapMethodEnum
     from maa.resource import Resource
     from maa.tasker import Tasker
     from maa.toolkit import Toolkit
-    from tools.run_sanjieqiyuan_macos import NativeMacOSInput
+    from tools.macos_window_adapter import NativeMacOSInput
 
     Toolkit.init_option(str(ROOT))
-    windows = [
-        item for item in Toolkit.find_desktop_windows()
-        if item.class_name == "com.netease.my" and item.window_name == "梦幻西游"
-    ]
-    if not windows:
-        raise RuntimeError("未找到已打开的梦幻西游窗口")
-    window = windows[0]
+    window_id, native_input = _resolve_game_window(Toolkit, NativeMacOSInput)
     controller = MacOSController(
-        window.hwnd,
+        window_id,
         MaaMacOSScreencapMethodEnum.ScreenCaptureKit,
         MaaMacOSInputMethodEnum.GlobalEvent,
     )
@@ -210,21 +221,20 @@ def capture_visible_metrics() -> dict:
     if not tasker.bind(resource, controller) or not tasker.inited:
         raise RuntimeError("初始化 Maa Tasker 失败")
 
-    native_input = NativeMacOSInput()
-    main_results = _ensure_main(tasker, native_input, window.hwnd)
+    main_results = _ensure_main(tasker, native_input, window_id)
     if not _click_text(native_input, main_results, "包裹", min_y=500):
         # Bottom-right bag label may be obscured by nearby players; its normalized
         # main-screen position remains stable in the fixed macOS game layout.
         native_input.click(985, 630, OCR_SIZE)
-    _, bag_results = _wait_for(tasker, window.hwnd, lambda value: _has(value, "人物评分", "包裹"))
+    _, bag_results = _wait_for(tasker, window_id, lambda value: _has(value, "人物评分", "包裹"))
     gold = parse_backpack_gold(bag_results)
     _close_panel(native_input)
     if gold is None:
         raise RuntimeError("背包已自动打开，但未能识别金币数值")
 
-    _wait_for(tasker, window.hwnd, _is_main)
+    _wait_for(tasker, window_id, _is_main)
     native_input.click(978, 55, OCR_SIZE)
-    _, profile_results = _wait_for(tasker, window.hwnd, lambda value: _has(value, "人物属性"))
+    _, profile_results = _wait_for(tasker, window_id, lambda value: _has(value, "人物属性"))
     profile = parse_profile_metrics(profile_results)
     _close_panel(native_input)
     if profile["experience"] is None:

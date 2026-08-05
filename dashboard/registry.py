@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import date, datetime
 
 
 COMMON_CHECKLIST = [
@@ -9,6 +10,12 @@ COMMON_CHECKLIST = [
     "运行期间可以让自动化激活并操作游戏窗口",
 ]
 
+TASK_CATEGORIES = {
+    "daily": {"id": "daily", "label": "日常任务", "order": 10},
+    "weekly": {"id": "weekly", "label": "周常任务", "order": 20},
+    "repeatable": {"id": "repeatable", "label": "常驻任务", "order": 30},
+}
+
 
 TASKS = {
     "sanjieqiyuan": {
@@ -16,116 +23,85 @@ TASKS = {
         "name": "三界奇缘",
         "eyebrow": "每日答题",
         "summary": "使用本地题库识别题目并完成三界奇缘答题。",
-        "description": "可从可识别的主界面自动进入活动，也可以在手动打开答题页后直接接管。题目未变化或无法可靠识别时会停止，避免重复点击。",
+        "description": "从游戏主界面启动后，自动点击“活动”、进入三界奇缘任务界面并完成答题。题目未变化或无法可靠识别时会停止，避免重复点击。",
         "status": "experimental",
+        "category": "daily",
+        "taskOrder": 30,
         "risk": {"level": "low", "label": "低风险", "summary": "仅答题，不消耗角色资产"},
         "steps": [
             "确认三界奇缘当前可参与。",
-            "自动导航模式请停留在主界面；手动模式请先打开答题页。",
-            "选择最多答题数并启动，运行期间不要移动或遮挡窗口。",
+            "停留在游戏主界面，自动化会点击“活动”并进入三界奇缘。",
+            "启动固定 10 题答题，运行期间不要移动或遮挡窗口。",
         ],
         "checklist": COMMON_CHECKLIST
-        + ["三界奇缘当前可参与，且已按所选模式准备好游戏页面"],
+        + ["三界奇缘当前可参与，且当前画面是无遮挡的游戏主界面"],
         "warnings": ["识别不到题目或题目画面没有变化时会安全停止。"],
-        "parameters": [
-            {
-                "key": "maxSteps",
-                "label": "最多答题数",
-                "type": "integer",
-                "default": 10,
-                "minimum": 1,
-                "maximum": 20,
-            },
-            {
-                "key": "navigation",
-                "label": "进入方式",
-                "type": "select",
-                "default": "auto",
-                "choices": [
-                    {"value": "auto", "label": "从主界面自动进入"},
-                    {"value": "manual", "label": "已手动打开答题页"},
-                ],
-            },
-        ],
+        "parameters": [],
     },
     "keju": {
         "id": "keju",
         "name": "科举乡试",
-        "eyebrow": "每日乡试",
+        "eyebrow": "工作日 17:00",
         "summary": "本地题库 Top 3 配合模型复核，低置信度时保留现场。",
-        "description": "启动前必须手动打开科举乡试正式答题页。未配置模型时仅使用高置信度本地题库兜底，不能可靠判断时停止而不是盲选。",
+        "description": "科举乡试仅在周一至周五 17:00 后开放。启动前必须手动打开正式答题页；未配置模型时仅使用高置信度本地题库兜底，不能可靠判断时停止而不是盲选。",
         "status": "experimental",
+        "category": "daily",
+        "taskOrder": 40,
+        "schedule": {
+            "weekdays": [0, 1, 2, 3, 4],
+            "startTime": "17:00",
+            "label": "周一至周五 17:00 后开放",
+            "unavailableReason": "科举乡试仅在周一至周五 17:00 后开放，请在开放时间再运行。",
+        },
         "risk": {"level": "low", "label": "低风险", "summary": "仅答题，不消耗角色资产"},
         "steps": [
-            "在游戏中手动进入科举乡试的正式答题页面。",
-            "选择答题来源；兼容 API 的密钥应存放在 macOS Keychain。",
+            "周一至周五 17:00 后，在游戏中手动进入科举乡试正式答题页面。",
+            "系统使用本地题库与已配置模型复核答案。",
             "确认题目和 A/B/C/D 选项清晰可见后启动。",
         ],
         "checklist": COMMON_CHECKLIST
-        + ["已经进入科举乡试正式答题页面，题目与四个选项可见"],
+        + [
+            "当前是周一至周五 17:00 后",
+            "已经进入科举乡试正式答题页面，题目与四个选项可见",
+        ],
         "warnings": [
+            "非周一至周五 17:00 后不能检测或启动科举乡试。",
             "模型失败且本地题库置信度不足时会停止并保留当前页面。",
             "API Key 不应填写在页面或日志中。",
         ],
-        "parameters": [
-            {
-                "key": "maxSteps",
-                "label": "最多答题数",
-                "type": "integer",
-                "default": 20,
-                "minimum": 1,
-                "maximum": 30,
-            },
-            {
-                "key": "answerSource",
-                "label": "答题来源",
-                "type": "select",
-                "default": "configured",
-                "choices": [
-                    {"value": "configured", "label": "本地题库 + 已配置兼容模型"},
-                    {"value": "codex", "label": "本地题库 + Codex 复核"},
-                ],
-            },
-        ],
+        "parameters": [],
     },
     "keju_huishi": {
         "id": "keju_huishi",
         "name": "科举会试",
-        "eyebrow": "限时会试",
+        "eyebrow": "每周六会试",
         "summary": "严格确认会试页面后，使用本地题库与模型复核完成答题。",
-        "description": "启动前必须手动打开科举会试正式答题页。检测不到明确会试证据或误入乡试时会停止，不会复用乡试页面盲点。",
+        "description": "科举会试仅在每周六开放。周六启动前必须手动打开会试正式答题页；检测不到明确会试证据或误入乡试时会停止。",
         "status": "experimental",
+        "category": "weekly",
+        "taskOrder": 10,
+        "schedule": {
+            "weekdays": [5],
+            "label": "仅每周六开放",
+            "unavailableReason": "科举会试仅在每周六开放，请在周六再运行。",
+        },
         "risk": {"level": "low", "label": "低风险", "summary": "仅答题，不消耗角色资产"},
         "steps": [
-            "在游戏中手动进入科举会试的正式答题页面。",
-            "选择答题来源；兼容 API 的密钥应存放在 macOS Keychain。",
+            "仅在周六进入科举会试的正式答题页面。",
+            "系统使用本地题库与已配置模型复核答案。",
             "确认页面明确显示会试，且题目和 A/B/C/D 选项清晰可见后启动。",
         ],
         "checklist": COMMON_CHECKLIST
-        + ["已经进入科举会试正式答题页面，题目与四个选项可见"],
+        + [
+            "今天是周六",
+            "已经进入科举会试正式答题页面，题目与四个选项可见",
+        ],
         "warnings": [
+            "非周六不能检测或启动科举会试。",
             "无法确认当前是会试页面时会停止，不会按乡试坐标尝试点击。",
             "模型失败且本地题库置信度不足时会停止并保留当前页面。",
         ],
         "parameters": [
-            {
-                "key": "maxSteps",
-                "label": "最多答题数",
-                "type": "integer",
-                "default": 20,
-                "minimum": 1,
-                "maximum": 30,
-            },
-            {
-                "key": "answerSource",
-                "label": "答题来源",
-                "type": "select",
-                "default": "configured",
-                "choices": [
-                    {"value": "configured", "label": "本地题库 + 已配置兼容模型"},
-                    {"value": "codex", "label": "本地题库 + Codex 复核"},
-                ],
-            },
             {
                 "key": "waitForRoundOne",
                 "label": "等待正式第 1 题",
@@ -141,6 +117,8 @@ TASKS = {
         "summary": "自动组队、匹配并按设定轮数完成捉鬼。",
         "description": "支持从主界面开始，也兼容已经领取捉鬼任务的状态。首版只支持有限正整数轮数。",
         "status": "experimental",
+        "category": "repeatable",
+        "taskOrder": 10,
         "risk": {"level": "medium", "label": "中风险", "summary": "包含组队、战斗和双倍点数确认"},
         "steps": [
             "确认角色可以创建或加入队伍，背包与弹窗不会遮挡主界面。",
@@ -200,6 +178,8 @@ TASKS = {
         "summary": "识别福利入口并完成每日刮刮乐签到。",
         "description": "从主界面进入福利页，只在识别到“打开刮刮乐”和刮奖区域后执行。首版不领取累计 2/5/7 次奖励。",
         "status": "experimental",
+        "category": "daily",
+        "taskOrder": 10,
         "risk": {"level": "low", "label": "低风险", "summary": "仅领取每日签到奖励，不购买或消耗资产"},
         "steps": [
             "保持游戏主界面完整可见，关闭遮挡福利入口的弹窗。",
@@ -221,6 +201,8 @@ TASKS = {
         "summary": "完成每日帮派签到，并领取当前可领的帮派分红。",
         "description": "从主界面进入帮派福利，只在独立识别签到、分红和确认按钮后执行。",
         "status": "experimental",
+        "category": "daily",
+        "taskOrder": 20,
         "risk": {"level": "low", "label": "低风险", "summary": "仅签到并领取可用分红，不购买或消耗资产"},
         "steps": [
             "保持游戏主界面完整可见，关闭遮挡右下菜单的弹窗。",
@@ -239,20 +221,22 @@ TASKS = {
         "id": "baotu",
         "name": "宝图任务",
         "eyebrow": "每日获得",
-        "summary": "从日常活动领取并完成宝图任务，只获得宝图，不自动挖宝。",
-        "description": "从主界面进入日常活动，只点击经过 OCR 识别的宝图任务入口、对话选项和右侧任务栏。战斗与自动寻路期间仅等待。",
+        "summary": "领取宝图任务后由游戏自动完成，控制台只读监控到明确完成。",
+        "description": "从主界面进入日常活动并领取宝图任务；游戏接管后控制台不再点击，只持续观察到明确完成证据，再返回主界面。只获得宝图，不自动挖宝。",
         "status": "experimental",
+        "category": "daily",
+        "taskOrder": 50,
         "risk": {"level": "low", "label": "低风险", "summary": "只获得宝图，不使用背包宝图或购买资产"},
         "steps": [
             "保持游戏主界面完整可见，关闭遮挡活动入口的弹窗。",
             "启动后会在日常活动列表中查找宝图任务并领取。",
-            "自动寻路和战斗结束后继续任务，达到点击上限或页面不明确时安全停止。",
+            "任务接取后由游戏自动寻路和战斗，控制台只读监控到明确完成。",
         ],
         "checklist": COMMON_CHECKLIST
         + ["宝图任务当前可参与，且允许自动化领取并完成今日宝图任务"],
         "warnings": [
             "本功能只获得宝图，不会打开背包或挖掘宝图。",
-            "任务栏最多点击 12 次，导航最多输入 14 次，防止页面循环。",
+            "进入自动执行后不会点击任务栏；长时间没有明确完成证据时会保留现场。",
         ],
         "parameters": [],
     },
@@ -260,13 +244,15 @@ TASKS = {
         "id": "yunbiao",
         "name": "普通运镖",
         "eyebrow": "单人日常",
-        "summary": "按设定次数完成普通运镖，只选择“押送普通镖银”。",
+        "summary": "固定完成 3 次普通运镖，只选择“押送普通镖银”。",
         "description": "从主界面进入日常活动，只在严格识别普通镖选项及随后确认按钮时点击。运镖途中、战斗和自动寻路期间仅等待。",
         "status": "experimental",
+        "category": "daily",
+        "taskOrder": 70,
         "risk": {"level": "medium", "label": "中风险", "summary": "普通运镖可能消耗活力，但不会选择其他镖种"},
         "steps": [
             "保持游戏主界面完整可见，并确认角色具备普通运镖所需条件。",
-            "选择本次执行次数，最多为每日普通运镖的 3 次。",
+            "启动后固定执行每日 3 次普通运镖。",
             "启动后仅接受普通镖，看到运镖进行中证据后等待每轮结束。",
         ],
         "checklist": COMMON_CHECKLIST
@@ -275,72 +261,173 @@ TASKS = {
             "活力不足、银币不足或只识别到其他镖种时会安全停止。",
             "每轮普通镖选项只点击一次，任务栏最多点击 12 次。",
         ],
-        "parameters": [
-            {
-                "key": "rounds",
-                "label": "普通运镖次数",
-                "type": "integer",
-                "default": 3,
-                "minimum": 1,
-                "maximum": 3,
-            }
-        ],
+        "parameters": [],
     },
     "shimen": {
         "id": "shimen",
         "name": "师门任务",
         "eyebrow": "自动领取",
-        "summary": "领取师门任务并点击右侧任务栏，后续流程交给游戏自动完成。",
-        "description": "从主界面、日常活动页或已有师门任务状态开始，完成任务领取并点击一次右侧师门任务。点击后自动化立即结束，不再干预后续寻路、战斗或任务交付。",
+        "summary": "领取并启动师门任务，随后只读监控到游戏明确完成。",
+        "description": "从主界面、日常活动页或已有师门任务状态开始，完成必要的领取和首次启动操作；游戏接管后不再点击，持续观察到明确完成证据，再返回主界面。",
         "status": "experimental",
+        "category": "daily",
+        "taskOrder": 60,
         "risk": {"level": "low", "label": "低风险", "summary": "只负责领取并启动任务，后续由游戏自动完成"},
         "steps": [
             "保持游戏主界面完整可见，关闭无关弹窗。",
             "启动后会进入师门任务、完成领取，并点击右侧师门任务正式开始。",
-            "右侧任务栏点击成功后控制台结束本次运行，游戏继续自动完成后续流程。",
+            "游戏接管后控制台只读监控寻路、战斗和交付，直到明确完成。",
         ],
         "checklist": COMMON_CHECKLIST
         + ["接受领取并启动师门任务，启动后由游戏继续自动执行"],
         "warnings": [
-            "控制台只确认右侧师门任务已被点击，不再监控游戏后续是否完成全部师门任务。",
+            "首次启动后不会继续点击任务栏或“去完成”，没有明确完成证据时不会提前返回主界面。",
             "领取阶段连续重复同一按钮或超过点击上限时会安全停止。",
+        ],
+        "parameters": [],
+    },
+    "mijingxiangyao": {
+        "id": "mijingxiangyao",
+        "name": "秘境降妖",
+        "eyebrow": "单人挑战",
+        "summary": "沿用游戏当前已选择的秘境模式推进战斗，资产操作和付费恢复一律保留现场。",
+        "description": "从主界面、日常活动页或已有秘境挑战状态开始，沿用游戏当前已选择的秘境模式，不自动切换海底秘境或日之井。战斗期间仅等待，不会购买药品、购买或更换助战，也不会在挑战失败后付费恢复。",
+        "status": "experimental",
+        "category": "daily",
+        "taskOrder": 80,
+        "risk": {
+            "level": "medium",
+            "label": "中风险",
+            "summary": "包含连续自动战斗；药品、助战购买及付费恢复默认禁止",
+        },
+        "steps": [
+            "保持游戏主界面完整可见，关闭无关弹窗，并确认秘境降妖当前可参与。",
+            "启动后沿用当前秘境模式，持续推进到明确完成状态。",
+            "战斗期间自动等待；遇到药品、助战购买、更换助战或付费恢复页面时安全停止。",
+        ],
+        "checklist": COMMON_CHECKLIST
+        + [
+            "确认游戏已选择所需秘境模式，并接受在当前模式中连续自动战斗",
+            "理解战斗失败或资产操作需要手动处理，自动化不会切换秘境模式",
+            "确认自动化不得购买药品、购买或更换助战，也不得执行任何付费恢复",
+        ],
+        "warnings": [
+            "自动化沿用游戏当前已选择的秘境模式，不会主动切换模式；模式选择页需要手动处理。",
+            "自动化不购买或使用药品，不购买或更换助战，也不会在失败后执行付费恢复。",
+            "安全步数超限、重复页面或证据不足时会安全停止。",
         ],
         "parameters": [],
     },
     "kaogu": {
         "id": "kaogu",
         "name": "工坊考古",
-        "eyebrow": "每日生产",
-        "summary": "自动购买一个洛阳铲并完成 10 次考古挖掘。",
-        "description": "从主界面依次进入技能、辅助技能和工坊考古，切换到二阶技能生产。没有洛阳铲时最多购买一个，随后使用工具并完成 10 次挖掘；不会售卖古董。",
+        "eyebrow": "常驻生产",
+        "summary": "使用手动选好的工具，自动完成 10 次考古挖掘。",
+        "description": "推荐先在游戏的工坊考古生产页手动选好工具，再从当前页面启动；脚本只点击考古并完成 10 次挖掘。也可以选择兼容的自动洛阳铲流程；不会售卖古董。",
+        "guideImage": {
+            "src": "/task-guides/kaogu-selected-tool-start.jpg",
+            "alt": "工坊考古生产页，工具已选好且考古按钮可见",
+            "caption": "从这个页面启动：先手动选好工具，确认工具数量足够，并保持“考古”按钮可见。",
+        },
         "status": "experimental",
+        "category": "repeatable",
+        "taskOrder": 20,
         "risk": {
             "level": "medium",
             "label": "中风险",
-            "summary": "会购买一个洛阳铲并消耗考古所需活力",
+            "summary": "会消耗考古活力；自动洛阳铲模式可能购买一个工具",
         },
         "steps": [
-            "保持游戏主界面完整可见，关闭无关弹窗，并确认角色可以使用工坊考古。",
-            "启动后会进入二阶技能生产，选择现有洛阳铲；没有工具时会自动购买一个。",
-            "使用洛阳铲后最多点击 10 次挖掘，完成即停止，不进入古董售卖。",
+            "推荐在游戏中进入工坊考古生产页，手动选好本次使用的工具。",
+            "保持已选工具及“考古”按钮可见，再选择“使用游戏中已选工具”。",
+            "启动后最多完成 10 次挖掘，完成即停止，不进入古董售卖。",
         ],
         "checklist": COMMON_CHECKLIST
         + [
-            "允许自动化在没有洛阳铲时购买一个洛阳铲，并消耗相应游戏货币",
+            "已按所选工具方式准备页面：手动模式已选好工具；自动模式允许购买一个洛阳铲",
             "角色具备 10 次考古所需活力，且接受自动化连续完成 10 次挖掘",
         ],
         "warnings": [
+            "使用游戏中已选工具时，脚本不会打开工具选择或购买页面；起始画面不符合提示时会停止。",
             "洛阳铲购买硬限制为一次；无法同时识别商品与购买按钮时不会购买。",
+            "一旦发起购买，本轮购买保护会跨进程保留；任务中断后不会再次购买，完成 10 次挖掘后才自动释放。",
             "挖掘硬限制为 10 次；页面连续不明确或按钮长时间未出现时会安全停止。",
             "本功能不会出售任何古董，也不会操作其他工坊生产项目。",
         ],
-        "parameters": [],
+        "parameters": [
+            {
+                "key": "toolMode",
+                "label": "工具方式",
+                "type": "select",
+                "default": "selected",
+                "choices": [
+                    {
+                        "value": "selected",
+                        "label": "使用游戏中已选工具（推荐）",
+                    },
+                    {
+                        "value": "luoyang_shovel",
+                        "label": "自动选择洛阳铲（必要时购买）",
+                    },
+                ],
+            }
+        ],
     },
 }
 
 
-def task_list() -> list[dict]:
-    return [deepcopy(task) for task in TASKS.values()]
+def task_availability(task_id: str, today: date | datetime | None = None) -> dict:
+    if task_id not in TASKS:
+        raise ValueError("不支持的任务")
+    schedule = TASKS[task_id].get("schedule")
+    if schedule is None:
+        return {"available": True, "label": None, "reason": None}
+
+    local_datetime = None
+    if today is None:
+        local_datetime = datetime.now().astimezone()
+        local_date = local_datetime.date()
+    elif isinstance(today, datetime):
+        local_datetime = today.astimezone() if today.tzinfo else today
+        local_date = local_datetime.date()
+    else:
+        # A date-only value asks whether the task opens on that calendar day;
+        # runtime start/inspection always call this with the current datetime.
+        local_date = today
+    available = local_date.weekday() in schedule["weekdays"]
+    start_time = schedule.get("startTime")
+    if available and start_time and local_datetime is not None:
+        hour, minute = (int(part) for part in start_time.split(":", 1))
+        available = (local_datetime.hour, local_datetime.minute) >= (hour, minute)
+    return {
+        "available": available,
+        "label": schedule["label"],
+        "reason": None if available else schedule["unavailableReason"],
+    }
+
+
+def ensure_task_available(task_id: str, today: date | datetime | None = None) -> None:
+    availability = task_availability(task_id, today)
+    if not availability["available"]:
+        raise ValueError(availability["reason"])
+
+
+def task_list(today: date | datetime | None = None) -> list[dict]:
+    items = []
+    for task in TASKS.values():
+        item = deepcopy(task)
+        category_id = item["category"]
+        item["category"] = deepcopy(TASK_CATEGORIES[category_id])
+        item["availability"] = task_availability(task["id"], today)
+        items.append(item)
+    items.sort(
+        key=lambda item: (
+            item["category"]["order"],
+            item["taskOrder"],
+            item["name"],
+        )
+    )
+    return items
 
 
 def validate_options(task_id: str, supplied: dict | None) -> dict:

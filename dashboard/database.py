@@ -53,7 +53,10 @@ class Database:
                     duration_ms INTEGER,
                     error TEXT,
                     result_json TEXT,
-                    benefit_status TEXT NOT NULL DEFAULT 'not_captured'
+                    benefit_status TEXT NOT NULL DEFAULT 'not_captured',
+                    stage TEXT,
+                    home_recovery_json TEXT,
+                    failure_phase TEXT
                 );
                 DROP INDEX IF EXISTS idx_task_runs_started_task;
                 CREATE INDEX IF NOT EXISTS idx_task_runs_completed_task
@@ -108,6 +111,12 @@ class Database:
             }
             if "result_json" not in columns:
                 db.execute("ALTER TABLE task_runs ADD COLUMN result_json TEXT")
+            if "stage" not in columns:
+                db.execute("ALTER TABLE task_runs ADD COLUMN stage TEXT")
+            if "home_recovery_json" not in columns:
+                db.execute("ALTER TABLE task_runs ADD COLUMN home_recovery_json TEXT")
+            if "failure_phase" not in columns:
+                db.execute("ALTER TABLE task_runs ADD COLUMN failure_phase TEXT")
             game_data_columns = {
                 row["name"]
                 for row in db.execute("PRAGMA table_info(game_data_snapshots)")
@@ -135,10 +144,42 @@ class Database:
     def create_run(self, run: dict[str, Any]) -> None:
         with self.connect() as db:
             db.execute(
-                "INSERT INTO task_runs(id, task_id, task_name, status, options_json, started_at) VALUES(?,?,?,?,?,?)",
+                """INSERT INTO task_runs(
+                id, task_id, task_name, status, options_json, started_at, stage,
+                home_recovery_json, failure_phase
+                ) VALUES(?,?,?,?,?,?,?,?,?)""",
                 (
                     run["id"], run["taskId"], run["taskName"], run["status"],
                     json.dumps(run["options"], ensure_ascii=False), run["startedAt"],
+                    run.get("stage"),
+                    json.dumps(run.get("homeRecovery", {"status": "not_requested"}), ensure_ascii=False),
+                    run.get("failurePhase"),
+                ),
+            )
+
+    def update_run_stage(
+        self,
+        run_id: str,
+        status: str,
+        stage: str,
+        *,
+        result: dict[str, Any] | None = None,
+        home_recovery: dict[str, Any] | None = None,
+        failure_phase: str | None = None,
+    ) -> None:
+        with self.connect() as db:
+            db.execute(
+                """UPDATE task_runs SET status=?, stage=?,
+                result_json=COALESCE(?, result_json),
+                home_recovery_json=COALESCE(?, home_recovery_json),
+                failure_phase=? WHERE id=?""",
+                (
+                    status,
+                    stage,
+                    json.dumps(result, ensure_ascii=False) if result is not None else None,
+                    json.dumps(home_recovery, ensure_ascii=False) if home_recovery is not None else None,
+                    failure_phase,
+                    run_id,
                 ),
             )
 
@@ -148,6 +189,10 @@ class Database:
         status: str,
         error: str | None = None,
         result: dict[str, Any] | None = None,
+        *,
+        stage: str | None = None,
+        home_recovery: dict[str, Any] | None = None,
+        failure_phase: str | None = None,
     ) -> None:
         now = utc_now()
         with self.connect() as db:
@@ -157,13 +202,17 @@ class Database:
             started = datetime.fromisoformat(row["started_at"])
             duration = max(0, int((datetime.now(UTC) - started).total_seconds() * 1000))
             db.execute(
-                "UPDATE task_runs SET status=?, finished_at=?, duration_ms=?, error=?, result_json=? WHERE id=?",
+                """UPDATE task_runs SET status=?, finished_at=?, duration_ms=?, error=?,
+                result_json=?, stage=?, home_recovery_json=?, failure_phase=? WHERE id=?""",
                 (
                     status,
                     now,
                     duration,
                     error,
                     json.dumps(result, ensure_ascii=False) if result is not None else None,
+                    stage,
+                    json.dumps(home_recovery, ensure_ascii=False) if home_recovery is not None else None,
+                    failure_phase,
                     run_id,
                 ),
             )
@@ -219,8 +268,7 @@ class Database:
                 """SELECT task_id, started_at, finished_at, result_json,
                 COALESCE(finished_at, started_at) completed_at
                 FROM task_runs
-                WHERE status='succeeded'
-                AND COALESCE(finished_at, started_at)>=?
+                WHERE COALESCE(finished_at, started_at)>=?
                 AND COALESCE(finished_at, started_at)<?
                 ORDER BY completed_at DESC""",
                 (start_utc.isoformat(), end_utc.isoformat()),
@@ -293,6 +341,14 @@ class Database:
                 (event_id, limit),
             ).fetchall()
         return [self._event_row(row) for row in rows]
+
+    def events_for_run(self, run_id: str, limit: int = 200) -> list[dict]:
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT * FROM run_events WHERE run_id=? ORDER BY id DESC LIMIT ?",
+                (run_id, limit),
+            ).fetchall()
+        return [self._event_row(row) for row in reversed(rows)]
 
     def summary(self) -> dict:
         with self.connect() as db:
@@ -572,16 +628,48 @@ class Database:
         now = utc_now()
         with self.connect() as db:
             rows = db.execute(
-                "SELECT id, started_at FROM task_runs WHERE status IN ('preparing','running','stopping')"
+                """SELECT id, started_at, status, result_json, home_recovery_json
+                FROM task_runs WHERE status IN ('preparing','running','recovering','stopping')"""
             ).fetchall()
             finished = datetime.fromisoformat(now)
             for row in rows:
                 started = datetime.fromisoformat(row["started_at"])
                 duration = max(0, int((finished - started).total_seconds() * 1000))
-                error = "看板进程意外退出，任务状态已恢复"
+                try:
+                    prior_home = json.loads(row["home_recovery_json"] or "{}")
+                except (json.JSONDecodeError, TypeError):
+                    prior_home = {}
+                recovery_interrupted = (
+                    row["status"] == "recovering"
+                    or prior_home.get("status") == "running"
+                )
+                error = (
+                    "任务已完成，但返回主界面期间看板进程意外退出；现场待确认"
+                    if recovery_interrupted
+                    else "看板进程意外退出，任务状态已恢复"
+                )
+                home_recovery = (
+                    json.dumps({
+                        "status": "failed",
+                        "outcome": None,
+                        "scene": None,
+                        "reason": "服务在恢复期间重启，未自动重放任何输入",
+                        "actions": 0,
+                        "clicks": 0,
+                    }, ensure_ascii=False)
+                    if recovery_interrupted else None
+                )
                 db.execute(
-                    "UPDATE task_runs SET status='failed', finished_at=?, duration_ms=?, error=? WHERE id=?",
-                    (now, duration, error, row["id"]),
+                    """UPDATE task_runs SET status='failed', finished_at=?, duration_ms=?,
+                    error=?, stage=?, home_recovery_json=COALESCE(?, home_recovery_json),
+                    failure_phase=? WHERE id=?""",
+                    (
+                        now, duration, error,
+                        "返回主界面已中断" if recovery_interrupted else "运行失败",
+                        home_recovery,
+                        "recovery" if recovery_interrupted else "task",
+                        row["id"],
+                    ),
                 )
                 db.execute(
                     """INSERT INTO run_events(run_id, created_at, level, event_type, message, payload_json)
@@ -599,6 +687,13 @@ class Database:
             "durationMs": row["duration_ms"], "error": row["error"],
             "result": json.loads(row["result_json"]) if row["result_json"] else None,
             "benefitStatus": row["benefit_status"],
+            "stage": row["stage"],
+            "homeRecovery": (
+                json.loads(row["home_recovery_json"])
+                if row["home_recovery_json"]
+                else {"status": "not_requested"}
+            ),
+            "failurePhase": row["failure_phase"],
         }
 
     @staticmethod

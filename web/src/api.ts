@@ -1,4 +1,4 @@
-import type { GameDataResponse, GameDataSnapshot, Metrics, Run, RunSummary, SystemState, Task, TaskInspection } from "./types";
+import type { GameDataResponse, GameDataSnapshot, LiveEvent, Metrics, Run, RunSummary, SystemState, Task, TaskInspection } from "./types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -22,6 +22,7 @@ export const api = {
       }
     ),
   runs: () => request<{ items: Run[]; summary: RunSummary }>("/api/runs"),
+  runEvents: (runId: string) => request<{ items: LiveEvent[] }>(`/api/runs/${runId}/events`),
   gameData: () => request<GameDataResponse>("/api/game-data"),
   captureDailyTasks: () => request<GameDataSnapshot>(
     "/api/game-data/daily-tasks/capture", { method: "POST" }
@@ -37,6 +38,8 @@ export const api = {
   stop: (runId: string) => request<Run>(`/api/runs/${runId}/stop`, { method: "POST" }),
   capture: () => request("/api/metrics/capture", { method: "POST" }),
   startGame: () => request<SystemState>("/api/game/start", { method: "POST" }),
+  openSystemSettings: (section: "screen-capture" | "accessibility") =>
+    request<{ opened: boolean; section: string }>(`/api/system/settings/${section}`, { method: "POST" }),
   correctMetric: (id: number, values: Record<string, number | null>) =>
     request(`/api/metrics/${id}`, { method: "PATCH", body: JSON.stringify(values) })
 };

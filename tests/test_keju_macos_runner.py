@@ -1,7 +1,7 @@
 import io
 import json
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -12,12 +12,43 @@ from tools.run_keju_macos import (
     classify_keju_inspection,
     detect_exam_type,
     main,
+    parse_args,
     parse_question_round,
     recognize_keju_frame,
     should_end_loop,
     stable_question_key,
     task_result,
 )
+
+
+class KejuArgumentTests(unittest.TestCase):
+    def test_xiangshi_defaults_to_ten_answers(self):
+        with patch(
+            "tools.run_keju_macos.sys.argv",
+            ["run_keju_macos.py", "--exam-type", "xiangshi"],
+        ):
+            self.assertEqual(parse_args().max_steps, 10)
+
+    def test_xiangshi_rejects_more_than_ten_answers(self):
+        with patch(
+            "tools.run_keju_macos.sys.argv",
+            [
+                "run_keju_macos.py",
+                "--exam-type",
+                "xiangshi",
+                "--max-steps",
+                "11",
+            ],
+        ), redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                parse_args()
+
+    def test_huishi_keeps_its_twenty_answer_default(self):
+        with patch(
+            "tools.run_keju_macos.sys.argv",
+            ["run_keju_macos.py", "--exam-type", "huishi"],
+        ):
+            self.assertEqual(parse_args().max_steps, 20)
 
 
 class KejuExplicitFrameTests(unittest.TestCase):
@@ -111,6 +142,12 @@ class KejuMacOSRunnerStateTests(unittest.TestCase):
         self.assertEqual(
             classify_keju_inspection([{"text": "课堂复习 即将开始"}])["status"],
             "waiting_for_question",
+        )
+        self.assertEqual(
+            classify_keju_inspection(
+                [{"text": "科举乡试 第1题 课堂复习 以下哪一年是国际天文年"}]
+            )["status"],
+            "formal_question_ready",
         )
         self.assertEqual(
             classify_keju_inspection([{"text": "长安城 世界地图"}])["status"],
