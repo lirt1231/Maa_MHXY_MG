@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from dashboard.metrics import parse_backpack_resources
+from dashboard.metrics import _is_backpack, parse_backpack_resources
 from tools.run_resource_snapshot_macos import build_snapshot
 
 
@@ -19,6 +19,26 @@ class ResourceSnapshotCaptureTests(unittest.TestCase):
         self.assertEqual(parsed["silver"], 24896692)
         self.assertEqual(parsed["goldItem"]["box"], [175, 587, 69, 23])
         self.assertEqual(parsed["silverItem"]["box"], [347, 586, 97, 23])
+
+    def test_live_bag_ocr_drift_still_requires_cross_region_identity(self):
+        results = [
+            {"text": "包裹", "box": [464, 106, 211, 31]},
+            {"text": "物评分15670", "box": [234, 532, 140, 22]},
+            {"text": "661.363", "box": [175, 571, 68, 19]},
+            {"text": "6.091.849", "box": [353, 571, 87, 19]},
+            {"text": "物品", "box": [563, 166, 59, 28]},
+            {"text": "任 务", "box": [753, 166, 60, 28]},
+            {"text": "整理", "box": [756, 560, 71, 32]},
+            {"text": "礼包", "box": [547, 559, 71, 31]},
+            {"text": "仓库", "box": [899, 307, 29, 46]},
+        ]
+
+        self.assertTrue(_is_backpack(results))
+        self.assertFalse(_is_backpack([
+            {"text": "包裹", "box": [464, 106, 211, 31]},
+            {"text": "661.363", "box": [175, 571, 68, 19]},
+            {"text": "6.091.849", "box": [353, 571, 87, 19]},
+        ]))
 
     def test_capture_failure_becomes_a_failed_snapshot(self):
         with patch(

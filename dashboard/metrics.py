@@ -176,6 +176,36 @@ def _is_main(results: list[dict]) -> bool:
     )
 
 
+def _is_backpack(results: list[dict]) -> bool:
+    title = any(
+        "包裹" in re.sub(r"\s+", "", item["text"])
+        and 330 <= item["box"][0] <= 720
+        and item["box"][1] <= 170
+        for item in results
+    )
+    anchors = sum(
+        any(marker in re.sub(r"\s+", "", item["text"]) for item in results)
+        for marker in ("物品", "任务", "整理", "礼包", "仓库")
+    )
+    currencies = parse_backpack_resources(results)
+    return bool(
+        title
+        and anchors >= 2
+        and currencies["gold"] is not None
+        and currencies["silver"] is not None
+    )
+
+
+def _is_profile(results: list[dict]) -> bool:
+    normalized = [re.sub(r"\s+", "", item["text"]) for item in results]
+    title = any("人物属性" in text for text in normalized)
+    anchors = sum(
+        any(marker in text for text in normalized)
+        for marker in ("气血", "魔法", "物理", "法术", "速度", "评分")
+    )
+    return title and anchors >= 2
+
+
 def _click_text(native_input, results: list[dict], text: str, *, min_y: int = 0) -> bool:
     matches = [item for item in results if text in re.sub(r"\s+", "", item["text"]) and item["box"][1] >= min_y]
     if not matches:
@@ -242,11 +272,27 @@ def _ensure_main(tasker, native_input, window_id: int) -> list[dict]:
         _, results = _wait_for(tasker, window_id, lambda value: bool(value), timeout=4)
         if _is_main(results):
             return results
-        if _has(results, "人物属性") or _has(results, "人物评分", "包裹"):
+        if _is_profile(results) or _is_backpack(results):
             _close_panel(native_input)
             continue
         raise RuntimeError("当前页面无法安全返回主界面，请先结束战斗或关闭特殊活动页面")
     raise RuntimeError("自动返回游戏主界面失败")
+
+
+def _restore_known_resource_panel(tasker, native_input, window_id: int) -> bool:
+    """Close only a positively identified bag/profile panel after capture errors."""
+    try:
+        image = _window_capture(window_id)
+        results = _recognize(tasker, image)
+        if _is_main(results):
+            return True
+        if not (_is_backpack(results) or _is_profile(results)):
+            return False
+        _close_panel(native_input)
+        _wait_for(tasker, window_id, _is_main, timeout=6)
+        return True
+    except Exception:
+        return False
 
 
 def _resolve_game_window(toolkit, native_input_class):
@@ -291,33 +337,39 @@ def capture_visible_metrics() -> dict:
     if not tasker.bind(resource, controller) or not tasker.inited:
         raise RuntimeError("初始化 Maa Tasker 失败")
 
-    main_results = _ensure_main(tasker, native_input, window_id)
-    if not _click_text(native_input, main_results, "包裹", min_y=500):
-        # Bottom-right bag label may be obscured by nearby players; its normalized
-        # main-screen position remains stable in the fixed macOS game layout.
-        native_input.click(985, 630, OCR_SIZE)
-    _, bag_results = _wait_for(tasker, window_id, lambda value: _has(value, "人物评分", "包裹"))
-    bag_image, bag_results, currencies = _wait_for_stable_values(
-        tasker,
-        window_id,
-        parse_backpack_resources,
-        ("gold", "silver"),
-        bag_results,
-    )
-    _close_panel(native_input)
+    try:
+        main_results = _ensure_main(tasker, native_input, window_id)
+        if not _click_text(native_input, main_results, "包裹", min_y=500):
+            # The fixed bag icon is used only after cross-region main-screen OCR.
+            native_input.click(985, 630, OCR_SIZE)
+        _, bag_results = _wait_for(tasker, window_id, _is_backpack)
+        try:
+            bag_image, bag_results, currencies = _wait_for_stable_values(
+                tasker,
+                window_id,
+                parse_backpack_resources,
+                ("gold", "silver"),
+                bag_results,
+            )
+        finally:
+            _close_panel(native_input)
 
-    _wait_for(tasker, window_id, _is_main)
-    native_input.click(978, 55, OCR_SIZE)
-    _, profile_results = _wait_for(tasker, window_id, lambda value: _has(value, "人物属性"))
-    profile_image, profile_results, profile = _wait_for_stable_values(
-        tasker,
-        window_id,
-        parse_profile_resources,
-        ("level", "experience", "experienceRequired"),
-        profile_results,
-    )
-    _close_panel(native_input)
-    _wait_for(tasker, window_id, _is_main)
+        _wait_for(tasker, window_id, _is_main)
+        native_input.click(978, 55, OCR_SIZE)
+        _, profile_results = _wait_for(tasker, window_id, _is_profile)
+        try:
+            profile_image, profile_results, profile = _wait_for_stable_values(
+                tasker,
+                window_id,
+                parse_profile_resources,
+                ("level", "experience", "experienceRequired"),
+                profile_results,
+            )
+        finally:
+            _close_panel(native_input)
+        _wait_for(tasker, window_id, _is_main)
+    finally:
+        _restore_known_resource_panel(tasker, native_input, window_id)
 
     raw_text = "背包：" + " | ".join(item["text"] for item in bag_results)
     raw_text += "\n人物属性：" + " | ".join(item["text"] for item in profile_results)
