@@ -49,6 +49,8 @@ class UserProgressTranslationTests(unittest.TestCase):
 
         self.assertEqual(ready["message"], "已识别第 3 题，正在选择答案")
         self.assertEqual(sanjie["message"], "正在回答第 4 题")
+        retry = user_progress("keju", "recognition_retry=1 status=unreliable")
+        self.assertEqual(retry["message"], "题面识别不稳定，正在重新获取游戏画面")
         for line in (
             'result_json={"task_id":"keju","status":"completed"}',
             'preflight_json={"image_size":[1020,718]}',

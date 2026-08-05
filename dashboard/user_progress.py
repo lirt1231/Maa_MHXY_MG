@@ -188,6 +188,8 @@ def user_progress(task_id: str, line: str) -> dict | None:
         message = "本题答案已提交，正在等待下一题"
     elif text.startswith("waiting_for_formal_question="):
         message = "正在等待正式题目出现"
+    elif text.startswith("recognition_retry="):
+        message = "题面识别不稳定，正在重新获取游戏画面"
     elif text.startswith("native_click") and task_id in {
         "sanjieqiyuan", "keju", "keju_huishi",
     }:

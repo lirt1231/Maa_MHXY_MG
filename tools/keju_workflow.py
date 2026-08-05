@@ -64,9 +64,14 @@ class KejuWorkflow:
     delay: float = 3.0
     max_waiting_polls: int = 180
     max_same_question_polls: int = 8
+    max_recognition_failures: int = 4
 
     def __post_init__(self):
-        if self.max_answers <= 0 or self.delay < 0:
+        if (
+            self.max_answers <= 0
+            or self.delay < 0
+            or self.max_recognition_failures <= 0
+        ):
             raise ValueError("科举答题上限必须为正整数且等待时间不能为负数")
 
     def execute(
@@ -86,6 +91,7 @@ class KejuWorkflow:
         answered = 0
         waiting_polls = 0
         same_question_polls = 0
+        recognition_failures = 0
         step = 0
 
         while not should_end_loop(answered, self.max_answers):
@@ -96,6 +102,7 @@ class KejuWorkflow:
             context.emit("quiz_observation", step=step, **decision)
 
             if status == "ready":
+                recognition_failures = 0
                 question = str(decision.get("question", ""))
                 question_key = str(
                     decision.get("question_key") or stable_question_key(question)
@@ -154,16 +161,28 @@ class KejuWorkflow:
                 continue
 
             if status == "waiting":
+                recognition_failures = 0
                 waiting_polls += 1
                 if waiting_polls >= self.max_waiting_polls:
                     raise RuntimeError("科举页面长时间未出现可答题目，已安全停止")
                 context.emit("waiting_for_formal_question", polls=waiting_polls)
                 context.waiter.wait(min(self.delay, 1.0))
                 continue
-            if status == "no_question":
-                raise RuntimeError("科举页面未识别到题目或明确完成状态，已保留页面")
-            if status == "unreliable":
-                raise RuntimeError("当前题目无法可靠决策，已保留页面")
+            if status in {"no_question", "unreliable"}:
+                recognition_failures += 1
+                if recognition_failures >= self.max_recognition_failures:
+                    if status == "no_question":
+                        raise RuntimeError(
+                            "科举页面连续多帧未识别到题目或明确完成状态，已保留页面"
+                        )
+                    raise RuntimeError("当前题目连续多帧无法可靠决策，已保留页面")
+                context.emit(
+                    "recognition_retry",
+                    polls=recognition_failures,
+                    status=status,
+                )
+                context.waiter.wait(min(self.delay, 1.0))
+                continue
             if status == "wrong_exam_type":
                 raise RuntimeError(str(decision.get("reason") or "当前科举考试类型不匹配"))
             if status == "unverified_exam_type":

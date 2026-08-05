@@ -402,6 +402,51 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
 
         self.assertEqual([entry[0] for entry in adapter.trace], ["click", "wait"])
 
+    def test_keju_retries_unreliable_frames_before_answering(self):
+        adapter = _DesktopAdapterA([])
+        source = _QuizSource([
+            _quiz_observation("unreliable"),
+            _quiz_observation("no_question"),
+            _quiz_observation(
+                "ready",
+                question="第2/2题 示例题",
+                question_key="round:2",
+                question_round=(2, 2),
+                answer="甲",
+                click=(620, 360),
+            ),
+        ])
+
+        outcome = KejuWorkflow(
+            source,
+            max_answers=2,
+            delay=0.25,
+            max_recognition_failures=4,
+        ).execute(WorkflowContext(adapter, adapter))
+
+        self.assertEqual(outcome.status, "completed")
+        self.assertEqual(
+            [entry[0] for entry in adapter.trace],
+            ["wait", "wait", "click", "wait"],
+        )
+
+    def test_keju_stops_after_bounded_unreliable_frames_without_clicking(self):
+        adapter = _DesktopAdapterA([])
+        source = _QuizSource([
+            _quiz_observation("unreliable"),
+            _quiz_observation("unreliable"),
+            _quiz_observation("unreliable"),
+        ])
+
+        with self.assertRaisesRegex(RuntimeError, "连续多帧无法可靠决策"):
+            KejuWorkflow(
+                source,
+                delay=0.25,
+                max_recognition_failures=3,
+            ).execute(WorkflowContext(adapter, adapter))
+
+        self.assertEqual([entry[0] for entry in adapter.trace], ["wait", "wait"])
+
     def test_sanjie_multi_select_counts_choices_as_one_question_on_any_adapter(self):
         outcomes = []
         for adapter_type in (_DesktopAdapterA, _DesktopAdapterB):

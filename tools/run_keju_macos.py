@@ -442,6 +442,11 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
             print("same_question_waiting=true", flush=True)
         elif event == "waiting_for_formal_question":
             print("waiting_for_formal_question=true", flush=True)
+        elif event == "recognition_retry":
+            print(
+                f"recognition_retry={payload['polls']} status={payload['status']}",
+                flush=True,
+            )
 
     runtime = MacOSQuizInputAdapter(click_answer)
     outcome = KejuWorkflow(
