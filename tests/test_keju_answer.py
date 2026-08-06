@@ -391,6 +391,84 @@ class HybridAnswerTests(unittest.TestCase):
         self.assertIsNone(answer)
         self.assertIn("未明确支持", error)
 
+    def test_true_false_decision_accepts_substantive_cited_fact(self):
+        question = "向别人介绍自己的弟弟妹妹应该用舍弟舍妹？"
+        options = {"A": "不是", "B": "是的"}
+        evidence = [{
+            "id": "web-3",
+            "title": '"舍弟舍妹"的正确用法',
+            "snippet": (
+                "向别人介绍自己的弟弟妹妹，正确且得体的谦辞确实是"
+                "舍弟和舍妹。这两个词专用于称呼自己辈分低或年纪小的"
+                "弟弟和妹妹。"
+            ),
+        }]
+        decision = {
+            "answer": "B",
+            "confidence": 0.95,
+            "evidence_ids": ["web-3"],
+            "reason": (
+                "向别人介绍自己辈分低或年纪小的弟弟妹妹时，应该使用"
+                "舍弟和舍妹，因此题目中的陈述是正确的。"
+            ),
+        }
+
+        self.assertEqual(
+            validate_model_decision(
+                decision,
+                {"web-3"},
+                evidence=evidence,
+                options=options,
+                question=question,
+            ),
+            ("B", None),
+        )
+
+    def test_true_false_decision_rejects_question_echo_without_fact(self):
+        question = "向别人介绍自己的弟弟妹妹应该用舍弟舍妹？"
+        decision = {
+            "answer": "B",
+            "confidence": 0.95,
+            "evidence_ids": ["web-1"],
+            "reason": "题目原句声称应该使用舍弟舍妹，因此陈述正确。",
+        }
+
+        answer, error = validate_model_decision(
+            decision,
+            {"web-1"},
+            evidence=[{"id": "web-1", "title": question, "snippet": ""}],
+            options={"A": "不是", "B": "是的"},
+            question=question,
+        )
+
+        self.assertIsNone(answer)
+        self.assertIn("未明确支持", error)
+
+    def test_true_false_decision_rejects_answer_reason_polarity_mismatch(self):
+        question = "向别人介绍自己的弟弟妹妹应该用舍弟舍妹？"
+        decision = {
+            "answer": "A",
+            "confidence": 0.95,
+            "evidence_ids": ["web-3"],
+            "reason": "舍弟舍妹是正确谦辞，因此题目陈述正确。",
+        }
+        evidence = [{
+            "id": "web-3",
+            "title": "亲属谦称",
+            "snippet": "舍弟舍妹是称呼自己弟弟妹妹的正确传统谦辞。",
+        }]
+
+        answer, error = validate_model_decision(
+            decision,
+            {"web-3"},
+            evidence=evidence,
+            options={"A": "不是", "B": "是的"},
+            question=question,
+        )
+
+        self.assertIsNone(answer)
+        self.assertIn("未明确支持", error)
+
     def test_negative_skill_question_requires_a_complete_list_without_target(self):
         question = "下列神兽中初始技能没有感知的是"
         options = {"A": "超级大熊猫", "D": "超级赤焰兽"}

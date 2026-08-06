@@ -242,7 +242,11 @@ def validate_model_decision(
         ]
         selected_text = str(options.get(decision["answer"], ""))
         if not _web_evidence_supports_selected_option(
-            cited, selected_text, question=question
+            cited,
+            selected_text,
+            question=question,
+            options=options,
+            reason=decision.get("reason", ""),
         ):
             return None, f"{label}引用的网页证据未明确支持当前选项文本"
     return decision["answer"], None
@@ -343,11 +347,92 @@ def resolve_model_decision(
     )
 
 
-def _web_evidence_supports_selected_option(evidence, selected_text, question=None):
+_AFFIRMATIVE_OPTIONS = frozenset(
+    normalize_text(text)
+    for text in ("是", "是的", "对", "正确", "没错", "可以", "能", "会")
+)
+_NEGATIVE_OPTIONS = frozenset(
+    normalize_text(text)
+    for text in ("不是", "不对", "错误", "不正确", "不可以", "不能", "不会")
+)
+
+
+def _boolean_option_polarity(text):
+    normalized = normalize_text(text)
+    if normalized in _AFFIRMATIVE_OPTIONS:
+        return True
+    if normalized in _NEGATIVE_OPTIONS:
+        return False
+    return None
+
+
+def _binary_boolean_options(options):
+    if len(options or {}) != 2:
+        return False
+    polarities = {_boolean_option_polarity(text) for text in options.values()}
+    return polarities == {True, False}
+
+
+def _reason_boolean_polarity(reason):
+    normalized = normalize_text(reason)
+    negative_patterns = (
+        r"(?:题目|陈述|说法).{0,10}(?:错误|不正确|不成立|不属实)",
+        r"(?:因此|所以|故).{0,14}(?:选择|应选)?(?:不是|不对|错误)",
+    )
+    affirmative_patterns = (
+        r"(?:题目|陈述|说法).{0,10}(?:正确|成立|属实)",
+        r"(?:因此|所以|故).{0,14}(?:选择|应选)?(?:是的|正确|没错)",
+    )
+    if any(re.search(pattern, normalized) for pattern in negative_patterns):
+        return False
+    if any(re.search(pattern, normalized) for pattern in affirmative_patterns):
+        return True
+    return None
+
+
+def _boolean_evidence_supports_decision(evidence, question, reason, polarity):
+    """Validate a cited true/false fact without matching generic option text."""
+    if _reason_boolean_polarity(reason) is not polarity:
+        return False
+
+    normalized_question = normalize_text(question or "")
+    normalized_reason = normalize_text(reason or "")
+    for item in evidence:
+        text = " ".join(str(item.get(key, "")) for key in ("title", "snippet"))
+        normalized_evidence = normalize_text(text)
+        # Search results often repeat the question verbatim in their title. Remove
+        # that echo so it cannot count as proof without a substantive snippet.
+        evidence_fact = normalized_evidence.replace(normalized_question, "")
+        reason_fact = normalized_reason.replace(normalized_question, "")
+        if not evidence_fact or not reason_fact:
+            continue
+        overlap = SequenceMatcher(None, reason_fact, evidence_fact).find_longest_match()
+        if overlap.size >= 6:
+            return True
+    return False
+
+
+def _web_evidence_supports_selected_option(
+    evidence,
+    selected_text,
+    question=None,
+    *,
+    options=None,
+    reason="",
+):
     """Reject guesses, same-site echoes, and stale external option letters."""
     selected = normalize_text(selected_text)
     if not selected or not evidence:
         return False
+
+    if _binary_boolean_options(options):
+        polarity = _boolean_option_polarity(selected_text)
+        return _boolean_evidence_supports_decision(
+            evidence,
+            question,
+            reason,
+            polarity,
+        )
 
     normalized_question = normalize_text(question or "")
     missing_target = ""
