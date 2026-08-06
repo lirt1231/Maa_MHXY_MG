@@ -1,0 +1,193 @@
+"""Bounded, evidence-backed workflow for 趣闻鉴赏."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Callable, Mapping
+
+try:
+    from .automation_actions import (
+        ActionMetrics,
+        EvidenceClickAction,
+        RelativeDragAction,
+    )
+    from .automation_workflows import (
+        WorkflowContext,
+        WorkflowInspection,
+        WorkflowOutcome,
+        WorkflowResult,
+    )
+    from .daily_activity_actions import DailyActivityActions
+    from .fun_news_recognition import FUN_NEWS_TEMPLATES, classify_fun_news_scene
+except ImportError:  # Direct execution through a platform runner.
+    from automation_actions import ActionMetrics, EvidenceClickAction, RelativeDragAction
+    from automation_workflows import (
+        WorkflowContext,
+        WorkflowInspection,
+        WorkflowOutcome,
+        WorkflowResult,
+    )
+    from daily_activity_actions import DailyActivityActions
+    from fun_news_recognition import FUN_NEWS_TEMPLATES, classify_fun_news_scene
+
+
+TARGET_LIKES = 5
+
+
+@dataclass(frozen=True)
+class FunNewsWorkflow:
+    max_steps: int = 80
+    target_likes: int = TARGET_LIKES
+    max_feed_scrolls: int = 8
+    max_completion_polls: int = 4
+    classifier: Callable[..., Mapping[str, Any]] = field(
+        default=classify_fun_news_scene,
+        repr=False,
+        compare=False,
+    )
+
+    def __post_init__(self):
+        if any(
+            value <= 0
+            for value in (
+                self.max_steps,
+                self.target_likes,
+                self.max_feed_scrolls,
+                self.max_completion_polls,
+            )
+        ):
+            raise ValueError("趣闻鉴赏 Workflow 上限必须是正整数")
+
+    def execute(self, context: WorkflowContext, *, inspect: bool = False) -> WorkflowOutcome:
+        metrics = ActionMetrics()
+        daily_actions = DailyActivityActions("趣闻鉴赏")
+        like_action = EvidenceClickAction(
+            name="like_fun_news",
+            statuses=("like",),
+            reason="点赞当前趣闻动态",
+            wait_seconds=1.2,
+            repeat_limit=1,
+            repeat_error="同一条趣闻动态的点赞控件重复出现，已停止以避免重复点赞",
+        )
+        scroll_feed = RelativeDragAction(
+            name="scroll_fun_news_feed",
+            statuses=("like", "refresh_feed"),
+            # Finger moves upward so the feed advances to older unseen posts.
+            start_ratio=(0.37, 0.68),
+            end_ratio=(0.37, 0.40),
+            reason="下滑趣闻动态以加载下一条",
+            wait_seconds=1.5,
+            repeat_limit=self.max_feed_scrolls,
+            repeat_error="趣闻动态连续滚动未出现新的可点赞内容，已安全停止",
+        )
+        unknown_polls = 0
+        likes = 0
+        feed_scrolls = 0
+        completion_polls = 0
+        needs_scroll = False
+
+        for step in range(1, self.max_steps + 1):
+            scene = context.runtime.read_scene(FUN_NEWS_TEMPLATES)
+            decision = self.classifier(
+                scene.texts,
+                scene.templates,
+                scene.image_size,
+                daily_tab_confirmed=daily_actions.daily_tab_confirmed,
+            )
+            status = str(decision.get("status", "unknown"))
+            context.emit(
+                "scene",
+                step=step,
+                status=status,
+                likes=likes,
+                feedScrolls=feed_scrolls,
+            )
+            if inspect:
+                return WorkflowInspection.from_scene(
+                    scene,
+                    decision,
+                    context.inspection_evidence(scene, decision),
+                )
+
+            if status in {"completed", "already_completed"}:
+                return WorkflowResult(
+                    status,
+                    {
+                        "likes": likes,
+                        "scrolls": feed_scrolls,
+                        "actions": metrics.actions,
+                        "clicks": metrics.clicks,
+                    },
+                )
+
+            action_context = context.action_context(scene, decision, "趣闻鉴赏")
+            if likes >= self.target_likes:
+                completion_polls += 1
+                if completion_polls >= self.max_completion_polls:
+                    raise RuntimeError("已点赞 5 条动态，但未识别到趣闻鉴赏完成状态")
+                context.emit(
+                    "completion_wait",
+                    task="趣闻鉴赏",
+                    poll=completion_polls,
+                    limit=self.max_completion_polls,
+                )
+                context.waiter.wait(1.5)
+                continue
+
+            if needs_scroll:
+                if status not in {"like", "refresh_feed"}:
+                    unknown_polls += 1
+                    if unknown_polls >= 3:
+                        raise RuntimeError("点赞后未能确认趣闻动态页面，已停止以避免无证据滚动")
+                    context.waiter.wait(1.0)
+                    continue
+                if feed_scrolls >= self.max_feed_scrolls:
+                    raise RuntimeError("趣闻动态滚动达到上限，未收集到足够的新动态")
+                metrics.record(scroll_feed.execute(action_context))
+                feed_scrolls += 1
+                needs_scroll = False
+                unknown_polls = 0
+                like_action.reset_repetition()
+                continue
+
+            navigation_result = daily_actions.execute(action_context)
+            if navigation_result is not None:
+                metrics.record(navigation_result)
+                unknown_polls = 0
+                continue
+
+            if status == "like":
+                metrics.record(like_action.execute(action_context))
+                likes += 1
+                needs_scroll = likes < self.target_likes
+                unknown_polls = 0
+                context.emit(
+                    "fun_news_liked",
+                    task="趣闻鉴赏",
+                    likes=likes,
+                    targetLikes=self.target_likes,
+                )
+                continue
+
+            if status == "refresh_feed":
+                if feed_scrolls >= self.max_feed_scrolls:
+                    raise RuntimeError("趣闻动态滚动达到上限，未识别到可点赞内容")
+                metrics.record(scroll_feed.execute(action_context))
+                feed_scrolls += 1
+                unknown_polls = 0
+                continue
+
+            if status == "wait":
+                unknown_polls = 0
+                context.waiter.wait(1.5)
+                continue
+
+            unknown_polls += 1
+            if unknown_polls >= 3:
+                raise RuntimeError("连续三次无法识别趣闻鉴赏页面，已停止以避免无证据输入")
+            context.waiter.wait(1.0)
+
+        raise RuntimeError("趣闻鉴赏超过最大识别步骤，已安全停止")
+
+
+__all__ = ["FunNewsWorkflow", "TARGET_LIKES"]
