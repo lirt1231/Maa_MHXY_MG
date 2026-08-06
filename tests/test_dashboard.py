@@ -114,8 +114,9 @@ class TaskRegistryTests(unittest.TestCase):
         task = TASKS["shimen"]
         self.assertIn("只读监控", task["summary"])
         self.assertTrue(any("不会继续点击" in warning for warning in task["warnings"]))
-        self.assertIn("明确完成证据", task["warnings"][0])
-        self.assertEqual(task["risk"]["level"], "low")
+        self.assertTrue(any("明确完成证据" in warning for warning in task["warnings"]))
+        self.assertIn("自动购买或上交", task["risk"]["summary"])
+        self.assertEqual(task["risk"]["level"], "medium")
         self.assertEqual(
             validate_options("sanjieqiyuan", {}),
             {},

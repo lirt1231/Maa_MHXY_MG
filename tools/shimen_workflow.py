@@ -150,17 +150,6 @@ class ShimenWorkflow:
                     status,
                     {"actions": metrics.actions, "clicks": metrics.clicks},
                 )
-            if status == "unsupported_asset_branch":
-                raise RuntimeError(
-                    f"师门进入需要资产操作的分支，首版不会自动处理：{decision['reason']}"
-                )
-            if status == "final_assessment" and not final_assessment_started:
-                action_context = context.action_context(scene, decision, "师门任务")
-                metrics.record(final_assessment.execute(action_context))
-                final_assessment_started = True
-                monitor.activate(context, "师门已进入最终考核，交由游戏自动完成")
-                unknown_polls = 0
-                continue
             if monitor.active:
                 completed_on_main = completion_tracker.observe(
                     status,
@@ -185,6 +174,17 @@ class ShimenWorkflow:
                         },
                     )
             if monitor.observe(context, status, decision.get("reason")):
+                continue
+            if status == "unsupported_asset_branch":
+                raise RuntimeError(
+                    f"师门尚未进入只读监控，无法确认资产页面属于当前任务：{decision['reason']}"
+                )
+            if status == "final_assessment" and not final_assessment_started:
+                action_context = context.action_context(scene, decision, "师门任务")
+                metrics.record(final_assessment.execute(action_context))
+                final_assessment_started = True
+                monitor.activate(context, "师门已进入最终考核，交由游戏自动完成")
+                unknown_polls = 0
                 continue
             action_context = context.action_context(scene, decision, "师门任务")
             if status == "start_task":

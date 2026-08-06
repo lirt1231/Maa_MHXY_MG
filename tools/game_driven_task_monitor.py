@@ -77,7 +77,7 @@ class StableMainCompletionTracker:
             raise ValueError("稳定主界面完成确认至少需要两次观察")
 
     def observe(self, status: str, reason: str | None = None) -> bool:
-        active_evidence = status == "continue_task" or (
+        active_evidence = status in {"continue_task", "unsupported_asset_branch"} or (
             status == "wait"
             and reason
             in {

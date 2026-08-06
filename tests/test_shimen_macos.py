@@ -377,7 +377,7 @@ class ShimenRunnerTests(unittest.TestCase):
         )
 
     @patch("tools.run_shimen_macos.MacOSTaskRuntime")
-    def test_handoff_allows_one_explicit_final_assessment_click(self, runtime_class):
+    def test_handoff_keeps_final_assessment_read_only(self, runtime_class):
         runtime = runtime_class.return_value
         runtime.read_scene.return_value = scene()
         decisions = [
@@ -391,8 +391,48 @@ class ShimenRunnerTests(unittest.TestCase):
         with patch("tools.run_shimen_macos.classify_shimen_scene", side_effect=decisions):
             self.assertEqual(run(args, Mock()), 0)
 
-        self.assertEqual(runtime.click_box.call_count, 2)
-        self.assertEqual(runtime.click_box.call_args.args[0], [830, 180, 160, 22])
+        runtime.click_box.assert_called_once()
+        self.assertEqual(runtime.click_box.call_args.args[0], [830, 180, 130, 28])
+
+    @patch("tools.run_shimen_macos.MacOSTaskRuntime")
+    def test_handoff_observes_asset_page_until_stable_main(self, runtime_class):
+        runtime = runtime_class.return_value
+        runtime.read_scene.return_value = scene()
+        decisions = [
+            {"status": "continue_task", "box": [830, 180, 130, 28]},
+            {
+                "status": "unsupported_asset_branch",
+                "reason": "请教（拥有0/1），上交不",
+            },
+            *[
+                {"status": "open_activity", "box": [260, 45, 50, 22]}
+                for _ in range(5)
+            ],
+        ]
+        args = SimpleNamespace(
+            inspect_scene=False,
+            recognize_only=False,
+            max_steps=len(decisions),
+        )
+        output = io.StringIO()
+
+        with patch(
+            "tools.run_shimen_macos.classify_shimen_scene",
+            side_effect=decisions,
+        ), redirect_stdout(output):
+            self.assertEqual(run(args, Mock()), 0)
+
+        runtime.click_box.assert_called_once()
+        result = next(
+            json.loads(line[len("result_json="):])
+            for line in output.getvalue().splitlines()
+            if line.startswith("result_json=")
+        )
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(
+            result["completionEvidence"],
+            "stable_main_after_task_disappeared",
+        )
 
     @patch("tools.run_shimen_macos.MacOSTaskRuntime")
     def test_repeated_five_step_navigation_cycle_stops_early(self, runtime_class):
