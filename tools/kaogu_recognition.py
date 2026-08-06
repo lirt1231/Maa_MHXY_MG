@@ -63,6 +63,9 @@ def _inventory_close_box(tab_box):
 
 
 def _main_screen_evidence(texts, templates, image_size):
+    if not templates.get("menu_plus"):
+        return False
+    anchors = ["menu_plus"]
     main_task = find_items(
         texts,
         r".*任务",
@@ -71,11 +74,34 @@ def _main_screen_evidence(texts, templates, image_size):
     )
     main_team = find_items(
         texts,
-        r"队伍",
+        r"(?:队)?伍",
         image_size,
         {"min_x": 0.82, "min_y": 0.05, "max_y": 0.3},
     )
-    return bool(templates.get("menu_plus") and main_task and main_team)
+    if main_task and main_team:
+        anchors.append("task_team_tabs")
+    if find_items(
+        texts,
+        r"(?:福利|商城|节日活动)",
+        image_size,
+        {"max_x": 0.18, "min_y": 0.1, "max_y": 0.4},
+    ):
+        anchors.append("left_menu")
+    if find_items(
+        texts,
+        r"活动",
+        image_size,
+        {"min_x": 0.18, "max_x": 0.46, "max_y": 0.18},
+    ):
+        anchors.append("activity_toolbar")
+    if find_items(
+        texts,
+        r"(?:当前|个人|世界|帮派|队伍)",
+        image_size,
+        {"max_x": 0.18, "min_y": 0.75},
+    ):
+        anchors.append("chat_tab")
+    return len(anchors) >= 3
 
 
 def _classify_antique_sale(texts, templates, image_size, phase):

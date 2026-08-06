@@ -32,6 +32,8 @@ def scene(texts=None, templates=None):
 def sale_flow_scenes(*, include_main=True):
     main = scene(
         [
+            text("福利", (15, 129, 33, 16)),
+            text("活动", (268, 53, 28, 12)),
             text("任务", (1100, 80, 45, 25)),
             text("队伍", (1190, 95, 45, 25)),
             text("包裹", (1190, 620, 45, 25)),
@@ -131,6 +133,34 @@ class KaoguSceneTests(unittest.TestCase):
             {},
             IMAGE_SIZE,
             phase="sale_sell",
+        )
+
+        self.assertEqual(decision, {"status": "wait_for_antique_sale"})
+
+    def test_sale_main_tolerates_partial_team_ocr_with_cross_region_anchors(self):
+        decision = classify_kaogu_scene(
+            [
+                text("福利", (15, 129, 33, 16)),
+                text("活动", (268, 53, 28, 12)),
+                text("任务", (871, 108, 38, 22)),
+                text("伍", (990, 110, 22, 17)),
+            ],
+            {"menu_plus": (968, 658, 44, 42)},
+            (1020, 718),
+            phase="sale_wait_main",
+        )
+
+        self.assertEqual(decision["status"], "open_inventory_for_sale")
+
+    def test_sale_main_rejects_partial_team_without_cross_region_anchors(self):
+        decision = classify_kaogu_scene(
+            [
+                text("任务", (871, 108, 38, 22)),
+                text("伍", (990, 110, 22, 17)),
+            ],
+            {"menu_plus": (968, 658, 44, 42)},
+            (1020, 718),
+            phase="sale_wait_main",
         )
 
         self.assertEqual(decision, {"status": "wait_for_antique_sale"})
@@ -798,6 +828,8 @@ class KaoguRunnerTests(unittest.TestCase):
         )
         main = scene(
             [
+                text("福利", (15, 129, 33, 16)),
+                text("活动", (268, 53, 28, 12)),
                 text("任务", (1100, 80, 45, 25)),
                 text("队伍", (1190, 95, 45, 25)),
             ],
@@ -903,6 +935,8 @@ class KaoguRunnerTests(unittest.TestCase):
         )
         main = scene(
             [
+                text("福利", (15, 129, 33, 16)),
+                text("活动", (268, 53, 28, 12)),
                 text("任务", (1100, 80, 45, 25)),
                 text("队伍", (1190, 95, 45, 25)),
             ],
