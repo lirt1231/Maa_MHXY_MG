@@ -181,6 +181,19 @@
       "source_kind": "language_reference",
       "trust": 0.82,
       "updated_at": "2026-08-06"
+    },
+    {
+      "id": "xiangshi-liubei-zhuge-couplet",
+      "title": "刘备三顾草庐见淡泊宁静对联",
+      "content": "《三国演义》第三十七回记载，刘备到卧龙冈诸葛亮草庐，见门上大书一联“淡泊以明志，宁静而致远”，因此该判断题的陈述正确。",
+      "answer": "是的",
+      "aliases": ["《三国演义》中刘备见到诸葛亮家悬挂了一幅对联，写的是“淡泊以明志，宁静而致远”？", "三国演义中刘备见到诸葛亮家悬挂了一幅对联写的是淡泊以明志宁静而致远", "刘备诸葛亮草庐淡泊以明志宁静而致远"],
+      "tags": ["科举乡试", "三国演义", "刘备", "诸葛亮", "对联", "判断题"],
+      "source_url": "https://zh.wikisource.org/wiki/三國演義/第037回",
+      "source_name": "维基文库·三国演义第三十七回",
+      "source_kind": "primary_text",
+      "trust": 0.98,
+      "updated_at": "2026-08-06"
     }
   ]
 }

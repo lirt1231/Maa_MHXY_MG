@@ -129,6 +129,26 @@ class KejuKnowledgeStoreTests(unittest.TestCase):
         self.assertEqual(result["answer"], "是的")
         self.assertGreaterEqual(result["similarity"], 90)
 
+    def test_default_seed_answers_liubei_couplet_without_web_search(self):
+        with tempfile.TemporaryDirectory() as directory:
+            empty_bank = Path(directory) / "bank.txt"
+            empty_bank.write_text("", encoding="utf-8")
+            store = KejuKnowledgeStore(
+                Path(directory) / "knowledge.sqlite3",
+                RECOGNITION_DIR / "keju_knowledge_seed.json",
+                empty_bank,
+            )
+
+            result = store.search(
+                "《三国演义》中刘备见到诸葛亮家悬挂了一幅对联，"
+                "写的是淡泊以明志宁静而致远？",
+                limit=1,
+            )[0]
+
+        self.assertEqual(result["id"], "xiangshi-liubei-zhuge-couplet")
+        self.assertEqual(result["answer"], "是的")
+        self.assertGreaterEqual(result["similarity"], 90)
+
 
 if __name__ == "__main__":
     unittest.main()
