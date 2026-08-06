@@ -8,6 +8,7 @@ from tools.automation_actions import (
     ActionContext,
     ActionMetrics,
     EvidenceClickAction,
+    EvidenceDoubleClickAction,
     EvidenceThenRelativeClickAction,
     RelativeClickAction,
     TextInputAction,
@@ -174,6 +175,29 @@ class PlatformNeutralEvidenceClickActionTests(unittest.TestCase):
 
         missing.input.click_box.assert_not_called()
         missing.waiter.wait.assert_not_called()
+
+    def test_double_click_is_one_bounded_action_and_two_clicks(self):
+        action = EvidenceDoubleClickAction(
+            name="activate_item",
+            statuses=("antique",),
+            reason="双击古董",
+            click_interval_seconds=0.12,
+            wait_seconds=0.8,
+            repeat_limit=1,
+        )
+        current = context("antique")
+
+        result = action.execute(current)
+
+        self.assertEqual(current.input.click_box.call_count, 2)
+        self.assertEqual(
+            current.waiter.wait.call_args_list,
+            [unittest.mock.call(0.12), unittest.mock.call(0.8)],
+        )
+        self.assertEqual((result.actions, result.clicks), (1, 2))
+        with self.assertRaisesRegex(RuntimeError, "连续重复执行"):
+            action.execute(current)
+        self.assertEqual(current.input.click_box.call_count, 2)
 
     def test_repeated_evidence_stops_before_extra_click(self):
         action = EvidenceClickAction(

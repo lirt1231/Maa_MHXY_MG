@@ -242,6 +242,60 @@ class EvidenceClickAction(AtomicAction):
         return result
 
 
+class EvidenceDoubleClickAction(EvidenceClickAction):
+    """Double-click one recognized box as a single bounded semantic action."""
+
+    def __init__(self, *, click_interval_seconds: float = 0.12, **kwargs):
+        if click_interval_seconds < 0:
+            raise ValueError("双击间隔不能为负数")
+        super().__init__(**kwargs)
+        self.click_interval_seconds = click_interval_seconds
+
+    def execute(self, context: ActionContext) -> ActionResult:
+        if not self.accepts(context):
+            raise RuntimeError(
+                f"动作 {self.name} 不接受状态 {context.decision_status or 'missing'}"
+            )
+        box = valid_box({"box": context.decision.get("box")})
+        if box is None:
+            raise RuntimeError(f"动作 {self.name} 缺少经过识别的有效点击区域")
+        signature = self._signature(context, box)
+        repeated = self._consecutive_repeats + 1 if signature == self._last_signature else 1
+        if repeated > self.repeat_limit:
+            message = self.repeat_error or (
+                f"{context.task_label}连续重复执行 {context.decision_status}，已安全停止"
+            )
+            raise RuntimeError(message)
+        if self.budget is not None:
+            self.budget.consume()
+        self._last_signature = signature
+        self._consecutive_repeats = repeated
+
+        reason = self._reason(context)
+        context.input.click_box(box, context.scene, reason)
+        if self.click_interval_seconds:
+            context.waiter.wait(self.click_interval_seconds)
+        context.input.click_box(box, context.scene, reason)
+        if self.wait_seconds:
+            context.waiter.wait(self.wait_seconds)
+        result = ActionResult(
+            name=self.name,
+            decision_status=context.decision_status,
+            actions=1,
+            clicks=2,
+            wait_seconds=self.click_interval_seconds + self.wait_seconds,
+        )
+        context.emit(
+            "action_completed",
+            action=self.name,
+            task=context.task_label,
+            decision=context.decision_status,
+            clicks=result.clicks,
+            drags=0,
+        )
+        return result
+
+
 class RelativeClickAction(AtomicAction):
     """Click a stable scene-relative point after recognition proves the state."""
 
@@ -433,6 +487,7 @@ __all__ = [
     "ActionWaiter",
     "AtomicAction",
     "ContinueSidebarTaskAction",
+    "EvidenceDoubleClickAction",
     "EvidenceThenRelativeClickAction",
     "EvidenceClickAction",
     "RelativeClickAction",
