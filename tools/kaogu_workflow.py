@@ -63,7 +63,14 @@ KAOGU_TEMPLATES = {
         "jineng/luoyangchan2.png",
         "jineng/luoyangchan_live_923.png",
     ],
-    "shop_close": ["jineng/zahuopu_guanbi.png"],
+    "shop_close": {
+        "templates": [
+            "jineng/zahuopu_guanbi.png",
+            "jineng/zahuopu_guanbi_live_923.png",
+        ],
+        "threshold": 0.8,
+        "roi_ratio": [0.82, 0.1, 0.16, 0.3],
+    },
     "selected_shovel": [
         "jineng/yixuan_luoyangchan.png",
         "jineng/yixuan_luoyangchan_live_923.png",
@@ -81,7 +88,7 @@ KAOGU_TEMPLATES = {
         ],
         "threshold": 0.82,
         "green_mask": True,
-        "roi_ratio": [0.47, 0.18, 0.42, 0.57],
+        "roi_ratio": [0.1, 0.18, 0.79, 0.57],
     },
     "auto_pathing": [
         "zonghe/zidongxunlu1.png",

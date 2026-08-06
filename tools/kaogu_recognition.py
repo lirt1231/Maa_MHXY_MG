@@ -124,6 +124,27 @@ def _classify_antique_sale(texts, templates, image_size, phase):
         max_x=0.75,
         max_y=0.5,
     )
+    sale_titles = find_items(
+        texts,
+        r"^古董售卖$",
+        image_size,
+        {"min_x": 0.3, "max_x": 0.7, "max_y": 0.3},
+    )
+    sale_totals = find_items(
+        texts,
+        r"^(?:总价|拥有)$",
+        image_size,
+        {"min_x": 0.5, "max_x": 0.9, "min_y": 0.55, "max_y": 0.85},
+    )
+    sell_buttons = find_items(
+        texts,
+        r"^售卖$",
+        image_size,
+        {"min_x": 0.55, "max_x": 0.9, "min_y": 0.68, "max_y": 0.92},
+    )
+    sale_page = bool(
+        sale_page or (sale_titles and len(sale_totals) >= 2 and sell_buttons)
+    )
     cancel_buttons = find_items(
         texts,
         r"^取消$",
@@ -166,7 +187,7 @@ def _classify_antique_sale(texts, templates, image_size, phase):
         templates,
         "non_genuine_antique",
         image_size,
-        min_x=0.4,
+        min_x=0.1,
         max_x=0.95,
         min_y=0.12,
         max_y=0.92,
@@ -207,15 +228,21 @@ def _classify_antique_sale(texts, templates, image_size, phase):
     )
     if phase in {"sale_select", "sale_sell"} and sale_complete:
         return {"status": "antique_sale_finished", "reason": "no_saleable_antique"}
-    if phase in {"sale_pathing", "sale_select"} and sale_page:
+    if (
+        phase in {"sale_wait_main", "sale_pathing", "sale_select"}
+        and sale_page
+        and antique
+    ):
         return {
             "status": "select_sale_antique",
-            "box": _relative_box(image_size, 0.132, 0.212, 0.05, 0.09),
+            "box": antique,
         }
-    if phase == "sale_sell" and sale_page:
+    if phase == "sale_select" and sale_page and not antique:
+        return {"status": "antique_sale_finished", "reason": "no_saleable_antique"}
+    if phase == "sale_sell" and sale_page and sell_buttons:
         return {
             "status": "sell_antique",
-            "box": _relative_box(image_size, 0.695, 0.822, 0.117, 0.081),
+            "box": valid_box(sell_buttons[-1]),
         }
     if phase == "sale_closing" and sale_page:
         close_box = _template_box(

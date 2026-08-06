@@ -56,7 +56,13 @@ def sale_flow_scenes(*, include_main=True):
         },
     )
     pathing = scene(templates={"auto_pathing": (1050, 620, 120, 30)})
-    sale_page = scene(templates={"antique_sale_page": (480, 60, 280, 79)})
+    sale_page = scene(
+        [text("售卖", (890, 592, 150, 58))],
+        {
+            "antique_sale_page": (480, 60, 280, 79),
+            "non_genuine_antique": (170, 153, 46, 44),
+        },
+    )
     genuine_prompt = scene(
         [
             text("取消", (464, 420, 142, 51)),
@@ -111,7 +117,13 @@ class KaoguSceneTests(unittest.TestCase):
         )
         self.assertTrue(antique["green_mask"])
         self.assertEqual(antique["threshold"], 0.82)
-        self.assertEqual(antique["roi_ratio"], [0.47, 0.18, 0.42, 0.57])
+        self.assertEqual(antique["roi_ratio"], [0.1, 0.18, 0.79, 0.57])
+
+    def test_shop_close_templates_include_current_narrow_client(self):
+        close = KAOGU_TEMPLATES["shop_close"]
+
+        self.assertIn("jineng/zahuopu_guanbi_live_923.png", close["templates"])
+        self.assertEqual(close["threshold"], 0.8)
 
     def test_dig_keeps_workflow_in_digging_phase(self):
         self.assertEqual(next_kaogu_phase("dig", "enter"), "digging")
@@ -157,6 +169,35 @@ class KaoguSceneTests(unittest.TestCase):
 
         self.assertEqual(decision["status"], "cancel_genuine_sale")
         self.assertEqual(decision["box"], [464, 420, 142, 51])
+
+    def test_live_sale_page_uses_ocr_identity_and_recognized_safe_controls(self):
+        texts = [
+            text("古董售卖", (426, 84, 142, 37)),
+            text("总价", (636, 461, 42, 25)),
+            text("拥有", (635, 500, 42, 23)),
+            text("售卖", (731, 553, 70, 32)),
+        ]
+        templates = {"non_genuine_antique": (519, 186, 46, 44)}
+
+        select = classify_kaogu_scene(
+            texts, templates, (1020, 718), phase="sale_wait_main"
+        )
+        sell = classify_kaogu_scene(
+            texts, templates, (1020, 718), phase="sale_sell"
+        )
+        finished = classify_kaogu_scene(
+            texts, {}, (1020, 718), phase="sale_select"
+        )
+
+        self.assertEqual(
+            select,
+            {"status": "select_sale_antique", "box": [519, 186, 46, 44]},
+        )
+        self.assertEqual(sell, {"status": "sell_antique", "box": [731, 553, 70, 32]})
+        self.assertEqual(
+            finished,
+            {"status": "antique_sale_finished", "reason": "no_saleable_antique"},
+        )
 
     def test_unknown_sale_page_never_proposes_input(self):
         decision = classify_kaogu_scene(
