@@ -142,6 +142,12 @@ def _classify_antique_sale(texts, templates, image_size, phase):
         image_size,
         {"min_x": 0.55, "max_x": 0.9, "min_y": 0.68, "max_y": 0.92},
     )
+    sale_close_buttons = find_items(
+        texts,
+        r"^[xX×]$",
+        image_size,
+        {"min_x": 0.75, "max_x": 0.98, "min_y": 0.12, "max_y": 0.45},
+    )
     sale_page = bool(
         sale_page or (sale_titles and len(sale_totals) >= 2 and sell_buttons)
     )
@@ -200,6 +206,15 @@ def _classify_antique_sale(texts, templates, image_size, phase):
         min_y=0.12,
         max_y=0.92,
     )
+    sale_antique = _template_box(
+        templates,
+        "sale_non_genuine_antique",
+        image_size,
+        min_x=0.1,
+        max_x=0.65,
+        min_y=0.15,
+        max_y=0.65,
+    )
     use_buttons = find_items(
         texts,
         r"^使用$",
@@ -248,18 +263,18 @@ def _classify_antique_sale(texts, templates, image_size, phase):
     if (
         phase in {"sale_wait_main", "sale_pathing", "sale_select"}
         and sale_page
-        and antique
+        and sale_antique
     ):
         return {
             "status": "select_sale_antique",
-            "box": antique,
+            "box": sale_antique,
         }
     if phase == "sale_pathing" and sale_page and sell_buttons:
         return {
             "status": "sell_antique",
             "box": valid_box(sell_buttons[-1]),
         }
-    if phase == "sale_select" and sale_page and not antique:
+    if phase == "sale_select" and sale_page and not sale_antique:
         return {"status": "antique_sale_finished", "reason": "no_saleable_antique"}
     if phase == "sale_sell" and sale_page and sell_buttons:
         return {
@@ -274,7 +289,9 @@ def _classify_antique_sale(texts, templates, image_size, phase):
             min_x=0.75,
             max_y=0.4,
         )
-        if close_box and not antique:
+        if close_box is None and sale_close_buttons:
+            close_box = valid_box(sale_close_buttons[-1])
+        if close_box and not sale_antique:
             return {"status": "close_sale_shop", "box": close_box}
 
     if _main_screen_evidence(texts, templates, image_size):

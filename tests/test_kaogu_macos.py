@@ -60,7 +60,7 @@ def sale_flow_scenes(*, include_main=True):
         [text("售卖", (890, 592, 150, 58))],
         {
             "antique_sale_page": (480, 60, 280, 79),
-            "non_genuine_antique": (170, 153, 46, 44),
+            "sale_non_genuine_antique": (170, 153, 46, 44),
         },
     )
     genuine_prompt = scene(
@@ -126,6 +126,14 @@ class KaoguSceneTests(unittest.TestCase):
         self.assertEqual(antique["threshold"], 0.82)
         self.assertEqual(antique["roi_ratio"], [0.1, 0.18, 0.79, 0.57])
 
+        sale_antique = KAOGU_TEMPLATES["sale_non_genuine_antique"]
+        self.assertIn(
+            "jineng/gd/yanpin_sale_live_986.png",
+            sale_antique["templates"],
+        )
+        self.assertNotIn("jineng/gd/gaofang.png", sale_antique["templates"])
+        self.assertEqual(sale_antique["threshold"], 0.82)
+
     def test_shop_close_templates_include_current_narrow_client(self):
         close = KAOGU_TEMPLATES["shop_close"]
 
@@ -184,7 +192,7 @@ class KaoguSceneTests(unittest.TestCase):
             text("拥有", (635, 500, 42, 23)),
             text("售卖", (731, 553, 70, 32)),
         ]
-        templates = {"non_genuine_antique": (519, 186, 46, 44)}
+        templates = {"sale_non_genuine_antique": (519, 186, 46, 44)}
 
         select = classify_kaogu_scene(
             texts, templates, (1020, 718), phase="sale_wait_main"
@@ -244,6 +252,27 @@ class KaoguSceneTests(unittest.TestCase):
         self.assertEqual(
             decision,
             {"status": "close_sale_shop", "box": [900, 180, 40, 40]},
+        )
+
+    def test_live_empty_sale_shop_closes_with_page_identity_and_ocr_control(self):
+        texts = [
+            text("古董售卖", (414, 107, 131, 37)),
+            text("总价", (615, 472, 41, 24)),
+            text("拥有", (614, 508, 41, 23)),
+            text("售卖", (707, 561, 68, 31)),
+            text("×", (873, 204, 36, 43)),
+        ]
+
+        decision = classify_kaogu_scene(
+            texts,
+            {},
+            (986, 720),
+            phase="sale_closing",
+        )
+
+        self.assertEqual(
+            decision,
+            {"status": "close_sale_shop", "box": [873, 204, 36, 43]},
         )
 
     def test_unknown_sale_page_never_proposes_input(self):
