@@ -102,11 +102,16 @@ class KaoguSceneTests(unittest.TestCase):
 
         self.assertEqual(
             antique["templates"],
-            ["jineng/gd/gaofang.png", "jineng/gd/yanpin.png"],
+            [
+                "jineng/gd/gaofang.png",
+                "jineng/gd/yanpin.png",
+                "jineng/gd/gaofang_live_923.png",
+                "jineng/gd/yanpin_live_923.png",
+            ],
         )
         self.assertTrue(antique["green_mask"])
-        self.assertEqual(antique["threshold"], 0.4)
-        self.assertEqual(antique["roi_ratio"], [0.49, 0.18, 0.39, 0.57])
+        self.assertEqual(antique["threshold"], 0.82)
+        self.assertEqual(antique["roi_ratio"], [0.47, 0.18, 0.42, 0.57])
 
     def test_dig_keeps_workflow_in_digging_phase(self):
         self.assertEqual(next_kaogu_phase("dig", "enter"), "digging")

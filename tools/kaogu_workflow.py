@@ -76,10 +76,12 @@ KAOGU_TEMPLATES = {
         "templates": [
             "jineng/gd/gaofang.png",
             "jineng/gd/yanpin.png",
+            "jineng/gd/gaofang_live_923.png",
+            "jineng/gd/yanpin_live_923.png",
         ],
-        "threshold": 0.4,
+        "threshold": 0.82,
         "green_mask": True,
-        "roi_ratio": [0.49, 0.18, 0.39, 0.57],
+        "roi_ratio": [0.47, 0.18, 0.42, 0.57],
     },
     "auto_pathing": [
         "zonghe/zidongxunlu1.png",
