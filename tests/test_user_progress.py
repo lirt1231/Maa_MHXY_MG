@@ -116,6 +116,22 @@ class UserProgressTranslationTests(unittest.TestCase):
             "本次考古已结算，正在等待下一次挖掘",
         )
 
+    def test_fun_news_keeps_a_do_not_touch_reminder_during_likes_and_scrolls(self):
+        liking = user_progress(
+            "fun_news",
+            '{"event":"scene","status":"like","likes":2}',
+        )
+        scrolled = user_progress(
+            "fun_news",
+            '{"event":"fun_news_liked","likes":3,"targetLikes":5}',
+        )
+
+        self.assertEqual(liking["message"], "正在点赞第 3 条动态，请勿操作游戏窗口")
+        self.assertEqual(
+            scrolled["message"],
+            "已点赞 3/5 条动态，正在下滑加载下一条，请勿操作游戏窗口",
+        )
+
 
 class _FinishedProcess:
     def __init__(self, lines):

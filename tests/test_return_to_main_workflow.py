@@ -79,6 +79,7 @@ class ReturnToMainWorkflowTests(unittest.TestCase):
         "fuli_qiandao": "每日刮刮乐 福利",
         "bangpai_qiandao": "帮派福利 帮派分红",
         "baotu": "日常活动 宝图任务",
+        "fun_news": "趣闻鉴赏",
         "yunbiao": "日常活动 押送普通镖银",
         "shimen": "日常活动 师门任务",
         "mijingxiangyao": "秘境降妖 第18关",
@@ -97,7 +98,7 @@ class ReturnToMainWorkflowTests(unittest.TestCase):
             {"close_generic": [920, 45, 35, 35]},
         )
 
-    def test_all_eleven_task_pages_recover_to_two_frame_main_screen(self):
+    def test_all_verified_task_pages_recover_to_two_frame_main_screen(self):
         for task_id, label in self.PAGE_LABELS.items():
             with self.subTest(task_id=task_id):
                 runtime = Runtime([self.known_page(label), main_scene(), main_scene()])
@@ -108,6 +109,21 @@ class ReturnToMainWorkflowTests(unittest.TestCase):
                 self.assertNotEqual(
                     result.evidence["firstFrameId"], result.evidence["lastFrameId"]
                 )
+
+    def test_fun_news_feed_close_requires_its_dedicated_template(self):
+        feed = scene(
+            [],
+            {"fun_news_feed_close": [596, 294, 40, 102]},
+        )
+        runtime = Runtime([feed, main_scene(), main_scene()])
+
+        result = ReturnToMainWorkflow("fun_news", wait_seconds=0).execute(
+            runtime, Guard()
+        )
+
+        self.assertEqual(result.status, "confirmed")
+        self.assertEqual(result.outcome, "recovered")
+        self.assertEqual(runtime.clicks[0][0], [596, 294, 40, 102])
 
     def test_live_welfare_scratch_page_is_an_allowed_close_path(self):
         current = scene(

@@ -20,6 +20,11 @@ RETURN_TO_MAIN_TEMPLATES = {
         "zonghe/huodong2.png",
         "zonghe/huodong_live_923.png",
     ],
+    "fun_news_feed_close": {
+        "templates": ["qiandao/liaotian_guanbi.png"],
+        "threshold": 0.90,
+        "roi_ratio": (0.55, 0.35, 0.12, 0.22),
+    },
     "battle": ["zhandou/quxiao.png"],
     "close_welfare": ["qiandao/fuli_guanbi.png"],
     "close_shimen": {
@@ -46,6 +51,7 @@ TASK_PAGE_PATTERNS = {
     ),
     "bangpai_qiandao": (("clan_welfare", r"帮派福利|帮派签到|帮派分红"), ("clan", r"帮派"), ("welfare", r"福利")),
     "baotu": (("activity", r"活动|日常活动|宝图任务"), ("team", r"队伍")),
+    "fun_news": (("activity", r"活动|日常活动|趣(?:闻|味)鉴赏"),),
     "yunbiao": (("activity", r"活动|日常活动|运镖|押送普通镖银"), ("team", r"队伍")),
     "shimen": (("activity", r"活动|日常活动|师门任务"), ("team", r"队伍")),
     "mijingxiangyao": (("dungeon", r"秘境降妖|当前秘境|关卡"), ("activity", r"活动|日常活动"), ("team", r"队伍")),
@@ -354,6 +360,18 @@ def classify_return_scene(task_id: str, scene) -> dict[str, Any]:
                 "action_id": "confirm:shimen_completion",
                 "box": valid_box(confirm),
             }
+
+    fun_news_close = valid_box({"box": scene.templates.get("fun_news_feed_close")})
+    if task_id == "fun_news" and fun_news_close is not None and in_region(
+        {"box": fun_news_close}, scene.image_size, min_x=0.55, max_x=0.70,
+        min_y=0.30, max_y=0.62,
+    ):
+        return {
+            "status": "close_known_page",
+            "scene": "fun_news_feed",
+            "action_id": "close:fun_news_feed",
+            "box": fun_news_close,
+        }
 
     shimen_title = _find_region(
         scene, r"^师门(?:任务)?$", max_x=0.35, min_y=0.15, max_y=0.50

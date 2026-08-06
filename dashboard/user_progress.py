@@ -15,6 +15,8 @@ SCENE_MESSAGES = {
     "click_daily": "正在打开日常活动列表",
     "scroll_daily": "正在活动列表中查找任务",
     "join_task": "已找到任务入口，正在参加任务",
+    "like": "已找到趣闻动态，正在点赞",
+    "refresh_feed": "正在下滑加载趣闻动态",
     "continue_task": "正在点击右侧任务栏启动当前任务",
     "accept_dialogue": "正在领取宝图任务",
     "accept_task_dialogue": "正在领取师门任务",
@@ -133,12 +135,23 @@ def _structured_message(task_id: str, data: dict) -> str | None:
         task = str(data.get("task", "任务")).strip() or "任务"
         return f"{task}正在由游戏自动完成，请勿操作游戏窗口"
     if event == "scene":
+        if task_id == "fun_news" and data.get("status") == "like":
+            likes = data.get("likes")
+            if isinstance(likes, int) and 0 <= likes < 5:
+                return f"正在点赞第 {likes + 1} 条动态，请勿操作游戏窗口"
         if data.get("monitoring") and task_id in {"baotu", "shimen"}:
             task = "宝图任务" if task_id == "baotu" else "师门任务"
             return f"{task}正在由游戏自动完成，请勿操作游戏窗口"
         if task_id == "baotu" and data.get("status") == "continue_task":
             return "已识别到宝图任务正在执行"
         return _scene_message(data.get("status"), data.get("reason"))
+    if event == "fun_news_liked":
+        likes = data.get("likes")
+        target = data.get("targetLikes")
+        if isinstance(likes, int) and isinstance(target, int):
+            return f"已点赞 {likes}/{target} 条动态，正在下滑加载下一条，请勿操作游戏窗口"
+    if event == "completion_wait" and task_id == "fun_news":
+        return "已点赞 5 条动态，正在确认任务完成，请勿操作游戏窗口"
     if event in {"click", "drag"}:
         reason = str(data.get("reason", "")).strip()
         if not reason:

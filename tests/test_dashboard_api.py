@@ -29,7 +29,7 @@ class DashboardApiTests(unittest.TestCase):
             {
                 "sanjieqiyuan", "keju", "keju_huishi", "zhuogui",
                 "fuli_qiandao", "bangpai_qiandao", "baotu", "yunbiao", "shimen",
-                "mijingxiangyao", "kaogu",
+                "mijingxiangyao", "fun_news", "kaogu",
             },
         )
         self.assertTrue(

@@ -33,7 +33,7 @@ class TaskRegistryTests(unittest.TestCase):
             {
                 "sanjieqiyuan", "keju", "keju_huishi", "zhuogui",
                 "fuli_qiandao", "bangpai_qiandao", "baotu", "yunbiao", "shimen",
-                "mijingxiangyao", "kaogu",
+                "mijingxiangyao", "fun_news", "kaogu",
             },
         )
         self.assertTrue(all(task["checklist"] for task in task_list()))
@@ -53,7 +53,7 @@ class TaskRegistryTests(unittest.TestCase):
             {task_id for task_id, category in categories.items() if category == "daily"},
             {
                 "fuli_qiandao", "bangpai_qiandao", "sanjieqiyuan", "keju",
-                "baotu", "shimen", "yunbiao", "mijingxiangyao",
+                "baotu", "shimen", "yunbiao", "mijingxiangyao", "fun_news",
             },
         )
         self.assertEqual(
@@ -68,7 +68,7 @@ class TaskRegistryTests(unittest.TestCase):
             [task["id"] for task in items],
             [
                 "fuli_qiandao", "bangpai_qiandao", "sanjieqiyuan", "keju",
-                "baotu", "shimen", "yunbiao", "mijingxiangyao",
+                "baotu", "shimen", "yunbiao", "mijingxiangyao", "fun_news",
                 "keju_huishi", "zhuogui", "kaogu",
             ],
         )

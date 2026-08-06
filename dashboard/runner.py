@@ -37,7 +37,7 @@ TASK_RESULT_STATUSES = TASK_SUCCESS_RESULTS | {"safe_stopped", "cancelled"}
 TASK_RESULT_NUMERIC_FIELDS = {
     "questions", "answers", "clicks", "limit", "rounds", "target_rounds",
     "actions", "steps", "ghost_progress", "max_steps", "battles", "max_battles",
-    "digs", "target_digs", "purchases", "sale_clicks",
+    "digs", "target_digs", "purchases", "sale_clicks", "likes", "scrolls",
 }
 TASK_RESULT_SCHEMAS = {
     "sanjieqiyuan": {
@@ -101,6 +101,14 @@ TASK_RESULT_SCHEMAS = {
         "required": {
             "completed": {"actions", "clicks"},
             "already_completed": {"actions", "clicks"},
+        },
+    },
+    "fun_news": {
+        "statuses": {"completed", "already_completed", "safe_stopped", "cancelled"},
+        "fields": {"task_id", "status", "reason", "likes", "scrolls", "actions", "clicks"},
+        "required": {
+            status: {"likes", "scrolls", "actions", "clicks"}
+            for status in {"completed", "already_completed"}
         },
     },
     "yunbiao": {
@@ -177,6 +185,8 @@ SCENE_LABELS = {
     "open_activity": "活动入口",
     "open_daily": "日常活动入口",
     "join_task": "日常任务卡片",
+    "like": "趣闻动态点赞控件",
+    "refresh_feed": "趣闻动态列表",
     "accept_dialogue": "宝图任务领取对话",
     "accept_task_dialogue": "师门任务领取对话",
     "start_task": "师门任务待启动",
@@ -269,6 +279,8 @@ ACTION_LABELS = {
     "open_activity": "打开活动页面",
     "open_daily": "打开日常活动列表",
     "join_task": "点击同一卡片内的任务参加按钮",
+    "like": "点击经过模板确认的心形点赞控件",
+    "refresh_feed": "下滑加载趣闻动态",
     "accept_dialogue": "选择经过识别的“听听无妨”",
     "accept_task_dialogue": "选择经过识别的师门 NPC 任务",
     "start_task": "点击右侧师门任务正式开始",
@@ -549,6 +561,8 @@ class RunnerManager:
             return [sys.executable, str(ROOT / "tools/run_bangpai_qiandao_macos.py")]
         if task_id == "baotu":
             return [sys.executable, str(ROOT / "tools/run_baotu_macos.py")]
+        if task_id == "fun_news":
+            return [sys.executable, str(ROOT / "tools/run_fun_news_macos.py")]
         if task_id == "yunbiao":
             return [
                 sys.executable,
@@ -805,6 +819,7 @@ class RunnerManager:
             "fuli_qiandao": "run_fuli_qiandao_macos.py",
             "bangpai_qiandao": "run_bangpai_qiandao_macos.py",
             "baotu": "run_baotu_macos.py",
+            "fun_news": "run_fun_news_macos.py",
             "yunbiao": "run_yunbiao_macos.py",
             "shimen": "run_shimen_macos.py",
             "mijingxiangyao": "run_mijingxiangyao_macos.py",
@@ -880,6 +895,11 @@ class RunnerManager:
             ready = scene in {
                 "open_activity", "open_daily", "scroll_daily", "join_task",
                 "accept_dialogue", "continue_task", "battle", "auto_pathing",
+            }
+        elif task_id == "fun_news":
+            ready = scene in {
+                "open_activity", "open_daily", "scroll_daily", "join_task",
+                "like", "refresh_feed",
             }
         elif task_id == "yunbiao":
             ready = scene in {
@@ -1153,6 +1173,7 @@ class RunnerManager:
                 "fuli_qiandao": "福利签到完成",
                 "bangpai_qiandao": "帮派签到与分红领取完成",
                 "baotu": "宝图任务完成",
+                "fun_news": "趣闻鉴赏完成",
                 "yunbiao": "普通运镖完成",
                 "shimen": "师门任务已启动，后续由游戏自动完成",
                 "mijingxiangyao": "秘境降妖完成",
@@ -1466,6 +1487,10 @@ class RunnerManager:
             payload["stage"] = "正在识别并推进宝图任务"
         elif task_id == "baotu" and line.startswith(RESULT_PREFIX):
             payload["stage"] = RunnerManager._bounded_task_result_stage(line, "宝图任务")
+        elif task_id == "fun_news" and '"event": "scene"' in line:
+            payload["stage"] = "正在识别趣闻动态"
+        elif task_id == "fun_news" and line.startswith(RESULT_PREFIX):
+            payload["stage"] = RunnerManager._bounded_task_result_stage(line, "趣闻鉴赏")
         elif task_id == "yunbiao" and '"event": "scene"' in line:
             payload["stage"] = "正在识别并推进普通运镖"
         elif task_id == "yunbiao" and line.startswith(RESULT_PREFIX):

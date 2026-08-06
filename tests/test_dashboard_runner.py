@@ -265,6 +265,11 @@ class RunnerTaskContractTests(unittest.TestCase):
         self.assertTrue(command[-1].endswith("tools/run_baotu_macos.py"))
         self.assertEqual(len(command), 2)
 
+    def test_fun_news_uses_dedicated_bounded_runner(self):
+        command = self.manager._command("fun_news", {})
+        self.assertTrue(command[-1].endswith("tools/run_fun_news_macos.py"))
+        self.assertEqual(len(command), 2)
+
     def test_ordinary_escort_uses_bounded_rounds(self):
         command = self.manager._command("yunbiao", {"rounds": 3})
         self.assertTrue(command[1].endswith("tools/run_yunbiao_macos.py"))
@@ -503,6 +508,7 @@ class RunnerTaskContractTests(unittest.TestCase):
             "fuli_qiandao": {"status": "already_completed", "actions": 0, "clicks": 0},
             "bangpai_qiandao": {"status": "completed", "actions": 1, "clicks": 1},
             "baotu": {"status": "completed", "actions": 8, "clicks": 6},
+            "fun_news": {"status": "completed", "likes": 5, "scrolls": 4, "actions": 9, "clicks": 5},
             "yunbiao": {
                 "status": "completed", "rounds": 3, "target_rounds": 3,
                 "actions": 8, "clicks": 6,
@@ -565,6 +571,7 @@ class RunnerTaskContractTests(unittest.TestCase):
             ("fuli_qiandao", {}, {"status": "completed", "actions": 5, "clicks": 3}),
             ("bangpai_qiandao", {}, {"status": "already_completed", "actions": 0, "clicks": 0}),
             ("baotu", {}, {"status": "completed", "actions": 8, "clicks": 6}),
+            ("fun_news", {}, {"status": "completed", "likes": 5, "scrolls": 4, "actions": 9, "clicks": 5}),
             (
                 "yunbiao", {},
                 {"status": "completed", "rounds": 3, "target_rounds": 3, "actions": 8, "clicks": 6},
@@ -618,6 +625,7 @@ class RunnerInspectionTests(unittest.TestCase):
             "fuli_qiandao": ["run_fuli_qiandao_macos.py", "--inspect-scene"],
             "bangpai_qiandao": ["run_bangpai_qiandao_macos.py", "--inspect-scene"],
             "baotu": ["run_baotu_macos.py", "--inspect-scene"],
+            "fun_news": ["run_fun_news_macos.py", "--inspect-scene"],
             "yunbiao": ["run_yunbiao_macos.py", "--inspect-scene", "--rounds", "3"],
             "shimen": ["run_shimen_macos.py", "--inspect-scene"],
             "mijingxiangyao": [
