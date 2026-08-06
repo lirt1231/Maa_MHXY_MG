@@ -100,6 +100,13 @@ class KaoguDashboardTests(unittest.TestCase):
         )
         self.assertEqual(selling["message"], "正在将非真品古董兑换为银币")
 
+        scanning = user_progress(
+            "kaogu", '{"event":"scene","status":"scan_inventory"}'
+        )
+        self.assertEqual(
+            scanning["message"], "正在查找非真品古董，请勿操作游戏窗口"
+        )
+
     def test_manual_tool_preflight_explains_required_start_page(self):
         output = (
             'preflight_json={"image_size":[1020,718],'
