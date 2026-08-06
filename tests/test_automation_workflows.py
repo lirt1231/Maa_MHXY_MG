@@ -949,7 +949,6 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
                     _scene("use_shovel"),
                     _scene("start_archaeology"),
                     _scene("dig"),
-                    _scene("dig"),
                     _scene("open_inventory_for_sale"),
                     _scene("activate_antique"),
                     _scene("wait_for_sale_pathing"),
@@ -967,8 +966,8 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
                     "sale_clicks": 1,
                     "sale_outcome": "all_non_genuine_sold_genuine_retained",
                     "genuine_protected": True,
-                    "actions": 13,
-                    "clicks": 14,
+                    "actions": 12,
+                    "clicks": 13,
                 },
             ),
         )

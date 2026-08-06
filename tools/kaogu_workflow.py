@@ -217,9 +217,15 @@ class KaoguWorkflow:
             status: EvidenceClickAction(
                 name=f"kaogu_{status}",
                 statuses=(status,),
-                reason=f"考古流程：{status}",
+                reason=(
+                    (lambda _action_context: f"进行第 {digs + 1} 次挖掘")
+                    if status == "start_archaeology"
+                    else f"考古流程：{status}"
+                ),
                 wait_seconds=(1.8 if status == "start_archaeology" else 1.0),
-                repeat_limit=limit,
+                repeat_limit=(
+                    self.target_digs if status == "start_archaeology" else limit
+                ),
                 repeat_error=f"考古步骤 {status} 重复达到上限，已安全停止",
                 signature_factory=lambda action_context: action_context.decision_status,
             )
@@ -443,9 +449,10 @@ class KaoguWorkflow:
                     sale_clicks += 1
                 elif status == "cancel_genuine_sale":
                     sale_outcome = "all_non_genuine_sold_genuine_retained"
-                if status == "start_archaeology" and self.tool_mode == "selected":
-                    # The production-page click performs the first excavation;
-                    # the game then exposes only the remaining map dig buttons.
+                if status == "start_archaeology":
+                    # The production-page button performs an excavation in both
+                    # tool modes; subsequent digs may appear on the map or after
+                    # navigating back to the production page.
                     digs += 1
                     if digs >= self.target_digs:
                         context.waiter.wait(0.8)

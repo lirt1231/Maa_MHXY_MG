@@ -829,8 +829,8 @@ class KaoguRunnerTests(unittest.TestCase):
         self.assertEqual(result["digs"], 10)
         self.assertEqual(result["purchases"], 0)
         click_reasons = [reason for _, reason in FakeRuntime.instances[0].clicks]
-        self.assertEqual(click_reasons[0], "考古流程：start_archaeology")
-        self.assertEqual(sum("次挖掘" in reason for reason in click_reasons), 9)
+        self.assertEqual(click_reasons[0], "进行第 1 次挖掘")
+        self.assertEqual(sum("次挖掘" in reason for reason in click_reasons), 10)
         self.assertIn("进行第 2 次挖掘", click_reasons)
         self.assertIn("进行第 10 次挖掘", click_reasons)
         self.assertNotIn("购买一个洛阳铲", click_reasons)
@@ -888,7 +888,7 @@ class KaoguRunnerTests(unittest.TestCase):
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["digs"], 1)
         click_reasons = [reason for _, reason in FakeRuntime.instances[0].clicks]
-        self.assertEqual(click_reasons[0], "考古流程：start_archaeology")
+        self.assertEqual(click_reasons[0], "进行第 1 次挖掘")
         self.assertEqual(click_reasons.count("双击非真品古董并启动自动寻路"), 2)
         self.assertIn("考古流程：cancel_genuine_sale", click_reasons)
         self.assertNotIn("考古流程：close_inventory", click_reasons)
@@ -971,7 +971,7 @@ class KaoguRunnerTests(unittest.TestCase):
             select_shovel,
             use_shovel,
             start,
-            *[dig for _ in range(TARGET_DIGS)],
+            *[dig for _ in range(TARGET_DIGS - 1)],
             *sale_flow_scenes(),
         ]
         guard = CancellationGuard()
@@ -1000,6 +1000,7 @@ class KaoguRunnerTests(unittest.TestCase):
         click_reasons = [reason for _, reason in FakeRuntime.instances[0].clicks]
         self.assertEqual(click_reasons.count("购买一个洛阳铲"), 1)
         self.assertEqual(sum("次挖掘" in reason for reason in click_reasons), 10)
+        self.assertIn("进行第 1 次挖掘", click_reasons)
         self.assertEqual(purchase_guard.reservations, 1)
         self.assertEqual(purchase_guard.releases, 1)
         self.assertFalse(purchase_guard.is_reserved())
