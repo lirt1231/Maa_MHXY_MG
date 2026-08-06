@@ -505,7 +505,7 @@ class MacOSTaskRuntimeInputTests(unittest.TestCase):
         self.runtime.guard.perform_input.assert_not_called()
 
     @patch("tools.macos_task_runtime.JTemplateMatch")
-    def test_read_scene_forwards_green_mask_template_option(self, template_match):
+    def test_read_scene_forwards_template_mask_and_relative_roi(self, template_match):
         frame = replace(
             self.frame,
             image=SimpleNamespace(shape=(718, 1020, 4)),
@@ -520,13 +520,14 @@ class MacOSTaskRuntimeInputTests(unittest.TestCase):
                 "templates": ["jineng/gd/yanpin.png"],
                 "threshold": 0.8,
                 "green_mask": True,
+                "roi_ratio": [0.49, 0.18, 0.39, 0.57],
             }
         })
 
         self.assertEqual(current.templates["non_genuine"], (200, 100, 50, 40))
         template_match.assert_called_once_with(
             template=["jineng/gd/yanpin.png"],
-            roi=(0, 0, 1020, 718),
+            roi=(500, 129, 398, 409),
             threshold=[0.8],
             green_mask=True,
         )

@@ -53,6 +53,32 @@ def box_center(box):
     return x + width // 2, y + height // 2
 
 
+def relative_roi(ratio, image_size):
+    if not isinstance(ratio, (list, tuple)) or len(ratio) != 4:
+        raise ValueError("模板相对识别区域必须包含四个数值")
+    if not all(isinstance(value, (int, float)) for value in ratio):
+        raise ValueError("模板相对识别区域必须是数值")
+    left, top, roi_width, roi_height = ratio
+    if (
+        left < 0
+        or top < 0
+        or roi_width <= 0
+        or roi_height <= 0
+        or left + roi_width > 1
+        or top + roi_height > 1
+    ):
+        raise ValueError("模板相对识别区域必须位于当前画面内")
+    width, height = image_size
+    x = round(width * left)
+    y = round(height * top)
+    return (
+        x,
+        y,
+        max(1, min(width - x, round(width * roi_width))),
+        max(1, min(height - y, round(height * roi_height))),
+    )
+
+
 def log_event(event: str, **payload) -> None:
     print(json.dumps({"event": event, **payload}, ensure_ascii=False), flush=True)
 
@@ -152,16 +178,19 @@ class MacOSTaskRuntime:
         for name, template_spec in (templates or {}).items():
             threshold = 0.72
             green_mask = False
+            roi = (0, 0, width, height)
             template_files = template_spec
             if isinstance(template_spec, Mapping):
                 template_files = template_spec.get("templates", [])
                 threshold = float(template_spec.get("threshold", threshold))
                 green_mask = bool(template_spec.get("green_mask", False))
+                if "roi_ratio" in template_spec:
+                    roi = relative_roi(template_spec["roi_ratio"], (width, height))
             detail = self._recognize(
                 "TemplateMatch",
                 JTemplateMatch(
                     template=template_files,
-                    roi=(0, 0, width, height),
+                    roi=roi,
                     threshold=[threshold],
                     green_mask=green_mask,
                 ),

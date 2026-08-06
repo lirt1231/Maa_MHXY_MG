@@ -77,8 +77,9 @@ KAOGU_TEMPLATES = {
             "jineng/gd/gaofang.png",
             "jineng/gd/yanpin.png",
         ],
-        "threshold": 0.8,
+        "threshold": 0.4,
         "green_mask": True,
+        "roi_ratio": [0.49, 0.18, 0.39, 0.57],
     },
     "auto_pathing": [
         "zonghe/zidongxunlu1.png",
