@@ -3,10 +3,22 @@
 from __future__ import annotations
 
 try:
-    from .daily_activity_navigation_core import classify_daily_navigation, find_items
+    from .daily_activity_navigation_core import (
+        classify_daily_navigation,
+        find_items,
+        in_region,
+        valid_box,
+    )
+    from .daily_schedule_macos_core import normalize_text
     from .daily_workflow_common import DAILY_TASK_TEMPLATES
 except ImportError:  # Direct execution through a platform runner.
-    from daily_activity_navigation_core import classify_daily_navigation, find_items
+    from daily_activity_navigation_core import (
+        classify_daily_navigation,
+        find_items,
+        in_region,
+        valid_box,
+    )
+    from daily_schedule_macos_core import normalize_text
     from daily_workflow_common import DAILY_TASK_TEMPLATES
 
 
@@ -37,6 +49,30 @@ FUN_NEWS_TEMPLATES = {
 }
 
 
+def fun_news_feed_signature(texts, image_size):
+    """Return visible feed text used to prove a scroll reached a new entry."""
+    entries = []
+    for item in texts or []:
+        box = valid_box(item)
+        value = normalize_text(item.get("text", ""))
+        if (
+            box is None
+            or len(value) < 2
+            or value in {"点赞", "评论", "转发", "更多"}
+            or not in_region(
+                item,
+                image_size,
+                min_x=0.10,
+                max_x=0.66,
+                min_y=0.13,
+                max_y=0.95,
+            )
+        ):
+            continue
+        entries.append((value, round(box[1] / image_size[1], 2)))
+    return tuple(entries) or None
+
+
 def classify_fun_news_scene(
     texts, templates, image_size, *, daily_tab_confirmed=False
 ):
@@ -61,4 +97,8 @@ def classify_fun_news_scene(
     )
 
 
-__all__ = ["FUN_NEWS_TEMPLATES", "classify_fun_news_scene"]
+__all__ = [
+    "FUN_NEWS_TEMPLATES",
+    "classify_fun_news_scene",
+    "fun_news_feed_signature",
+]

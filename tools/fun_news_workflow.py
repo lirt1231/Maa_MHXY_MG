@@ -18,7 +18,11 @@ try:
         WorkflowResult,
     )
     from .daily_activity_actions import DailyActivityActions
-    from .fun_news_recognition import FUN_NEWS_TEMPLATES, classify_fun_news_scene
+    from .fun_news_recognition import (
+        FUN_NEWS_TEMPLATES,
+        classify_fun_news_scene,
+        fun_news_feed_signature,
+    )
 except ImportError:  # Direct execution through a platform runner.
     from automation_actions import ActionMetrics, EvidenceClickAction, RelativeDragAction
     from automation_workflows import (
@@ -28,7 +32,11 @@ except ImportError:  # Direct execution through a platform runner.
         WorkflowResult,
     )
     from daily_activity_actions import DailyActivityActions
-    from fun_news_recognition import FUN_NEWS_TEMPLATES, classify_fun_news_scene
+    from fun_news_recognition import (
+        FUN_NEWS_TEMPLATES,
+        classify_fun_news_scene,
+        fun_news_feed_signature,
+    )
 
 
 TARGET_LIKES = 5
@@ -85,6 +93,10 @@ class FunNewsWorkflow:
         feed_scrolls = 0
         completion_polls = 0
         needs_scroll = False
+        awaiting_new_entry = False
+        stale_feed_polls = 0
+        last_like_box = None
+        last_feed_signature = None
 
         for step in range(1, self.max_steps + 1):
             scene = context.runtime.read_scene(FUN_NEWS_TEMPLATES)
@@ -146,6 +158,7 @@ class FunNewsWorkflow:
                 metrics.record(scroll_feed.execute(action_context))
                 feed_scrolls += 1
                 needs_scroll = False
+                awaiting_new_entry = True
                 unknown_polls = 0
                 like_action.reset_repetition()
                 continue
@@ -157,9 +170,32 @@ class FunNewsWorkflow:
                 continue
 
             if status == "like":
+                like_box = tuple(decision["box"])
+                feed_signature = fun_news_feed_signature(scene.texts, scene.image_size)
+                if (
+                    awaiting_new_entry
+                    and like_box == last_like_box
+                    and (feed_signature is None or feed_signature == last_feed_signature)
+                ):
+                    stale_feed_polls += 1
+                    if stale_feed_polls >= 3:
+                        raise RuntimeError(
+                            "下滑后仍是同一条趣闻动态，已停止以避免重复点赞"
+                        )
+                    context.emit(
+                        "feed_refresh_wait",
+                        task="趣闻鉴赏",
+                        poll=stale_feed_polls,
+                    )
+                    context.waiter.wait(1.0)
+                    continue
                 metrics.record(like_action.execute(action_context))
                 likes += 1
                 needs_scroll = likes < self.target_likes
+                awaiting_new_entry = False
+                stale_feed_polls = 0
+                last_like_box = like_box
+                last_feed_signature = feed_signature
                 unknown_polls = 0
                 context.emit(
                     "fun_news_liked",

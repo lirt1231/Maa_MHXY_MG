@@ -152,6 +152,8 @@ def _structured_message(task_id: str, data: dict) -> str | None:
             return f"已点赞 {likes}/{target} 条动态，正在下滑加载下一条，请勿操作游戏窗口"
     if event == "completion_wait" and task_id == "fun_news":
         return "已点赞 5 条动态，正在确认任务完成，请勿操作游戏窗口"
+    if event == "feed_refresh_wait" and task_id == "fun_news":
+        return "正在等待新的趣闻动态加载，请勿操作游戏窗口"
     if event in {"click", "drag"}:
         reason = str(data.get("reason", "")).strip()
         if not reason:

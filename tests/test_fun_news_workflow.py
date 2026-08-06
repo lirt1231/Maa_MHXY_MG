@@ -81,17 +81,13 @@ class FunNewsWorkflowTests(unittest.TestCase):
     def test_likes_five_distinct_feed_entries_with_scrolls_between_them(self):
         like = {"fun_news_like": (180, 400, 76, 24)}
         completed = {"fun_news_complete": (320, 120, 300, 80)}
+        feed = lambda number: scene(
+            texts=[text(f"第 {number} 条趣闻动态", (160, 240, 160, 24))],
+            templates=like,
+        )
         runtime = Runtime([
-            scene(templates=like),
-            scene(templates=like),
-            scene(templates=like),
-            scene(templates=like),
-            scene(templates=like),
-            scene(templates=like),
-            scene(templates=like),
-            scene(templates=like),
-            scene(templates=like),
-            scene(templates=completed),
+            feed(1), feed(1), feed(2), feed(2), feed(3), feed(3),
+            feed(4), feed(4), feed(5), scene(templates=completed),
         ])
 
         result = FunNewsWorkflow(max_steps=10).execute(self.context(runtime))
@@ -117,7 +113,14 @@ class FunNewsWorkflowTests(unittest.TestCase):
 
     def test_five_likes_require_completion_evidence_before_success(self):
         like = {"fun_news_like": (180, 400, 76, 24)}
-        runtime = Runtime([scene(templates=like) for _ in range(13)])
+        feed = lambda number: scene(
+            texts=[text(f"第 {number} 条趣闻动态", (160, 240, 160, 24))],
+            templates=like,
+        )
+        runtime = Runtime([
+            feed(1), feed(1), feed(2), feed(2), feed(3), feed(3),
+            feed(4), feed(4), feed(5), feed(5), feed(5), feed(5), feed(5),
+        ])
 
         with self.assertRaisesRegex(RuntimeError, "已点赞 5 条动态"):
             FunNewsWorkflow(max_steps=13, max_completion_polls=4).execute(
@@ -127,6 +130,22 @@ class FunNewsWorkflowTests(unittest.TestCase):
         self.assertEqual(
             len([entry for entry in runtime.trace if entry[0] == "click"]),
             5,
+        )
+
+    def test_unchanged_feed_after_scroll_never_receives_a_second_like(self):
+        like = {"fun_news_like": (180, 400, 76, 24)}
+        current = scene(
+            texts=[text("同一条趣闻动态", (160, 240, 160, 24))],
+            templates=like,
+        )
+        runtime = Runtime([current, current, current, current, current])
+
+        with self.assertRaisesRegex(RuntimeError, "同一条趣闻动态"):
+            FunNewsWorkflow(max_steps=5).execute(self.context(runtime))
+
+        self.assertEqual(
+            len([entry for entry in runtime.trace if entry[0] == "click"]),
+            1,
         )
 
 

@@ -131,6 +131,8 @@ class UserProgressTranslationTests(unittest.TestCase):
             scrolled["message"],
             "已点赞 3/5 条动态，正在下滑加载下一条，请勿操作游戏窗口",
         )
+        waiting = user_progress("fun_news", '{"event":"feed_refresh_wait","poll":1}')
+        self.assertEqual(waiting["message"], "正在等待新的趣闻动态加载，请勿操作游戏窗口")
 
 
 class _FinishedProcess:
