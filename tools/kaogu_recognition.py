@@ -244,7 +244,7 @@ def _classify_antique_sale(texts, templates, image_size, phase):
             "status": "sell_antique",
             "box": valid_box(sell_buttons[-1]),
         }
-    if phase == "sale_closing" and sale_page:
+    if phase in {"sale_wait_main", "sale_closing", "sale_confirm_main"} and sale_page:
         close_box = _template_box(
             templates,
             "shop_close",
@@ -252,7 +252,7 @@ def _classify_antique_sale(texts, templates, image_size, phase):
             min_x=0.75,
             max_y=0.4,
         )
-        if close_box:
+        if close_box and not antique:
             return {"status": "close_sale_shop", "box": close_box}
 
     if _main_screen_evidence(texts, templates, image_size):

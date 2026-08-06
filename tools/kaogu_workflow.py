@@ -130,7 +130,7 @@ DEFAULT_ACTION_LIMITS = {
     "select_sale_antique": 12,
     "sell_antique": 12,
     "cancel_genuine_sale": 1,
-    "close_sale_shop": 1,
+    "close_sale_shop": 2,
 }
 
 
@@ -247,7 +247,11 @@ class KaoguWorkflow:
                     if status == "start_archaeology"
                     else f"考古流程：{status}"
                 ),
-                wait_seconds=(1.8 if status == "start_archaeology" else 1.0),
+                wait_seconds=(
+                    1.8
+                    if status == "start_archaeology"
+                    else 2.0 if status == "close_sale_shop" else 1.0
+                ),
                 repeat_limit=(
                     self.target_digs if status == "start_archaeology" else limit
                 ),

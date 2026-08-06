@@ -199,6 +199,26 @@ class KaoguSceneTests(unittest.TestCase):
             {"status": "antique_sale_finished", "reason": "no_saleable_antique"},
         )
 
+    def test_sale_resume_closes_empty_shop_only_with_close_template(self):
+        texts = [
+            text("古董售卖", (426, 84, 142, 37)),
+            text("总价", (636, 461, 42, 25)),
+            text("拥有", (635, 500, 42, 23)),
+            text("售卖", (731, 553, 70, 32)),
+        ]
+
+        decision = classify_kaogu_scene(
+            texts,
+            {"shop_close": (900, 180, 40, 40)},
+            (1020, 718),
+            phase="sale_wait_main",
+        )
+
+        self.assertEqual(
+            decision,
+            {"status": "close_sale_shop", "box": [900, 180, 40, 40]},
+        )
+
     def test_unknown_sale_page_never_proposes_input(self):
         decision = classify_kaogu_scene(
             [text("确定", (672, 408, 157, 69))],
