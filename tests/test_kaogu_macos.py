@@ -131,7 +131,11 @@ class KaoguSceneTests(unittest.TestCase):
             "jineng/gd/yanpin_sale_live_986.png",
             sale_antique["templates"],
         )
-        self.assertNotIn("jineng/gd/gaofang.png", sale_antique["templates"])
+        self.assertIn("jineng/gd/yanpin_live_923.png", sale_antique["templates"])
+        self.assertIn("jineng/gd/gaofang_live_923.png", sale_antique["templates"])
+        self.assertTrue(
+            all("zhenpin" not in template for template in sale_antique["templates"])
+        )
         self.assertEqual(sale_antique["threshold"], 0.82)
 
     def test_shop_close_templates_include_current_narrow_client(self):

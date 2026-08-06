@@ -93,11 +93,14 @@ KAOGU_TEMPLATES = {
     "sale_non_genuine_antique": {
         "templates": [
             "jineng/gd/yanpin_sale_live_986.png",
+            "jineng/gd/yanpin_live_923.png",
+            "jineng/gd/yanpin.png",
             "jineng/gd/gaofang_live_923.png",
+            "jineng/gd/gaofang.png",
         ],
         "threshold": 0.82,
         "green_mask": True,
-        "roi_ratio": [0.1, 0.2, 0.5, 0.3],
+        "roi_ratio": [0.1, 0.18, 0.5, 0.5],
     },
     "auto_pathing": [
         "zonghe/zidongxunlu1.png",
