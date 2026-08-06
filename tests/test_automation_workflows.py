@@ -120,6 +120,7 @@ def _kaogu_classifier(
         "wait_for_dig",
         "dig_confirmed",
         "wait_for_sale_pathing",
+        "sale_candidate_absent",
         "antique_sale_main_confirmed",
     }:
         decision["box"] = texts[0]["box"]
@@ -1093,6 +1094,44 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
         )
         self.assertEqual(reasons.count("考古流程：close_sale_shop"), 2)
         self.assertEqual(reasons.count("考古流程：close_inventory"), 1)
+
+    def test_kaogu_sells_every_visible_antique_before_closing_shop(self):
+        adapter = _DesktopAdapterA([
+            _scene("select_sale_antique"),
+            _scene("sell_antique"),
+            _scene("select_sale_antique"),
+            _scene("sell_antique"),
+            _scene("select_sale_antique"),
+            _scene("sell_antique"),
+            _scene("sale_candidate_absent"),
+            _scene("sale_candidate_absent"),
+            _scene("sale_candidate_absent"),
+            _scene("close_sale_shop"),
+            _scene("open_inventory_for_sale"),
+            _scene("normalize_inventory"),
+            _scene("normalize_inventory"),
+            _scene("normalize_inventory"),
+            _scene("organize_inventory"),
+            _scene("scan_inventory"),
+            _scene("close_inventory"),
+            _scene("antique_sale_main_confirmed"),
+            _scene("antique_sale_main_confirmed"),
+        ])
+        workflow = KaoguWorkflow(
+            target_digs=10,
+            initial_digs=10,
+            max_inventory_scan_drags=1,
+            classifier=_kaogu_classifier,
+        )
+
+        result = workflow.execute(WorkflowContext(adapter, adapter))
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.payload["sale_clicks"], 3)
+        reasons = [entry[-1] for entry in adapter.trace if entry[0] == "click"]
+        self.assertEqual(reasons.count("考古流程：select_sale_antique"), 3)
+        self.assertEqual(reasons.count("考古流程：sell_antique"), 3)
+        self.assertEqual(reasons.count("考古流程：close_sale_shop"), 1)
 
     def test_kaogu_stops_after_bounded_inventory_scan_without_clicking_items(self):
         adapter = _DesktopAdapterA([

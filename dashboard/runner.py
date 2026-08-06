@@ -221,6 +221,7 @@ SCENE_LABELS = {
     "wait_for_sale_pathing": "前往古董商途中",
     "select_sale_antique": "古董商出售列表",
     "sell_antique": "非真品古董出售按钮",
+    "sale_candidate_absent": "古董商待售列表复核",
     "cancel_genuine_sale": "真品出售确认页",
     "antique_sale_finished": "非真品古董已售完",
     "close_sale_shop": "古董商页面关闭按钮",

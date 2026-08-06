@@ -114,7 +114,6 @@ KAOGU_TEMPLATES = {
     },
     "antique_sale_complete": {
         "templates": [
-            "jineng/shoumai_wancheng.png",
             "jineng/shoumai_wancheng2.png",
         ],
         "threshold": 0.8,
@@ -196,6 +195,7 @@ class KaoguWorkflow:
     max_dig_attempts_per_round: int = 3
     max_final_observations: int = 360
     max_sale_wait_polls: int = 300
+    sale_empty_confirmations: int = 3
     inventory_normalize_drags: int = 3
     max_inventory_scan_drags: int = 20
     final_main_confirmations: int = 2
@@ -224,6 +224,7 @@ class KaoguWorkflow:
             self.max_dig_attempts_per_round,
             self.max_final_observations,
             self.max_sale_wait_polls,
+            self.sale_empty_confirmations,
             self.final_main_confirmations,
             self.inventory_normalize_drags,
             self.max_inventory_scan_drags,
@@ -247,6 +248,7 @@ class KaoguWorkflow:
         final_observations = 0
         confirmed_main_polls = 0
         sale_wait_polls = 0
+        sale_empty_polls = 0
         sale_clicks = 0
         sale_batches = 0
         sale_outcome = None
@@ -433,6 +435,13 @@ class KaoguWorkflow:
                     context.waiter.wait(self.final_confirmation_wait_seconds)
                     continue
                 confirmed_main_polls = 0
+                if status == "sale_candidate_absent":
+                    sale_empty_polls += 1
+                    if sale_empty_polls >= self.sale_empty_confirmations:
+                        phase = "sale_closing"
+                    context.waiter.wait(0.8)
+                    continue
+                sale_empty_polls = 0
                 if status == "antique_sale_finished":
                     phase = "sale_closing"
                     context.waiter.wait(0.5)

@@ -250,6 +250,15 @@ def _classify_antique_sale(texts, templates, image_size, phase):
     if phase == "sale_pathing" and inventory_page and use_buttons:
         return {"status": "use_antique", "box": valid_box(use_buttons[-1])}
 
+    if (
+        phase in {"sale_wait_main", "sale_pathing", "sale_select"}
+        and sale_page
+        and sale_antique
+    ):
+        return {
+            "status": "select_sale_antique",
+            "box": sale_antique,
+        }
     sale_complete = _template_box(
         templates,
         "antique_sale_complete",
@@ -260,22 +269,13 @@ def _classify_antique_sale(texts, templates, image_size, phase):
     )
     if phase in {"sale_select", "sale_sell"} and sale_complete:
         return {"status": "antique_sale_finished", "reason": "no_saleable_antique"}
-    if (
-        phase in {"sale_wait_main", "sale_pathing", "sale_select"}
-        and sale_page
-        and sale_antique
-    ):
-        return {
-            "status": "select_sale_antique",
-            "box": sale_antique,
-        }
     if phase == "sale_pathing" and sale_page and sell_buttons:
         return {
             "status": "sell_antique",
             "box": valid_box(sell_buttons[-1]),
         }
     if phase == "sale_select" and sale_page and not sale_antique:
-        return {"status": "antique_sale_finished", "reason": "no_saleable_antique"}
+        return {"status": "sale_candidate_absent", "reason": "confirming_empty_sale"}
     if phase == "sale_sell" and sale_page and sell_buttons:
         return {
             "status": "sell_antique",

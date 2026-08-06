@@ -148,6 +148,14 @@ class KaoguSceneTests(unittest.TestCase):
         self.assertIn("jineng/zahuopu_guanbi_live_923.png", close["templates"])
         self.assertEqual(close["threshold"], 0.8)
 
+    def test_sale_completion_uses_only_explicit_no_goods_template(self):
+        completion = KAOGU_TEMPLATES["antique_sale_complete"]
+
+        self.assertEqual(
+            completion["templates"],
+            ["jineng/shoumai_wancheng2.png"],
+        )
+
     def test_dig_keeps_workflow_in_digging_phase(self):
         self.assertEqual(next_kaogu_phase("dig", "enter"), "digging")
 
@@ -219,6 +227,49 @@ class KaoguSceneTests(unittest.TestCase):
         self.assertEqual(sell, {"status": "sell_antique", "box": [731, 553, 70, 32]})
         self.assertEqual(
             finished,
+            {"status": "sale_candidate_absent", "reason": "confirming_empty_sale"},
+        )
+
+    def test_blank_preview_never_hides_the_next_saleable_antique(self):
+        texts = [
+            text("古董售卖", (426, 84, 142, 37)),
+            text("总价", (636, 461, 42, 25)),
+            text("拥有", (635, 500, 42, 23)),
+            text("售卖", (731, 553, 70, 32)),
+        ]
+
+        decision = classify_kaogu_scene(
+            texts,
+            {
+                "antique_sale_complete": (766, 66, 318, 332),
+                "sale_non_genuine_antique": (519, 186, 46, 44),
+            },
+            (1020, 718),
+            phase="sale_select",
+        )
+
+        self.assertEqual(
+            decision,
+            {"status": "select_sale_antique", "box": [519, 186, 46, 44]},
+        )
+
+    def test_explicit_no_goods_page_finishes_sale(self):
+        texts = [
+            text("古董售卖", (426, 84, 142, 37)),
+            text("总价", (636, 461, 42, 25)),
+            text("拥有", (635, 500, 42, 23)),
+            text("售卖", (731, 553, 70, 32)),
+        ]
+
+        decision = classify_kaogu_scene(
+            texts,
+            {"antique_sale_complete": (766, 66, 368, 382)},
+            (1020, 718),
+            phase="sale_select",
+        )
+
+        self.assertEqual(
+            decision,
             {"status": "antique_sale_finished", "reason": "no_saleable_antique"},
         )
 
