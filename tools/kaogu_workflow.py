@@ -72,16 +72,11 @@ KAOGU_TEMPLATES = {
     },
     "non_genuine_antique": {
         "templates": [
-            "jineng/gd/1.1.png",
-            "jineng/gd/1.2.png",
-            "jineng/gd/1.3.png",
-            "jineng/gd/1.4.png",
-            "jineng/gd/2.1.png",
-            "jineng/gd/2.2.png",
             "jineng/gd/gaofang.png",
             "jineng/gd/yanpin.png",
         ],
         "threshold": 0.8,
+        "green_mask": True,
     },
     "auto_pathing": [
         "zonghe/zidongxunlu1.png",

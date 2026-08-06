@@ -2,6 +2,7 @@ import io
 import json
 import unittest
 from contextlib import redirect_stdout
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -502,6 +503,33 @@ class MacOSTaskRuntimeInputTests(unittest.TestCase):
         self.assertNotIn("predictedScreenPoint", evidence)
         self.runtime.backend.preview_point.assert_not_called()
         self.runtime.guard.perform_input.assert_not_called()
+
+    @patch("tools.macos_task_runtime.JTemplateMatch")
+    def test_read_scene_forwards_green_mask_template_option(self, template_match):
+        frame = replace(
+            self.frame,
+            image=SimpleNamespace(shape=(718, 1020, 4)),
+        )
+        self.runtime.backend.capture.return_value = frame
+        self.runtime._recognize = Mock(
+            side_effect=[None, SimpleNamespace(hit=True, box=(200, 100, 50, 40))]
+        )
+
+        current = self.runtime.read_scene({
+            "non_genuine": {
+                "templates": ["jineng/gd/yanpin.png"],
+                "threshold": 0.8,
+                "green_mask": True,
+            }
+        })
+
+        self.assertEqual(current.templates["non_genuine"], (200, 100, 50, 40))
+        template_match.assert_called_once_with(
+            template=["jineng/gd/yanpin.png"],
+            roi=(0, 0, 1020, 718),
+            threshold=[0.8],
+            green_mask=True,
+        )
 
     def test_click_rejects_scene_from_an_older_capture(self):
         newer = CapturedFrame(

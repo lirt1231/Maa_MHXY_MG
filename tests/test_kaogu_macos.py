@@ -86,6 +86,15 @@ class KaoguSceneTests(unittest.TestCase):
             KAOGU_TEMPLATES["selected_shovel"],
         )
 
+    def test_sale_entry_templates_require_explicit_non_genuine_badges(self):
+        antique = KAOGU_TEMPLATES["non_genuine_antique"]
+
+        self.assertEqual(
+            antique["templates"],
+            ["jineng/gd/gaofang.png", "jineng/gd/yanpin.png"],
+        )
+        self.assertTrue(antique["green_mask"])
+
     def test_dig_keeps_workflow_in_digging_phase(self):
         self.assertEqual(next_kaogu_phase("dig", "enter"), "digging")
 

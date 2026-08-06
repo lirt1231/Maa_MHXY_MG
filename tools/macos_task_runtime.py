@@ -151,16 +151,19 @@ class MacOSTaskRuntime:
         matches = {}
         for name, template_spec in (templates or {}).items():
             threshold = 0.72
+            green_mask = False
             template_files = template_spec
             if isinstance(template_spec, Mapping):
                 template_files = template_spec.get("templates", [])
                 threshold = float(template_spec.get("threshold", threshold))
+                green_mask = bool(template_spec.get("green_mask", False))
             detail = self._recognize(
                 "TemplateMatch",
                 JTemplateMatch(
                     template=template_files,
                     roi=(0, 0, width, height),
                     threshold=[threshold],
+                    green_mask=green_mask,
                 ),
                 image,
             )
