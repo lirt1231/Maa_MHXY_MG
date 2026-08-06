@@ -173,6 +173,18 @@ class KaoguSceneTests(unittest.TestCase):
 
         self.assertEqual(decision, {"status": "scan_inventory"})
 
+    def test_sale_resume_accepts_an_inventory_already_left_open(self):
+        inventory = sale_flow_scenes()[1]
+
+        decision = classify_kaogu_scene(
+            inventory.texts,
+            inventory.templates,
+            IMAGE_SIZE,
+            phase="sale_wait_main",
+        )
+
+        self.assertEqual(decision, {"status": "normalize_inventory"})
+
     def test_sale_main_tolerates_partial_team_ocr_with_cross_region_anchors(self):
         decision = classify_kaogu_scene(
             [

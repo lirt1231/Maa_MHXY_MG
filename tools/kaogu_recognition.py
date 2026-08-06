@@ -183,7 +183,7 @@ def _classify_antique_sale(texts, templates, image_size, phase):
         image_size,
         {"min_x": 0.55, "max_x": 0.9, "min_y": 0.72, "max_y": 0.95},
     )
-    if phase == "sale_inventory_normalize" and inventory_page:
+    if phase in {"sale_wait_main", "sale_inventory_normalize"} and inventory_page:
         return {"status": "normalize_inventory"}
     if phase == "sale_inventory_sort" and inventory_page and organize_buttons:
         return {
