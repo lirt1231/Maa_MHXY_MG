@@ -110,6 +110,25 @@ class KejuKnowledgeStoreTests(unittest.TestCase):
             self.assertEqual(first, ["a-first", "z-last"])
             self.assertEqual(second, first)
 
+    def test_default_seed_answers_shedi_shemei_without_web_search(self):
+        with tempfile.TemporaryDirectory() as directory:
+            empty_bank = Path(directory) / "bank.txt"
+            empty_bank.write_text("", encoding="utf-8")
+            store = KejuKnowledgeStore(
+                Path(directory) / "knowledge.sqlite3",
+                RECOGNITION_DIR / "keju_knowledge_seed.json",
+                empty_bank,
+            )
+
+            result = store.search(
+                "向别人介绍自己的弟弟妹妹应该用舍弟舍妹？",
+                limit=1,
+            )[0]
+
+        self.assertEqual(result["id"], "xiangshi-shedi-shemei-honorific")
+        self.assertEqual(result["answer"], "是的")
+        self.assertGreaterEqual(result["similarity"], 90)
+
 
 if __name__ == "__main__":
     unittest.main()

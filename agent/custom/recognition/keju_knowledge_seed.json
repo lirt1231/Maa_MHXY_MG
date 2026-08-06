@@ -168,6 +168,19 @@
       "source_kind": "culture_reference",
       "trust": 0.76,
       "updated_at": "2026-07-25"
+    },
+    {
+      "id": "xiangshi-shedi-shemei-honorific",
+      "title": "介绍自己的弟弟妹妹使用舍弟舍妹",
+      "content": "向别人介绍自己的弟弟妹妹时，舍弟和舍妹是正确的传统亲属谦称，因此该判断题的陈述正确。",
+      "answer": "是的",
+      "aliases": ["向别人介绍自己的弟弟妹妹应该用舍弟舍妹", "舍弟舍妹是不是正确谦辞"],
+      "tags": ["科举乡试", "传统文化", "谦辞", "舍弟", "舍妹", "判断题"],
+      "source_url": "https://wenku.baidu.com/view/170db3701d2e453610661ed9ad51f01dc281572d.html",
+      "source_name": "百度文库·舍弟舍妹的正确用法",
+      "source_kind": "language_reference",
+      "trust": 0.82,
+      "updated_at": "2026-08-06"
     }
   ]
 }
