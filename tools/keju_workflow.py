@@ -48,19 +48,28 @@ def should_end_loop(
     answered: int,
     max_steps: int,
     question_round: tuple[int, int] | None = None,
+    *,
+    question_number: int | None = None,
+    final_question_number: int | None = None,
 ) -> bool:
     if answered >= max_steps:
         return True
-    if question_round is None:
-        return False
-    current, total = question_round
-    return current >= total
+    if question_round is not None:
+        current, total = question_round
+        if current >= total:
+            return True
+    return bool(
+        question_number is not None
+        and final_question_number is not None
+        and question_number >= final_question_number
+    )
 
 
 @dataclass(frozen=True)
 class KejuWorkflow:
     source: QuizObservationSource
     max_answers: int = 20
+    final_question_number: int | None = None
     delay: float = 3.0
     max_waiting_polls: int = 180
     max_same_question_polls: int = 8
@@ -71,6 +80,10 @@ class KejuWorkflow:
             self.max_answers <= 0
             or self.delay < 0
             or self.max_recognition_failures <= 0
+            or (
+                self.final_question_number is not None
+                and self.final_question_number <= 0
+            )
         ):
             raise ValueError("科举答题上限必须为正整数且等待时间不能为负数")
 
@@ -147,8 +160,21 @@ class KejuWorkflow:
                     clicks=metrics.clicks,
                     questionRound=question_round,
                 )
-                if should_end_loop(answered, self.max_answers, question_round):
-                    if question_round and question_round[0] >= question_round[1]:
+                if should_end_loop(
+                    answered,
+                    self.max_answers,
+                    question_round,
+                    question_number=question_number,
+                    final_question_number=self.final_question_number,
+                ):
+                    if (
+                        question_round
+                        and question_round[0] >= question_round[1]
+                    ) or (
+                        question_number is not None
+                        and self.final_question_number is not None
+                        and question_number >= self.final_question_number
+                    ):
                         return WorkflowResult(
                             "completed",
                             {

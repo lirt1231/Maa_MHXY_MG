@@ -347,6 +347,57 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
             ["click", "wait"],
         )
 
+    def test_keju_completes_at_fixed_final_round_without_total_in_ocr(self):
+        adapter = _DesktopAdapterA([])
+        source = _QuizSource([
+            _quiz_observation(
+                "ready",
+                question="第7题 示例题七",
+                question_key="round:7",
+                question_number=7,
+                answer="甲",
+                click=(620, 360),
+            ),
+            _quiz_observation(
+                "ready",
+                question="第8题 示例题八",
+                question_key="round:8",
+                question_number=8,
+                answer="甲",
+                click=(620, 360),
+            ),
+            _quiz_observation(
+                "ready",
+                question="第9题 示例题九",
+                question_key="round:9",
+                question_number=9,
+                answer="甲",
+                click=(620, 360),
+            ),
+            _quiz_observation(
+                "ready",
+                question="第10题 示例题十",
+                question_key="round:10",
+                question_number=10,
+                answer="甲",
+                click=(620, 360),
+            ),
+        ])
+
+        outcome = KejuWorkflow(
+            source,
+            max_answers=10,
+            final_question_number=10,
+            delay=0,
+        ).execute(WorkflowContext(adapter, adapter))
+
+        self.assertEqual(outcome.status, "completed")
+        self.assertEqual(outcome.payload, {"answers": 4, "clicks": 4, "limit": 10})
+        self.assertEqual(
+            [entry[0] for entry in adapter.trace],
+            ["click", "click", "click", "click"],
+        )
+
     def test_keju_same_question_never_causes_a_second_click(self):
         adapter = _DesktopAdapterA([])
         repeated = _quiz_observation(

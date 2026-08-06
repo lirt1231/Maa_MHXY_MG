@@ -46,6 +46,10 @@ EXAM_LABELS = {
     "xiangshi": "乡试",
     "huishi": "会试",
 }
+EXAM_FINAL_QUESTION_NUMBERS = {
+    "xiangshi": 10,
+    "huishi": 20,
+}
 MAX_WAITING_POLLS = 180
 MAX_SAME_QUESTION_POLLS = 8
 
@@ -452,6 +456,7 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
     outcome = KejuWorkflow(
         source,
         max_answers=args.max_steps,
+        final_question_number=EXAM_FINAL_QUESTION_NUMBERS[args.exam_type],
         delay=args.delay,
         max_waiting_polls=MAX_WAITING_POLLS,
         max_same_question_polls=MAX_SAME_QUESTION_POLLS,

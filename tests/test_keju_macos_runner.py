@@ -200,6 +200,34 @@ class KejuMacOSRunnerStateTests(unittest.TestCase):
     def test_final_question_ends_even_before_max_answers(self):
         self.assertTrue(should_end_loop(3, 20, (15, 15)))
 
+    def test_fixed_final_question_ends_without_total_in_ocr(self):
+        self.assertTrue(
+            should_end_loop(
+                4,
+                10,
+                question_number=10,
+                final_question_number=10,
+            )
+        )
+
+    def test_fixed_final_question_does_not_end_early_or_for_huishi(self):
+        self.assertFalse(
+            should_end_loop(
+                4,
+                10,
+                question_number=9,
+                final_question_number=10,
+            )
+        )
+        self.assertFalse(
+            should_end_loop(
+                10,
+                20,
+                question_number=10,
+                final_question_number=20,
+            )
+        )
+
     def test_max_steps_counts_answers_instead_of_polling_attempts(self):
         for _poll_attempt in range(10):
             self.assertFalse(should_end_loop(answered=0, max_steps=1))
