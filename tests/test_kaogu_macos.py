@@ -29,6 +29,10 @@ def scene(texts=None, templates=None):
     )
 
 
+def dig_settlement():
+    return scene([text("本次考古消耗了54点活力", (430, 430, 220, 30))])
+
+
 def sale_flow_scenes(*, include_main=True):
     main = scene(
         [
@@ -964,12 +968,39 @@ class KaoguSceneTests(unittest.TestCase):
             phase="enter",
         )
 
-        expected = {
-            "status": "wait_for_dig",
-            "reason": "archaeology_transition",
-        }
-        self.assertEqual(animation, expected)
-        self.assertEqual(reward, expected)
+        self.assertEqual(
+            animation,
+            {
+                "status": "wait_for_dig",
+                "reason": "archaeology_in_progress",
+            },
+        )
+        self.assertEqual(
+            reward,
+            {
+                "status": "wait_for_dig",
+                "reason": "archaeology_product",
+            },
+        )
+
+    def test_excavation_settlement_is_explicit_completion_evidence(self):
+        decision = classify_kaogu_scene(
+            [
+                text("考古成功，你获得了1个汉朝陶罐", (365, 390, 300, 30)),
+                text("本次考古消耗了54点活力", (405, 430, 230, 30)),
+            ],
+            {},
+            (1020, 718),
+            phase="digging",
+        )
+
+        self.assertEqual(
+            decision,
+            {
+                "status": "dig_confirmed",
+                "reason": "archaeology_settlement",
+            },
+        )
 
     def test_world_chat_archaeology_message_is_not_a_dig_transition(self):
         decision = classify_kaogu_scene(
@@ -1055,7 +1086,7 @@ class KaoguRunnerTests(unittest.TestCase):
         )
 
     @patch("tools.run_kaogu_macos.MacOSTaskRuntime", FakeRuntime)
-    def test_selected_tool_mode_counts_start_and_nine_map_digs(self):
+    def test_selected_tool_mode_counts_only_ten_confirmed_map_digs(self):
         start = scene(
             [
                 text("二阶", (246, 166, 35, 24)),
@@ -1079,7 +1110,11 @@ class KaoguRunnerTests(unittest.TestCase):
         )
         FakeRuntime.scenes = [
             start,
-            *[dig for _ in range(TARGET_DIGS - 1)],
+            *[
+                item
+                for _ in range(TARGET_DIGS)
+                for item in (dig, dig_settlement())
+            ],
             *sale_flow_scenes(),
         ]
         guard = CancellationGuard()
@@ -1103,9 +1138,9 @@ class KaoguRunnerTests(unittest.TestCase):
         self.assertEqual(result["digs"], 10)
         self.assertEqual(result["purchases"], 0)
         click_reasons = [reason for _, reason in FakeRuntime.instances[0].clicks]
-        self.assertEqual(click_reasons[0], "进行第 1 次挖掘")
+        self.assertEqual(click_reasons[0], "开始考古并前往挖掘地点")
         self.assertEqual(sum("次挖掘" in reason for reason in click_reasons), 10)
-        self.assertIn("进行第 2 次挖掘", click_reasons)
+        self.assertIn("进行第 1 次挖掘", click_reasons)
         self.assertIn("进行第 10 次挖掘", click_reasons)
         self.assertNotIn("购买一个洛阳铲", click_reasons)
 
@@ -1140,6 +1175,7 @@ class KaoguRunnerTests(unittest.TestCase):
             start,
             lingering_dig,
             transition,
+            dig_settlement(),
             *sale_flow_scenes(),
         ]
         guard = CancellationGuard()
@@ -1162,7 +1198,8 @@ class KaoguRunnerTests(unittest.TestCase):
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["digs"], 1)
         click_reasons = [reason for _, reason in FakeRuntime.instances[0].clicks]
-        self.assertEqual(click_reasons[0], "进行第 1 次挖掘")
+        self.assertEqual(click_reasons[0], "开始考古并前往挖掘地点")
+        self.assertEqual(click_reasons[1], "进行第 1 次挖掘")
         self.assertEqual(click_reasons.count("双击非真品古董并启动自动寻路"), 2)
         self.assertIn("考古流程：cancel_genuine_sale", click_reasons)
         self.assertIn("考古流程：close_inventory", click_reasons)
@@ -1185,7 +1222,14 @@ class KaoguRunnerTests(unittest.TestCase):
             {"menu_plus": (1206, 637, 44, 42)},
         )
         battle = scene([text("取消", (1215, 680, 50, 26))])
-        FakeRuntime.scenes = [start, main, battle, *sale_flow_scenes(include_main=False)]
+        FakeRuntime.scenes = [
+            start,
+            scene([text("挖掘", (1044, 550, 101, 51))]),
+            dig_settlement(),
+            main,
+            battle,
+            *sale_flow_scenes(include_main=False),
+        ]
         guard = CancellationGuard()
         waits = []
         guard.wait = waits.append
@@ -1207,7 +1251,45 @@ class KaoguRunnerTests(unittest.TestCase):
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["digs"], 1)
         self.assertIn(5.0, waits)
-        self.assertEqual(len(FakeRuntime.instances[0].clicks), 12)
+        self.assertEqual(len(FakeRuntime.instances[0].clicks), 13)
+
+    @patch("tools.run_kaogu_macos.MacOSTaskRuntime", FakeRuntime)
+    def test_unchanged_dig_button_retries_without_counting_until_settlement(self):
+        start = scene(
+            [
+                text("工坊·考古", (436, 98, 148, 33)),
+                text("考古", (564, 560, 59, 29)),
+            ]
+        )
+        dig = scene([text("挖掘", (1044, 550, 101, 51))])
+        FakeRuntime.scenes = [
+            start,
+            dig,
+            dig,
+            dig_settlement(),
+            *sale_flow_scenes(),
+        ]
+        guard = CancellationGuard()
+        guard.wait = lambda _seconds: None
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            return_code = run(
+                self._args(tool_mode="selected", target_digs=1),
+                guard,
+                FakePurchaseGuard(),
+            )
+
+        self.assertEqual(return_code, 0)
+        result = next(
+            json.loads(line[len("result_json="):])
+            for line in output.getvalue().splitlines()
+            if line.startswith("result_json=")
+        )
+        self.assertEqual(result["digs"], 1)
+        reasons = [reason for _, reason in FakeRuntime.instances[0].clicks]
+        self.assertEqual(reasons.count("进行第 1 次挖掘"), 2)
+        self.assertNotIn("进行第 2 次挖掘", reasons)
 
     @patch("tools.run_kaogu_macos.MacOSTaskRuntime", FakeRuntime)
     def test_purchase_once_and_complete_exactly_ten_digs(self):
@@ -1247,7 +1329,11 @@ class KaoguRunnerTests(unittest.TestCase):
             select_shovel,
             use_shovel,
             start,
-            *[dig for _ in range(TARGET_DIGS - 1)],
+            *[
+                item
+                for _ in range(TARGET_DIGS)
+                for item in (dig, dig_settlement())
+            ],
             *sale_flow_scenes(),
         ]
         guard = CancellationGuard()

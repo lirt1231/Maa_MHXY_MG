@@ -70,6 +70,7 @@ SCENE_MESSAGES = {
     "use_shovel": "正在使用洛阳铲",
     "start_archaeology": "洛阳铲已就绪，正在开始考古",
     "dig": "正在进行考古挖掘",
+    "dig_confirmed": "本次考古已结算，正在等待下一次挖掘",
     "close_temporary_bag": "正在关闭临时道具栏",
     "wait_for_dig": "正在等待下一次挖掘",
     "open_inventory_for_sale": "考古已完成，正在打开包裹整理非真品古董",

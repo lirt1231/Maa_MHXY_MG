@@ -355,14 +355,32 @@ def classify_kaogu_scene(
     if vitality:
         return {"status": "blocked_resource", "reason": "活力不足"}
 
+    archaeology_settlement = find_items(
+        texts,
+        r".*(?:考古成功.*(?:获得|发现)|本次考古消耗了?\d+点活力).*",
+        image_size,
+        {"min_x": 0.2, "max_x": 0.8, "min_y": 0.15, "max_y": 0.85},
+    )
+    if archaeology_settlement:
+        return {"status": "dig_confirmed", "reason": "archaeology_settlement"}
+
     archaeology_transition = find_items(
         texts,
-        r".*(?:考古中|类型[:：]考古产品|本次考古消耗了?\d+点活力).*",
+        r".*考古中[.。…]*.*",
         image_size,
         {"min_x": 0.2, "max_x": 0.8, "min_y": 0.15, "max_y": 0.85},
     )
     if archaeology_transition:
-        return {"status": "wait_for_dig", "reason": "archaeology_transition"}
+        return {"status": "wait_for_dig", "reason": "archaeology_in_progress"}
+
+    archaeology_product = find_items(
+        texts,
+        r".*类型[:：]考古产品.*",
+        image_size,
+        {"min_x": 0.2, "max_x": 0.8, "min_y": 0.15, "max_y": 0.85},
+    )
+    if archaeology_product:
+        return {"status": "wait_for_dig", "reason": "archaeology_product"}
 
     temporary_bag = find_items(
         texts,

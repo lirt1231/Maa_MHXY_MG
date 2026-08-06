@@ -105,6 +105,17 @@ class UserProgressTranslationTests(unittest.TestCase):
             "师门任务正在由游戏自动完成，请勿操作游戏窗口",
         )
 
+    def test_archaeology_settlement_reports_confirmed_progress(self):
+        progress = user_progress(
+            "kaogu",
+            '{"event":"scene","status":"dig_confirmed","digs":8}',
+        )
+
+        self.assertEqual(
+            progress["message"],
+            "本次考古已结算，正在等待下一次挖掘",
+        )
+
 
 class _FinishedProcess:
     def __init__(self, lines):

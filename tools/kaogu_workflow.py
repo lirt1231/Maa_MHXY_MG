@@ -193,6 +193,7 @@ class KaoguWorkflow:
     max_purchases: int = 1
     max_unknown_polls: int = 3
     max_wait_polls: int = 18
+    max_dig_attempts_per_round: int = 3
     max_final_observations: int = 360
     max_sale_wait_polls: int = 300
     inventory_normalize_drags: int = 3
@@ -220,6 +221,7 @@ class KaoguWorkflow:
             self.max_purchases,
             self.max_unknown_polls,
             self.max_wait_polls,
+            self.max_dig_attempts_per_round,
             self.max_final_observations,
             self.max_sale_wait_polls,
             self.final_main_confirmations,
@@ -250,13 +252,16 @@ class KaoguWorkflow:
         sale_outcome = None
         normalize_drags = 0
         scan_drags = 0
+        pending_dig = False
+        pending_dig_attempts = 0
+        pending_dig_polls = 0
 
         actions = {
             status: EvidenceClickAction(
                 name=f"kaogu_{status}",
                 statuses=(status,),
                 reason=(
-                    (lambda _action_context: f"进行第 {digs + 1} 次挖掘")
+                    "开始考古并前往挖掘地点"
                     if status == "start_archaeology"
                     else f"考古流程：{status}"
                 ),
@@ -265,9 +270,7 @@ class KaoguWorkflow:
                     if status == "start_archaeology"
                     else 2.0 if status == "close_sale_shop" else 1.0
                 ),
-                repeat_limit=(
-                    self.target_digs if status == "start_archaeology" else limit
-                ),
+                repeat_limit=limit,
                 repeat_error=f"考古步骤 {status} 重复达到上限，已安全停止",
                 signature_factory=lambda action_context: action_context.decision_status,
             )
@@ -298,8 +301,8 @@ class KaoguWorkflow:
             statuses=("dig",),
             reason=lambda _action_context: f"进行第 {digs + 1} 次挖掘",
             wait_seconds=0.0,
-            repeat_limit=self.target_digs,
-            repeat_error="考古挖掘已达到目标次数，已停止额外输入",
+            repeat_limit=self.max_dig_attempts_per_round,
+            repeat_error="本次挖掘按钮连续点击仍未进入结算，已安全停止",
             signature_factory=lambda action_context: action_context.decision_status,
         )
         activate_antique = EvidenceDoubleClickAction(
@@ -377,6 +380,7 @@ class KaoguWorkflow:
                     "wait_for_battle",
                     "wait_for_busy_task",
                     "wait_for_dig",
+                    "dig_confirmed",
                     "start_archaeology",
                     "dig",
                     "close_temporary_bag",
@@ -461,10 +465,31 @@ class KaoguWorkflow:
                     raise RuntimeError("考古页面连续未出现可执行按钮，已安全停止")
                 context.waiter.wait(0.8)
                 continue
+            if status == "dig_confirmed":
+                if pending_dig:
+                    digs += 1
+                    pending_dig = False
+                    pending_dig_attempts = 0
+                    pending_dig_polls = 0
+                    dig.reset_repetition()
+                    context.emit(
+                        "dig_confirmed",
+                        digs=digs,
+                        targetDigs=self.target_digs,
+                    )
+                    phase = (
+                        "sale_wait_main"
+                        if digs >= self.target_digs
+                        else "digging"
+                    )
+                context.waiter.wait(0.8)
+                continue
             if status == "wait_for_dig":
                 wait_polls += 1
-                if digs >= self.target_digs:
-                    return result("completed")
+                if pending_dig:
+                    pending_dig_polls += 1
+                    if pending_dig_polls >= self.max_wait_polls:
+                        raise RuntimeError("本次考古长时间没有出现结算证据，已安全停止")
                 if wait_polls >= self.max_wait_polls:
                     raise RuntimeError("长时间未出现下一次挖掘按钮，已安全停止")
                 context.waiter.wait(0.6)
@@ -495,12 +520,13 @@ class KaoguWorkflow:
             elif status == "dig":
                 if digs >= self.target_digs:
                     return result("completed")
+                if pending_dig and pending_dig_attempts >= self.max_dig_attempts_per_round:
+                    raise RuntimeError("本次挖掘按钮连续点击仍未进入结算，已安全停止")
                 metrics.record(dig.execute(action_context))
-                digs += 1
-                if digs >= self.target_digs:
-                    context.waiter.wait(0.8)
-                else:
-                    context.waiter.wait(1.8)
+                pending_dig = True
+                pending_dig_attempts += 1
+                pending_dig_polls = 0
+                context.waiter.wait(1.8)
             elif status == "activate_antique":
                 metrics.record(activate_antique.execute(action_context))
             elif status == "normalize_inventory":
@@ -554,15 +580,10 @@ class KaoguWorkflow:
                     phase = "sale_confirm_main"
                     continue
                 if status == "start_archaeology":
-                    # The production-page button performs an excavation in both
-                    # tool modes; subsequent digs may appear on the map or after
-                    # navigating back to the production page.
-                    digs += 1
-                    if digs >= self.target_digs:
-                        context.waiter.wait(0.8)
+                    pending_dig = False
+                    pending_dig_attempts = 0
+                    pending_dig_polls = 0
             phase = next_kaogu_phase(status, phase)
-            if digs >= self.target_digs and status in {"dig", "start_archaeology"}:
-                phase = "sale_wait_main"
 
         raise RuntimeError("考古流程超过最大识别步骤，已安全停止")
 
