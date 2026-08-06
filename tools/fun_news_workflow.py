@@ -47,7 +47,6 @@ class FunNewsWorkflow:
     max_steps: int = 80
     target_likes: int = TARGET_LIKES
     max_feed_scrolls: int = 8
-    max_completion_polls: int = 4
     classifier: Callable[..., Mapping[str, Any]] = field(
         default=classify_fun_news_scene,
         repr=False,
@@ -61,7 +60,6 @@ class FunNewsWorkflow:
                 self.max_steps,
                 self.target_likes,
                 self.max_feed_scrolls,
-                self.max_completion_polls,
             )
         ):
             raise ValueError("趣闻鉴赏 Workflow 上限必须是正整数")
@@ -91,7 +89,6 @@ class FunNewsWorkflow:
         unknown_polls = 0
         likes = 0
         feed_scrolls = 0
-        completion_polls = 0
         needs_scroll = False
         awaiting_new_entry = False
         stale_feed_polls = 0
@@ -133,19 +130,6 @@ class FunNewsWorkflow:
                 )
 
             action_context = context.action_context(scene, decision, "趣闻鉴赏")
-            if likes >= self.target_likes:
-                completion_polls += 1
-                if completion_polls >= self.max_completion_polls:
-                    raise RuntimeError("已点赞 5 条动态，但未识别到趣闻鉴赏完成状态")
-                context.emit(
-                    "completion_wait",
-                    task="趣闻鉴赏",
-                    poll=completion_polls,
-                    limit=self.max_completion_polls,
-                )
-                context.waiter.wait(1.5)
-                continue
-
             if needs_scroll:
                 if status not in {"like", "refresh_feed"}:
                     unknown_polls += 1
@@ -203,6 +187,16 @@ class FunNewsWorkflow:
                     likes=likes,
                     targetLikes=self.target_likes,
                 )
+                if likes >= self.target_likes:
+                    return WorkflowResult(
+                        "completed",
+                        {
+                            "likes": likes,
+                            "scrolls": feed_scrolls,
+                            "actions": metrics.actions,
+                            "clicks": metrics.clicks,
+                        },
+                    )
                 continue
 
             if status == "refresh_feed":

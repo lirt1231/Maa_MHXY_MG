@@ -110,10 +110,17 @@ class ReturnToMainWorkflowTests(unittest.TestCase):
                     result.evidence["firstFrameId"], result.evidence["lastFrameId"]
                 )
 
-    def test_fun_news_feed_close_requires_its_dedicated_template(self):
+    def test_fun_news_feed_close_requires_its_full_page_identity(self):
         feed = scene(
-            [],
-            {"fun_news_feed_close": [596, 294, 40, 102]},
+            [
+                (channel, [20, 110 + index * 40, 48, 25])
+                for index, channel in enumerate(("系统", "世界", "当前", "门派", "帮派", "队伍", "空间"))
+            ] + [
+                ("打开空间", [15, 75, 58, 16]),
+                ("关注", [95, 66, 39, 19]), ("图文", [136, 65, 50, 21]),
+                ("视频", [259, 68, 36, 15]), ("论坛", [302, 66, 39, 19]),
+                ("+关注", [359, 118, 52, 20]),
+            ],
         )
         runtime = Runtime([feed, main_scene(), main_scene()])
 
@@ -123,7 +130,7 @@ class ReturnToMainWorkflowTests(unittest.TestCase):
 
         self.assertEqual(result.status, "confirmed")
         self.assertEqual(result.outcome, "recovered")
-        self.assertEqual(runtime.clicks[0][0], [596, 294, 40, 102])
+        self.assertEqual(runtime.clicks[0][0], [454, 294, 41, 101])
 
     def test_live_welfare_scratch_page_is_an_allowed_close_path(self):
         current = scene(

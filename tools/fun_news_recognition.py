@@ -49,6 +49,42 @@ FUN_NEWS_TEMPLATES = {
 }
 
 
+def is_fun_news_feed(texts, image_size) -> bool:
+    """Require independent navigation, tab, and post anchors for 空间动态页."""
+    channels = {
+        str(item.get("text", ""))
+        for item in texts or []
+        if valid_box(item)
+        and in_region(item, image_size, max_x=0.11, min_y=0.10, max_y=0.68)
+        and str(item.get("text", ""))
+        in {"系统", "世界", "当前", "门派", "帮派", "队伍", "空间", "同城", "组合"}
+    }
+    tabs = {
+        str(item.get("text", ""))
+        for item in texts or []
+        if valid_box(item)
+        and in_region(item, image_size, min_x=0.08, max_x=0.48, min_y=0.05, max_y=0.18)
+        and str(item.get("text", "")) in {"关注", "图文", "视频", "论坛"}
+    }
+    has_open_space = bool(
+        find_items(
+            texts,
+            r"打开空间",
+            image_size,
+            {"max_x": 0.14, "min_y": 0.05, "max_y": 0.20},
+        )
+    )
+    has_follow = bool(
+        find_items(
+            texts,
+            r"\+?关注|十关注",
+            image_size,
+            {"min_x": 0.32, "max_x": 0.50, "min_y": 0.10, "max_y": 0.94},
+        )
+    )
+    return len(channels) >= 5 and len(tabs) >= 3 and has_open_space and has_follow
+
+
 def fun_news_feed_signature(texts, image_size):
     """Return visible feed text used to prove a scroll reached a new entry."""
     entries = []
@@ -82,6 +118,17 @@ def classify_fun_news_scene(
     ):
         return {"status": "completed"}
 
+    if is_fun_news_feed(texts, image_size):
+        hearts = find_items(
+            texts,
+            r"心|❤|♥",
+            image_size,
+            {"min_x": 0.12, "max_x": 0.32, "min_y": 0.15, "max_y": 0.94},
+        )
+        if hearts:
+            return {"status": "like", "box": valid_box(hearts[0]), "source": "ocr"}
+        return {"status": "refresh_feed"}
+
     like_box = templates.get("fun_news_like")
     if like_box:
         return {"status": "like", "box": list(like_box)}
@@ -101,4 +148,5 @@ __all__ = [
     "FUN_NEWS_TEMPLATES",
     "classify_fun_news_scene",
     "fun_news_feed_signature",
+    "is_fun_news_feed",
 ]

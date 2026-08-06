@@ -205,6 +205,30 @@ def _full_team_panel_present(scene) -> bool:
     return bool(has_header and has_side_tabs)
 
 
+def _fun_news_feed_identity(scene) -> bool:
+    channels = {
+        str(item.get("text", ""))
+        for item in _texts(scene)
+        if valid_box(item)
+        and in_region(item, scene.image_size, max_x=0.11, min_y=0.10, max_y=0.68)
+        and str(item.get("text", ""))
+        in {"系统", "世界", "当前", "门派", "帮派", "队伍", "空间", "同城", "组合"}
+    }
+    tabs = {
+        str(item.get("text", ""))
+        for item in _texts(scene)
+        if valid_box(item)
+        and in_region(item, scene.image_size, min_x=0.08, max_x=0.48, min_y=0.05, max_y=0.18)
+        and str(item.get("text", "")) in {"关注", "图文", "视频", "论坛"}
+    }
+    return (
+        len(channels) >= 5
+        and len(tabs) >= 3
+        and _find_region(scene, r"打开空间", max_x=0.14, min_y=0.05, max_y=0.20)
+        and _find_region(scene, r"\+?关注|十关注", min_x=0.32, max_x=0.50, min_y=0.10, max_y=0.94)
+    )
+
+
 def classify_return_scene(task_id: str, scene) -> dict[str, Any]:
     """Classify only states where either confirmation or one known close is safe."""
     joined = _joined(scene)
@@ -362,15 +386,14 @@ def classify_return_scene(task_id: str, scene) -> dict[str, Any]:
             }
 
     fun_news_close = valid_box({"box": scene.templates.get("fun_news_feed_close")})
-    if task_id == "fun_news" and fun_news_close is not None and in_region(
-        {"box": fun_news_close}, scene.image_size, min_x=0.55, max_x=0.70,
-        min_y=0.30, max_y=0.62,
-    ):
+    if task_id == "fun_news" and _fun_news_feed_identity(scene):
         return {
             "status": "close_known_page",
             "scene": "fun_news_feed",
             "action_id": "close:fun_news_feed",
-            "box": fun_news_close,
+            # The space panel's return arrow is fixed within the game canvas.
+            # Its page identity above is required before this scaled control is used.
+            "box": _relative_box(scene.image_size, 0.445, 0.41, 0.04, 0.14),
         }
 
     shimen_title = _find_region(
