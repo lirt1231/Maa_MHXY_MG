@@ -56,6 +56,17 @@ class FakeNativeInput:
         self.drags.append((start, end))
 
 
+class SequenceGeometryNativeInput(FakeNativeInput):
+    def __init__(self, geometry, later_geometries):
+        super().__init__(geometry)
+        self.later_geometries = list(later_geometries)
+
+    def window_geometry(self):
+        if self.later_geometries:
+            return self.later_geometries.pop(0)
+        return self.geometry
+
+
 class FakeCapture:
     def __init__(self, captured_frame):
         self.frame = captured_frame
@@ -254,6 +265,32 @@ class LegacyMacOSWindowBackendTests(unittest.TestCase):
             backend.click((100, 100), captured, guard)
 
         guard.perform_input.assert_not_called()
+
+    def test_transient_input_geometry_mismatch_is_rechecked_before_click(self):
+        current = frame(image_size=(923, 720))
+        native = SequenceGeometryNativeInput(
+            (100.0, -50.0, 923.0, 748.0, 77),
+            [],
+        )
+        backend = LegacyMacOSWindowBackend(
+            target_id="local-primary",
+            window_id=42,
+            controller=Mock(),
+            capture_driver=FakeCapture(current),
+            native_input=native,
+        )
+        guard = Mock()
+        guard.perform_input.side_effect = lambda function, *args: function(*args)
+        captured = backend.capture(guard)
+        native.later_geometries = [
+            (100.0, -50.0, 1000.0, 748.0, 77),
+            (100.0, -50.0, 923.0, 748.0, 77),
+        ]
+
+        result = backend.click((461.5, 360), captured, guard)
+
+        self.assertEqual(result, (561.5, 338.0))
+        self.assertEqual(native.clicks, [(561.5, 338.0)])
 
     def test_read_only_preview_maps_point_without_native_input(self):
         backend, native = self.backend(frame(image_size=(923, 720)))

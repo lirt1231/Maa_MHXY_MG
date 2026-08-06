@@ -6,6 +6,7 @@ import ctypes
 import hashlib
 import subprocess
 import tempfile
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -31,6 +32,8 @@ SYSTEM_CAPTURE_SIZE = (1020, 718)
 MACOS_TITLE_BAR_HEIGHT_POINTS = 24
 GEOMETRY_CAPTURE_ATTEMPTS = 8
 GEOMETRY_RETRY_WAIT_SECONDS = 1.0
+GEOMETRY_INPUT_ATTEMPTS = 3
+GEOMETRY_INPUT_RETRY_WAIT_SECONDS = 0.05
 
 
 class _TransientGeometryMismatch(RuntimeError):
@@ -442,10 +445,21 @@ class LegacyMacOSWindowBackend:
     def _frame_at_current_origin(self, frame):
         if self.last_frame is None or frame.frame_id != self.last_frame.frame_id:
             raise RuntimeError("输入帧已过期，已阻止使用旧识别证据")
-        current = self._window_bounds()
         if frame.window_bounds_points is None:
             raise RuntimeError("输入帧缺少窗口边界")
         old_x, old_y, old_width, old_height = frame.window_bounds_points
+        current = None
+        for attempt in range(GEOMETRY_INPUT_ATTEMPTS):
+            current = self._window_bounds()
+            _, _, new_width, new_height = current
+            if (
+                abs(old_width - new_width) <= 0.5
+                and abs(old_height - new_height) <= 0.5
+            ):
+                break
+            if attempt + 1 < GEOMETRY_INPUT_ATTEMPTS:
+                time.sleep(GEOMETRY_INPUT_RETRY_WAIT_SECONDS)
+        assert current is not None
         new_x, new_y, new_width, new_height = current
         if abs(old_width - new_width) > 0.5 or abs(old_height - new_height) > 0.5:
             raise RuntimeError("输入前窗口尺寸已变化，旧帧坐标映射已失效")
