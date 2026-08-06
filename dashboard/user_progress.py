@@ -72,6 +72,16 @@ SCENE_MESSAGES = {
     "dig": "正在进行考古挖掘",
     "close_temporary_bag": "正在关闭临时道具栏",
     "wait_for_dig": "正在等待下一次挖掘",
+    "open_inventory_for_sale": "考古已完成，正在打开包裹整理非真品古董",
+    "activate_antique": "正在双击非真品古董并前往古董商",
+    "use_antique": "正在使用非真品古董并前往古董商",
+    "wait_for_sale_pathing": "正在自动寻路前往古董商，请勿操作游戏窗口",
+    "select_sale_antique": "正在选择下一件可出售的古董",
+    "sell_antique": "正在将非真品古董兑换为银币",
+    "cancel_genuine_sale": "检测到真品，正在取消出售并保留真品",
+    "antique_sale_finished": "非真品古董已全部兑换为银币",
+    "close_sale_shop": "非真品古董已处理，正在关闭古董商页面",
+    "antique_sale_main_confirmed": "古董售卖结束，正在确认游戏主界面",
 }
 
 WAIT_MESSAGES = {

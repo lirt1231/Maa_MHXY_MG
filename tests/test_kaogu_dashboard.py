@@ -34,7 +34,8 @@ class KaoguDashboardTests(unittest.TestCase):
         self.assertTrue(any("购买硬限制为一次" in item for item in task["warnings"]))
         self.assertTrue(any("跨进程保留" in item for item in task["warnings"]))
         self.assertTrue(any("挖掘硬限制为 10 次" in item for item in task["warnings"]))
-        self.assertTrue(any("不会出售" in item for item in task["warnings"]))
+        self.assertTrue(any("非真品古董" in item for item in task["warnings"]))
+        self.assertTrue(any("绝不会确认出售" in item for item in task["warnings"]))
 
     def test_runner_command_and_inspection_are_registered(self):
         command = self.manager._command("kaogu", {"toolMode": "selected"})
@@ -56,7 +57,9 @@ class KaoguDashboardTests(unittest.TestCase):
     def test_result_contract_requires_ten_digs_and_one_purchase_at_most(self):
         base = {
             "task_id": "kaogu", "status": "completed", "digs": 10,
-            "target_digs": 10, "purchases": 1, "actions": 17, "clicks": 17,
+            "target_digs": 10, "purchases": 1, "sale_clicks": 7,
+            "sale_outcome": "all_non_genuine_sold_genuine_retained",
+            "genuine_protected": True, "actions": 24, "clicks": 25,
         }
         parsed = self.manager._parse_task_result(
             "kaogu", ["result_json=" + json.dumps(base)]
@@ -70,6 +73,11 @@ class KaoguDashboardTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "完成次数与目标次数不一致"):
             self.manager._parse_task_result(
                 "kaogu", ["result_json=" + json.dumps({**base, "digs": 9})]
+            )
+        with self.assertRaisesRegex(RuntimeError, "未确认真品保护"):
+            self.manager._parse_task_result(
+                "kaogu",
+                ["result_json=" + json.dumps({**base, "genuine_protected": False})],
             )
 
     def test_preflight_and_live_progress_use_user_facing_copy(self):
@@ -86,6 +94,11 @@ class KaoguDashboardTests(unittest.TestCase):
         self.assertTrue(inspection["canStart"])
         self.assertEqual(inspection["proposedAction"], "打开技能页面")
         self.assertEqual(progress["message"], "正在购买一个洛阳铲")
+
+        selling = user_progress(
+            "kaogu", '{"event":"scene","status":"sell_antique"}'
+        )
+        self.assertEqual(selling["message"], "正在将非真品古董兑换为银币")
 
     def test_manual_tool_preflight_explains_required_start_page(self):
         output = (

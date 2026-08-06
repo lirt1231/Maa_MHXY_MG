@@ -37,7 +37,7 @@ TASK_RESULT_STATUSES = TASK_SUCCESS_RESULTS | {"safe_stopped", "cancelled"}
 TASK_RESULT_NUMERIC_FIELDS = {
     "questions", "answers", "clicks", "limit", "rounds", "target_rounds",
     "actions", "steps", "ghost_progress", "max_steps", "battles", "max_battles",
-    "digs", "target_digs", "purchases",
+    "digs", "target_digs", "purchases", "sale_clicks",
 }
 TASK_RESULT_SCHEMAS = {
     "sanjieqiyuan": {
@@ -140,10 +140,13 @@ TASK_RESULT_SCHEMAS = {
         "statuses": {"completed", "already_completed", "safe_stopped", "cancelled"},
         "fields": {
             "task_id", "status", "reason", "digs", "target_digs", "purchases",
-            "actions", "clicks",
+            "sale_clicks", "sale_outcome", "genuine_protected", "actions", "clicks",
         },
         "required": {
-            status: {"digs", "target_digs", "purchases", "actions", "clicks"}
+            status: {
+                "digs", "target_digs", "purchases", "sale_clicks",
+                "sale_outcome", "genuine_protected", "actions", "clicks",
+            }
             for status in {"completed", "already_completed"}
         },
     },
@@ -209,6 +212,16 @@ SCENE_LABELS = {
     "close_temporary_bag": "临时道具栏",
     "wait_for_dig": "等待下一次挖掘",
     "manual_tool_required": "未检测到已选工具",
+    "open_inventory_for_sale": "准备出售非真品古董",
+    "activate_antique": "包裹中的非真品古董",
+    "use_antique": "古董使用按钮",
+    "wait_for_sale_pathing": "前往古董商途中",
+    "select_sale_antique": "古董商出售列表",
+    "sell_antique": "非真品古董出售按钮",
+    "cancel_genuine_sale": "真品出售确认页",
+    "antique_sale_finished": "非真品古董已售完",
+    "close_sale_shop": "古董商页面关闭按钮",
+    "antique_sale_main_confirmed": "售卖后主界面",
 }
 
 ACTION_LABELS = {
@@ -278,6 +291,13 @@ ACTION_LABELS = {
     "start_archaeology": "开始考古",
     "dig": "执行本次挖掘",
     "close_temporary_bag": "关闭临时道具栏",
+    "open_inventory_for_sale": "打开包裹查找非真品古董",
+    "activate_antique": "双击经过模板确认的非真品古董",
+    "use_antique": "使用非真品古董并启动自动寻路",
+    "select_sale_antique": "选择古董商列表中的下一件古董",
+    "sell_antique": "出售当前非真品古董",
+    "cancel_genuine_sale": "取消真品出售并保留真品",
+    "close_sale_shop": "关闭古董商页面",
 }
 
 
@@ -1080,6 +1100,16 @@ class RunnerManager:
             raise RuntimeError("考古完成次数与目标次数不一致")
         if task_id == "kaogu" and result.get("purchases", 0) > 1:
             raise RuntimeError("考古结果中的洛阳铲购买次数超过上限")
+        if task_id == "kaogu" and result.get("sale_clicks", 0) > 12:
+            raise RuntimeError("考古结果中的古董出售次数超过上限")
+        if task_id == "kaogu" and status == "completed":
+            if result.get("genuine_protected") is not True:
+                raise RuntimeError("考古结果未确认真品保护")
+            if result.get("sale_outcome") not in {
+                "all_non_genuine_sold",
+                "all_non_genuine_sold_genuine_retained",
+            }:
+                raise RuntimeError("考古结果缺少有效的古董售卖结论")
         return result
 
     @classmethod
@@ -1119,7 +1149,7 @@ class RunnerManager:
                 "yunbiao": "普通运镖完成",
                 "shimen": "师门任务已启动，后续由游戏自动完成",
                 "mijingxiangyao": "秘境降妖完成",
-                "kaogu": "工坊考古完成 10 次挖掘",
+                "kaogu": "工坊考古完成 10 次挖掘，非真品古董已兑换为银币",
             }[task_id]
         return None
 
