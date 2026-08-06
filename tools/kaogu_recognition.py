@@ -254,6 +254,11 @@ def _classify_antique_sale(texts, templates, image_size, phase):
             "status": "select_sale_antique",
             "box": antique,
         }
+    if phase == "sale_pathing" and sale_page and sell_buttons:
+        return {
+            "status": "sell_antique",
+            "box": valid_box(sell_buttons[-1]),
+        }
     if phase == "sale_select" and sale_page and not antique:
         return {"status": "antique_sale_finished", "reason": "no_saleable_antique"}
     if phase == "sale_sell" and sale_page and sell_buttons:

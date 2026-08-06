@@ -206,6 +206,26 @@ class KaoguSceneTests(unittest.TestCase):
             {"status": "antique_sale_finished", "reason": "no_saleable_antique"},
         )
 
+    def test_pathing_arrival_sells_the_previously_verified_antique(self):
+        texts = [
+            text("古董售卖", (414, 107, 131, 37)),
+            text("总价", (615, 472, 41, 24)),
+            text("拥有", (614, 508, 41, 23)),
+            text("售卖", (707, 561, 68, 31)),
+        ]
+
+        decision = classify_kaogu_scene(
+            texts,
+            {},
+            (986, 720),
+            phase="sale_pathing",
+        )
+
+        self.assertEqual(
+            decision,
+            {"status": "sell_antique", "box": [707, 561, 68, 31]},
+        )
+
     def test_sale_resume_closes_empty_shop_only_with_close_template(self):
         texts = [
             text("古董售卖", (426, 84, 142, 37)),
