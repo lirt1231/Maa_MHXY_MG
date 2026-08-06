@@ -133,6 +133,8 @@ class UserProgressTranslationTests(unittest.TestCase):
         )
         waiting = user_progress("fun_news", '{"event":"feed_refresh_wait","poll":1}')
         self.assertEqual(waiting["message"], "正在等待新的趣闻动态加载，请勿操作游戏窗口")
+        loading = user_progress("fun_news", '{"event":"feed_loading_wait","poll":1}')
+        self.assertEqual(loading["message"], "正在等待趣闻动态加载，请勿操作游戏窗口")
 
 
 class _FinishedProcess:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 try:
     from .daily_activity_navigation_core import (
         classify_daily_navigation,
@@ -59,13 +61,12 @@ def is_fun_news_feed(texts, image_size) -> bool:
         and str(item.get("text", ""))
         in {"系统", "世界", "当前", "门派", "帮派", "队伍", "空间", "同城", "组合"}
     }
-    tabs = {
-        str(item.get("text", ""))
+    top_text = " ".join(
+        normalize_text(item.get("text", ""))
         for item in texts or []
         if valid_box(item)
         and in_region(item, image_size, min_x=0.08, max_x=0.48, min_y=0.05, max_y=0.18)
-        and str(item.get("text", "")) in {"关注", "图文", "视频", "论坛"}
-    }
+    )
     has_open_space = bool(
         find_items(
             texts,
@@ -82,7 +83,58 @@ def is_fun_news_feed(texts, image_size) -> bool:
             {"min_x": 0.32, "max_x": 0.50, "min_y": 0.10, "max_y": 0.94},
         )
     )
-    return len(channels) >= 5 and len(tabs) >= 3 and has_open_space and has_follow
+    return (
+        len(channels) >= 5
+        and all(label in top_text for label in ("关注", "图文", "视频", "论坛"))
+        and has_open_space
+        and has_follow
+    )
+
+
+def _fun_news_like_counter_box(texts, image_size):
+    """Find the like count that shares a row with a post's comment count."""
+    counters = []
+    for item in texts or []:
+        box = valid_box(item)
+        value = normalize_text(item.get("text", ""))
+        if (
+            box is None
+            or not re.fullmatch(r"\d+(?:\.\d+)?万?", value)
+            or not in_region(
+                item,
+                image_size,
+                min_x=0.14,
+                max_x=0.34,
+                min_y=0.15,
+                max_y=0.94,
+            )
+        ):
+            continue
+        counters.append(box)
+    for likes in counters:
+        like_y = likes[1] + likes[3] / 2
+        for comments in counters:
+            comment_y = comments[1] + comments[3] / 2
+            if (
+                comments[0] > likes[0]
+                and image_size[0] * 0.06 <= comments[0] - likes[0] <= image_size[0] * 0.16
+                and abs(comment_y - like_y) <= image_size[1] * 0.04
+            ):
+                return likes
+    return None
+
+
+def _heart_box_from_like_counter(counter_box, image_size):
+    """The heart is fixed just left of the verified like-count row."""
+    width, height = image_size
+    heart_width = max(24, round(width * 0.034))
+    heart_height = max(22, round(height * 0.042))
+    return [
+        max(0, counter_box[0] - heart_width - round(width * 0.008)),
+        max(0, round(counter_box[1] + counter_box[3] / 2 - heart_height / 2)),
+        heart_width,
+        heart_height,
+    ]
 
 
 def fun_news_feed_signature(texts, image_size):
@@ -127,6 +179,13 @@ def classify_fun_news_scene(
         )
         if hearts:
             return {"status": "like", "box": valid_box(hearts[0]), "source": "ocr"}
+        counter_box = _fun_news_like_counter_box(texts, image_size)
+        if counter_box is not None:
+            return {
+                "status": "like",
+                "box": _heart_box_from_like_counter(counter_box, image_size),
+                "source": "like_counter_row",
+            }
         return {"status": "refresh_feed"}
 
     like_box = templates.get("fun_news_like")

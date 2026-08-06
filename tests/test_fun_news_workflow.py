@@ -77,6 +77,24 @@ class FunNewsRecognitionTests(unittest.TestCase):
             {"status": "like", "box": [178, 495, 32, 7], "source": "ocr"},
         )
 
+    def test_live_space_page_derives_heart_from_verified_like_and_comment_row(self):
+        decision = classify_fun_news_scene(
+            [
+                *[text(channel, (20, 110 + index * 40, 48, 25)) for index, channel in enumerate(("系统", "世界", "当前", "门派", "帮派", "队伍", "空间"))],
+                text("打开空间", (15, 75, 58, 16)),
+                text("关注", (96, 68, 40, 15)), text("造梦星图文视频", (134, 63, 164, 23)),
+                text("页论坛手*", (288, 65, 101, 20)), text("十关注", (359, 134, 52, 21)),
+                text("3.1万", (160, 308, 43, 19)), text("84", (255, 310, 19, 16)),
+            ],
+            {},
+            (923, 720),
+        )
+
+        self.assertEqual(
+            decision,
+            {"status": "like", "box": [122, 302, 31, 30], "source": "like_counter_row"},
+        )
+
     def test_completed_template_wins_over_visible_like(self):
         self.assertEqual(
             classify_fun_news_scene(

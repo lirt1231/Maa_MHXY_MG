@@ -214,16 +214,15 @@ def _fun_news_feed_identity(scene) -> bool:
         and str(item.get("text", ""))
         in {"系统", "世界", "当前", "门派", "帮派", "队伍", "空间", "同城", "组合"}
     }
-    tabs = {
+    top_text = " ".join(
         str(item.get("text", ""))
         for item in _texts(scene)
         if valid_box(item)
         and in_region(item, scene.image_size, min_x=0.08, max_x=0.48, min_y=0.05, max_y=0.18)
-        and str(item.get("text", "")) in {"关注", "图文", "视频", "论坛"}
-    }
+    )
     return (
         len(channels) >= 5
-        and len(tabs) >= 3
+        and all(label in top_text for label in ("关注", "图文", "视频", "论坛"))
         and _find_region(scene, r"打开空间", max_x=0.14, min_y=0.05, max_y=0.20)
         and _find_region(scene, r"\+?关注|十关注", min_x=0.32, max_x=0.50, min_y=0.10, max_y=0.94)
     )

@@ -47,6 +47,7 @@ class FunNewsWorkflow:
     max_steps: int = 80
     target_likes: int = TARGET_LIKES
     max_feed_scrolls: int = 8
+    max_feed_loading_polls: int = 4
     classifier: Callable[..., Mapping[str, Any]] = field(
         default=classify_fun_news_scene,
         repr=False,
@@ -60,6 +61,7 @@ class FunNewsWorkflow:
                 self.max_steps,
                 self.target_likes,
                 self.max_feed_scrolls,
+                self.max_feed_loading_polls,
             )
         ):
             raise ValueError("趣闻鉴赏 Workflow 上限必须是正整数")
@@ -94,6 +96,7 @@ class FunNewsWorkflow:
         stale_feed_polls = 0
         last_like_box = None
         last_feed_signature = None
+        feed_loading_polls = 0
 
         for step in range(1, self.max_steps + 1):
             scene = context.runtime.read_scene(FUN_NEWS_TEMPLATES)
@@ -154,6 +157,7 @@ class FunNewsWorkflow:
                 continue
 
             if status == "like":
+                feed_loading_polls = 0
                 like_box = tuple(decision["box"])
                 feed_signature = fun_news_feed_signature(scene.texts, scene.image_size)
                 if (
@@ -200,10 +204,21 @@ class FunNewsWorkflow:
                 continue
 
             if status == "refresh_feed":
+                if feed_loading_polls < self.max_feed_loading_polls:
+                    feed_loading_polls += 1
+                    context.emit(
+                        "feed_loading_wait",
+                        task="趣闻鉴赏",
+                        poll=feed_loading_polls,
+                        limit=self.max_feed_loading_polls,
+                    )
+                    context.waiter.wait(1.0)
+                    continue
                 if feed_scrolls >= self.max_feed_scrolls:
                     raise RuntimeError("趣闻动态滚动达到上限，未识别到可点赞内容")
                 metrics.record(scroll_feed.execute(action_context))
                 feed_scrolls += 1
+                feed_loading_polls = 0
                 unknown_polls = 0
                 continue
 
