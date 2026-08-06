@@ -198,7 +198,7 @@ class LegacyMacOSWindowBackendTests(unittest.TestCase):
         captured = backend.capture(guard)
 
         self.assertEqual(capture.capture_count, 2)
-        guard.wait.assert_called_once_with(0.2)
+        guard.wait.assert_called_once_with(1.0)
         self.assertEqual(
             captured.content_rect_points,
             (-1510.0, 93.0, 908.0, 635.0),
@@ -224,12 +224,12 @@ class LegacyMacOSWindowBackendTests(unittest.TestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"截图内容=912x635.*目标窗口=908x663.*连续 3 次不一致",
+            r"截图内容=912x635.*目标窗口=908x663.*连续 8 次不一致",
         ):
             backend.capture(guard)
 
-        self.assertEqual(capture.capture_count, 3)
-        self.assertEqual(guard.wait.call_count, 2)
+        self.assertEqual(capture.capture_count, 8)
+        self.assertEqual(guard.wait.call_count, 7)
         self.assertIsNone(backend.last_frame)
 
     def test_window_move_updates_origin_without_invalidating_frame(self):

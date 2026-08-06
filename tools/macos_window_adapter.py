@@ -29,7 +29,8 @@ except ImportError:  # Direct execution through tools/run_*.py.
 ROOT = Path(__file__).resolve().parents[1]
 SYSTEM_CAPTURE_SIZE = (1020, 718)
 MACOS_TITLE_BAR_HEIGHT_POINTS = 24
-GEOMETRY_CAPTURE_ATTEMPTS = 3
+GEOMETRY_CAPTURE_ATTEMPTS = 8
+GEOMETRY_RETRY_WAIT_SECONDS = 1.0
 
 
 class _TransientGeometryMismatch(RuntimeError):
@@ -432,7 +433,7 @@ class LegacyMacOSWindowBackend:
             except _TransientGeometryMismatch as exc:
                 last_mismatch = exc
                 if attempt < GEOMETRY_CAPTURE_ATTEMPTS:
-                    guard.wait(0.2)
+                    guard.wait(GEOMETRY_RETRY_WAIT_SECONDS)
         raise RuntimeError(
             f"{last_mismatch}；连续 {GEOMETRY_CAPTURE_ATTEMPTS} 次不一致，"
             "已阻止建立坐标映射"
