@@ -983,6 +983,33 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
             self.assertEqual(outcomes[0][0].status, "completed")
             self.assertEqual(outcomes[0][0].payload, expected_payload)
 
+    def test_kaogu_can_resume_at_sale_without_any_dig_or_purchase_input(self):
+        adapter = _DesktopAdapterA([
+            _scene("open_inventory_for_sale"),
+            _scene("activate_antique"),
+            _scene("wait_for_sale_pathing"),
+            _scene("select_sale_antique"),
+            _scene("sell_antique"),
+            _scene("cancel_genuine_sale"),
+            _scene("close_sale_shop"),
+            _scene("antique_sale_main_confirmed"),
+            _scene("antique_sale_main_confirmed"),
+        ])
+        workflow = KaoguWorkflow(
+            target_digs=10,
+            initial_digs=10,
+            classifier=_kaogu_classifier,
+        )
+
+        result = workflow.execute(WorkflowContext(adapter, adapter))
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.payload["digs"], 10)
+        self.assertEqual(result.payload["purchases"], 0)
+        reasons = [entry[-1] for entry in adapter.trace if entry[0] == "click"]
+        self.assertNotIn("购买一个洛阳铲", reasons)
+        self.assertFalse(any("次挖掘" in reason for reason in reasons))
+
 
 if __name__ == "__main__":
     unittest.main()

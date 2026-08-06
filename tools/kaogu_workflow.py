@@ -159,6 +159,7 @@ def next_kaogu_phase(status: str, phase: str) -> str:
 @dataclass(frozen=True)
 class KaoguWorkflow:
     target_digs: int = 10
+    initial_digs: int = 0
     tool_mode: str = "luoyang_shovel"
     max_steps: int = 80
     max_purchases: int = 1
@@ -197,13 +198,15 @@ class KaoguWorkflow:
             limit <= 0 for limit in self.action_limits.values()
         ):
             raise ValueError("考古 Workflow 上限必须是正整数")
+        if not 0 <= self.initial_digs <= self.target_digs:
+            raise ValueError("考古初始完成次数必须在 0 到目标次数之间")
         if self.final_confirmation_wait_seconds < 0:
             raise ValueError("考古最终确认等待时间不能为负数")
 
     def execute(self, context: WorkflowContext, *, inspect: bool = False) -> WorkflowOutcome:
-        phase = "enter"
+        phase = "sale_wait_main" if self.initial_digs >= self.target_digs else "enter"
         metrics = ActionMetrics()
-        digs = 0
+        digs = self.initial_digs
         purchases = 0
         unknown_polls = 0
         wait_polls = 0
