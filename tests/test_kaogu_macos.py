@@ -248,6 +248,23 @@ class KaoguSceneTests(unittest.TestCase):
 
         self.assertEqual(decision, {"status": "scan_inventory"})
 
+    def test_split_inventory_title_keeps_page_identity_during_scan(self):
+        texts = [
+            text("物", (544, 174, 34, 27)),
+            text("品", (574, 178, 25, 22)),
+            text("包裹", (871, 223, 25, 43)),
+            text("仓库", (869, 322, 29, 44)),
+        ]
+
+        decision = classify_kaogu_scene(
+            texts,
+            {},
+            (986, 720),
+            phase="sale_inventory_scan",
+        )
+
+        self.assertEqual(decision, {"status": "scan_inventory"})
+
     def test_post_sale_empty_inventory_proposes_evidence_backed_close(self):
         inventory = sale_flow_scenes()[1]
 

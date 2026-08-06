@@ -182,7 +182,15 @@ def _classify_antique_sale(texts, templates, image_size, phase):
         image_size,
         {"min_x": 0.75, "min_y": 0.1, "max_y": 0.5},
     )
-    inventory_page = inventory_page or bool(inventory_title and inventory_tabs)
+    warehouse_tabs = find_items(
+        texts,
+        r"仓库",
+        image_size,
+        {"min_x": 0.75, "min_y": 0.25, "max_y": 0.7},
+    )
+    inventory_page = inventory_page or bool(
+        inventory_tabs and (inventory_title or warehouse_tabs)
+    )
     antique = _template_box(
         templates,
         "non_genuine_antique",
