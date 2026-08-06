@@ -940,6 +940,7 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
                 lambda: KaoguWorkflow(
                     target_digs=2,
                     max_steps=10,
+                    max_inventory_scan_drags=1,
                     classifier=_kaogu_classifier,
                 ),
                 [
@@ -960,6 +961,13 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
                     _scene("sell_antique"),
                     _scene("cancel_genuine_sale"),
                     _scene("close_sale_shop"),
+                    _scene("open_inventory_for_sale"),
+                    _scene("normalize_inventory"),
+                    _scene("normalize_inventory"),
+                    _scene("normalize_inventory"),
+                    _scene("organize_inventory"),
+                    _scene("scan_inventory"),
+                    _scene("close_inventory"),
                     _scene("antique_sale_main_confirmed"),
                     _scene("antique_sale_main_confirmed"),
                 ],
@@ -968,11 +976,12 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
                     "target_digs": 2,
                     "purchases": 1,
                     "sale_clicks": 1,
+                    "sale_batches": 1,
                     "sale_outcome": "all_non_genuine_sold_genuine_retained",
                     "genuine_protected": True,
-                    "actions": 16,
-                    "clicks": 14,
-                    "drags": 3,
+                    "actions": 23,
+                    "clicks": 17,
+                    "drags": 7,
                 },
             ),
         )
@@ -1001,12 +1010,20 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
             _scene("sell_antique"),
             _scene("cancel_genuine_sale"),
             _scene("close_sale_shop"),
+            _scene("open_inventory_for_sale"),
+            _scene("normalize_inventory"),
+            _scene("normalize_inventory"),
+            _scene("normalize_inventory"),
+            _scene("organize_inventory"),
+            _scene("scan_inventory"),
+            _scene("close_inventory"),
             _scene("antique_sale_main_confirmed"),
             _scene("antique_sale_main_confirmed"),
         ])
         workflow = KaoguWorkflow(
             target_digs=10,
             initial_digs=10,
+            max_inventory_scan_drags=1,
             classifier=_kaogu_classifier,
         )
 
@@ -1018,6 +1035,60 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
         reasons = [entry[-1] for entry in adapter.trace if entry[0] == "click"]
         self.assertNotIn("购买一个洛阳铲", reasons)
         self.assertFalse(any("次挖掘" in reason for reason in reasons))
+
+    def test_kaogu_rescans_and_sells_a_second_inventory_batch(self):
+        adapter = _DesktopAdapterA([
+            _scene("open_inventory_for_sale"),
+            _scene("normalize_inventory"),
+            _scene("normalize_inventory"),
+            _scene("normalize_inventory"),
+            _scene("organize_inventory"),
+            _scene("activate_antique"),
+            _scene("wait_for_sale_pathing"),
+            _scene("select_sale_antique"),
+            _scene("sell_antique"),
+            _scene("antique_sale_finished"),
+            _scene("close_sale_shop"),
+            _scene("open_inventory_for_sale"),
+            _scene("normalize_inventory"),
+            _scene("normalize_inventory"),
+            _scene("normalize_inventory"),
+            _scene("organize_inventory"),
+            _scene("activate_antique"),
+            _scene("wait_for_sale_pathing"),
+            _scene("select_sale_antique"),
+            _scene("sell_antique"),
+            _scene("antique_sale_finished"),
+            _scene("close_sale_shop"),
+            _scene("open_inventory_for_sale"),
+            _scene("normalize_inventory"),
+            _scene("normalize_inventory"),
+            _scene("normalize_inventory"),
+            _scene("organize_inventory"),
+            _scene("scan_inventory"),
+            _scene("close_inventory"),
+            _scene("antique_sale_main_confirmed"),
+            _scene("antique_sale_main_confirmed"),
+        ])
+        workflow = KaoguWorkflow(
+            target_digs=10,
+            initial_digs=10,
+            max_inventory_scan_drags=1,
+            classifier=_kaogu_classifier,
+        )
+
+        result = workflow.execute(WorkflowContext(adapter, adapter))
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.payload["sale_batches"], 2)
+        self.assertEqual(result.payload["sale_clicks"], 2)
+        reasons = [entry[-1] for entry in adapter.trace if entry[0] == "click"]
+        self.assertEqual(
+            reasons.count("双击非真品古董并启动自动寻路"),
+            4,
+        )
+        self.assertEqual(reasons.count("考古流程：close_sale_shop"), 2)
+        self.assertEqual(reasons.count("考古流程：close_inventory"), 1)
 
     def test_kaogu_stops_after_bounded_inventory_scan_without_clicking_items(self):
         adapter = _DesktopAdapterA([

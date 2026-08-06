@@ -211,10 +211,19 @@ def _classify_antique_sale(texts, templates, image_size, phase):
             "status": "organize_inventory",
             "box": valid_box(organize_buttons[-1]),
         }
-    if phase == "sale_inventory_scan" and inventory_page and antique:
+    if (
+        phase in {"sale_inventory_scan", "sale_inventory_verify_empty"}
+        and inventory_page
+        and antique
+    ):
         return {"status": "activate_antique", "box": antique}
     if phase == "sale_inventory_scan" and inventory_page:
         return {"status": "scan_inventory"}
+    if phase == "sale_inventory_verify_empty" and inventory_page and inventory_tabs:
+        return {
+            "status": "close_inventory",
+            "box": _inventory_close_box(valid_box(inventory_tabs[-1])),
+        }
     if phase == "sale_pathing" and inventory_page and use_buttons:
         return {"status": "use_antique", "box": valid_box(use_buttons[-1])}
 
@@ -256,14 +265,14 @@ def _classify_antique_sale(texts, templates, image_size, phase):
             return {"status": "close_sale_shop", "box": close_box}
 
     if _main_screen_evidence(texts, templates, image_size):
-        if phase in {"sale_wait_main", "sale_confirm_main"}:
+        if phase in {"sale_wait_main", "sale_rescan_main", "sale_confirm_main"}:
             main_inventory = find_items(
                 texts,
                 r"包裹",
                 image_size,
                 {"min_x": 0.88, "min_y": 0.72, "max_y": 0.95},
             )
-            if phase == "sale_wait_main":
+            if phase in {"sale_wait_main", "sale_rescan_main"}:
                 return {
                     "status": "open_inventory_for_sale",
                     "box": (

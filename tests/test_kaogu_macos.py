@@ -88,6 +88,13 @@ def sale_flow_scenes(*, include_main=True):
         genuine_prompt,
         closing,
         main,
+        inventory,
+        inventory,
+        inventory,
+        inventory,
+        *[inventory for _ in range(20)],
+        inventory,
+        main,
         main,
     ]
 
@@ -240,6 +247,33 @@ class KaoguSceneTests(unittest.TestCase):
         )
 
         self.assertEqual(decision, {"status": "scan_inventory"})
+
+    def test_post_sale_empty_inventory_proposes_evidence_backed_close(self):
+        inventory = sale_flow_scenes()[1]
+
+        decision = classify_kaogu_scene(
+            inventory.texts,
+            inventory.templates,
+            IMAGE_SIZE,
+            phase="sale_inventory_verify_empty",
+        )
+
+        self.assertEqual(
+            decision,
+            {"status": "close_inventory", "box": [982, 107, 99, 34]},
+        )
+
+    def test_post_sale_rescan_main_reopens_inventory(self):
+        main = sale_flow_scenes()[0]
+
+        decision = classify_kaogu_scene(
+            main.texts,
+            main.templates,
+            IMAGE_SIZE,
+            phase="sale_rescan_main",
+        )
+
+        self.assertEqual(decision["status"], "open_inventory_for_sale")
 
     def test_sale_resume_accepts_an_inventory_already_left_open(self):
         inventory = sale_flow_scenes()[1]
@@ -1043,7 +1077,7 @@ class KaoguRunnerTests(unittest.TestCase):
         self.assertEqual(click_reasons[0], "进行第 1 次挖掘")
         self.assertEqual(click_reasons.count("双击非真品古董并启动自动寻路"), 2)
         self.assertIn("考古流程：cancel_genuine_sale", click_reasons)
-        self.assertNotIn("考古流程：close_inventory", click_reasons)
+        self.assertIn("考古流程：close_inventory", click_reasons)
 
     @patch("tools.run_kaogu_macos.MacOSTaskRuntime", FakeRuntime)
     def test_transitional_main_before_final_battle_does_not_finish_early(self):
@@ -1085,7 +1119,7 @@ class KaoguRunnerTests(unittest.TestCase):
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["digs"], 1)
         self.assertIn(5.0, waits)
-        self.assertEqual(len(FakeRuntime.instances[0].clicks), 9)
+        self.assertEqual(len(FakeRuntime.instances[0].clicks), 12)
 
     @patch("tools.run_kaogu_macos.MacOSTaskRuntime", FakeRuntime)
     def test_purchase_once_and_complete_exactly_ten_digs(self):

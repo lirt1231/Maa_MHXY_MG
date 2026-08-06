@@ -234,6 +234,7 @@ class KaoguWorkflow:
         confirmed_main_polls = 0
         sale_wait_polls = 0
         sale_clicks = 0
+        sale_batches = 0
         sale_outcome = None
         normalize_drags = 0
         scan_drags = 0
@@ -332,6 +333,7 @@ class KaoguWorkflow:
                     "target_digs": self.target_digs,
                     "purchases": purchases,
                     "sale_clicks": sale_clicks,
+                    "sale_batches": sale_batches,
                     "sale_outcome": sale_outcome,
                     "genuine_protected": True,
                     "actions": metrics.actions,
@@ -416,7 +418,6 @@ class KaoguWorkflow:
                     continue
                 confirmed_main_polls = 0
                 if status == "antique_sale_finished":
-                    sale_outcome = "all_non_genuine_sold"
                     phase = "sale_closing"
                     context.waiter.wait(0.5)
                     continue
@@ -499,6 +500,12 @@ class KaoguWorkflow:
             elif status == "scan_inventory":
                 metrics.record(scan_inventory.execute(action_context))
                 scan_drags += 1
+                if (
+                    sale_batches > 0
+                    and scan_drags >= self.max_inventory_scan_drags
+                ):
+                    phase = "sale_inventory_verify_empty"
+                    continue
             else:
                 action = actions.get(status)
                 if action is None:
@@ -508,6 +515,32 @@ class KaoguWorkflow:
                     sale_clicks += 1
                 elif status == "cancel_genuine_sale":
                     sale_outcome = "all_non_genuine_sold_genuine_retained"
+                elif status == "close_sale_shop":
+                    sale_batches += 1
+                    normalize_drags = 0
+                    scan_drags = 0
+                    for batch_status in (
+                        "open_inventory_for_sale",
+                        "organize_inventory",
+                        "select_sale_antique",
+                        "sell_antique",
+                        "cancel_genuine_sale",
+                        "close_sale_shop",
+                    ):
+                        actions[batch_status].reset_repetition()
+                    activate_antique.reset_repetition()
+                    normalize_inventory.reset_repetition()
+                    scan_inventory.reset_repetition()
+                    phase = "sale_rescan_main"
+                    continue
+                elif (
+                    status == "close_inventory"
+                    and phase == "sale_inventory_verify_empty"
+                ):
+                    if sale_outcome is None:
+                        sale_outcome = "all_non_genuine_sold"
+                    phase = "sale_confirm_main"
+                    continue
                 if status == "start_archaeology":
                     # The production-page button performs an excavation in both
                     # tool modes; subsequent digs may appear on the map or after

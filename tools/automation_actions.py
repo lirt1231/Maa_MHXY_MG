@@ -403,6 +403,10 @@ class RelativeDragAction(AtomicAction):
         self._last_signature: Any = None
         self._consecutive_repeats = 0
 
+    def reset_repetition(self) -> None:
+        self._last_signature = None
+        self._consecutive_repeats = 0
+
     def execute(self, context: ActionContext) -> ActionResult:
         if not self.accepts(context):
             raise RuntimeError(
