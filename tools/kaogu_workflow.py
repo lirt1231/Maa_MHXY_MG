@@ -11,6 +11,7 @@ try:
         EvidenceClickAction,
         EvidenceDoubleClickAction,
         EvidenceThenRelativeClickAction,
+        RelativeDragAction,
     )
     from .automation_workflows import (
         WorkflowContext,
@@ -25,6 +26,7 @@ except ImportError:  # Direct execution through a platform runner.
         EvidenceClickAction,
         EvidenceDoubleClickAction,
         EvidenceThenRelativeClickAction,
+        RelativeDragAction,
     )
     from automation_workflows import (
         WorkflowContext,
@@ -113,6 +115,7 @@ DEFAULT_ACTION_LIMITS = {
     "close_temporary_bag": 3,
     "close_inventory": 2,
     "open_inventory_for_sale": 1,
+    "organize_inventory": 1,
     "use_antique": 1,
     "select_sale_antique": 12,
     "sell_antique": 12,
@@ -146,7 +149,10 @@ def next_kaogu_phase(status: str, phase: str) -> str:
         "start_archaeology": "digging",
         "dig": "digging",
         "close_temporary_bag": phase,
-        "open_inventory_for_sale": "sale_inventory",
+        "open_inventory_for_sale": "sale_inventory_normalize",
+        "normalize_inventory": phase,
+        "organize_inventory": "sale_inventory_scan",
+        "scan_inventory": phase,
         "activate_antique": "sale_pathing",
         "use_antique": "sale_pathing",
         "select_sale_antique": "sale_sell",
@@ -167,6 +173,8 @@ class KaoguWorkflow:
     max_wait_polls: int = 18
     max_final_observations: int = 360
     max_sale_wait_polls: int = 300
+    inventory_normalize_drags: int = 3
+    max_inventory_scan_drags: int = 20
     final_main_confirmations: int = 2
     final_confirmation_wait_seconds: float = 5.0
     action_limits: Mapping[str, int] = field(default_factory=lambda: dict(DEFAULT_ACTION_LIMITS))
@@ -193,6 +201,8 @@ class KaoguWorkflow:
             self.max_final_observations,
             self.max_sale_wait_polls,
             self.final_main_confirmations,
+            self.inventory_normalize_drags,
+            self.max_inventory_scan_drags,
         )
         if any(value <= 0 for value in values) or any(
             limit <= 0 for limit in self.action_limits.values()
@@ -215,6 +225,8 @@ class KaoguWorkflow:
         sale_wait_polls = 0
         sale_clicks = 0
         sale_outcome = None
+        normalize_drags = 0
+        scan_drags = 0
 
         actions = {
             status: EvidenceClickAction(
@@ -272,6 +284,26 @@ class KaoguWorkflow:
             repeat_limit=1,
             repeat_error="古董已双击一次，未确认页面变化前不会重复双击",
         )
+        normalize_inventory = RelativeDragAction(
+            name="normalize_antique_inventory",
+            statuses=("normalize_inventory",),
+            start_ratio=(0.71, 0.31),
+            end_ratio=(0.71, 0.62),
+            reason="将包裹物品列表下拉到顶部",
+            wait_seconds=0.6,
+            repeat_limit=self.inventory_normalize_drags,
+            repeat_error="包裹归顶动作达到上限，已安全停止",
+        )
+        scan_inventory = RelativeDragAction(
+            name="scan_antique_inventory",
+            statuses=("scan_inventory",),
+            start_ratio=(0.71, 0.64),
+            end_ratio=(0.71, 0.50),
+            reason="继续浏览包裹中的非真品古董",
+            wait_seconds=0.5,
+            repeat_limit=self.max_inventory_scan_drags,
+            repeat_error="已浏览完整包裹但未找到非真品古董，保留现场待确认",
+        )
 
         def result(status: str) -> WorkflowResult:
             if (
@@ -290,6 +322,7 @@ class KaoguWorkflow:
                     "genuine_protected": True,
                     "actions": metrics.actions,
                     "clicks": metrics.clicks,
+                    "drags": metrics.drags,
                 },
             )
 
@@ -443,6 +476,15 @@ class KaoguWorkflow:
                     context.waiter.wait(1.8)
             elif status == "activate_antique":
                 metrics.record(activate_antique.execute(action_context))
+            elif status == "normalize_inventory":
+                metrics.record(normalize_inventory.execute(action_context))
+                normalize_drags += 1
+                if normalize_drags >= self.inventory_normalize_drags:
+                    phase = "sale_inventory_sort"
+                    continue
+            elif status == "scan_inventory":
+                metrics.record(scan_inventory.execute(action_context))
+                scan_drags += 1
             else:
                 action = actions.get(status)
                 if action is None:

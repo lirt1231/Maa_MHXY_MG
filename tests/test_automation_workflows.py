@@ -950,6 +950,10 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
                     _scene("start_archaeology"),
                     _scene("dig"),
                     _scene("open_inventory_for_sale"),
+                    _scene("normalize_inventory"),
+                    _scene("normalize_inventory"),
+                    _scene("normalize_inventory"),
+                    _scene("organize_inventory"),
                     _scene("activate_antique"),
                     _scene("wait_for_sale_pathing"),
                     _scene("select_sale_antique"),
@@ -966,8 +970,9 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
                     "sale_clicks": 1,
                     "sale_outcome": "all_non_genuine_sold_genuine_retained",
                     "genuine_protected": True,
-                    "actions": 12,
-                    "clicks": 13,
+                    "actions": 16,
+                    "clicks": 14,
+                    "drags": 3,
                 },
             ),
         )
@@ -986,6 +991,10 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
     def test_kaogu_can_resume_at_sale_without_any_dig_or_purchase_input(self):
         adapter = _DesktopAdapterA([
             _scene("open_inventory_for_sale"),
+            _scene("normalize_inventory"),
+            _scene("normalize_inventory"),
+            _scene("normalize_inventory"),
+            _scene("organize_inventory"),
             _scene("activate_antique"),
             _scene("wait_for_sale_pathing"),
             _scene("select_sale_antique"),
@@ -1009,6 +1018,31 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
         reasons = [entry[-1] for entry in adapter.trace if entry[0] == "click"]
         self.assertNotIn("购买一个洛阳铲", reasons)
         self.assertFalse(any("次挖掘" in reason for reason in reasons))
+
+    def test_kaogu_stops_after_bounded_inventory_scan_without_clicking_items(self):
+        adapter = _DesktopAdapterA([
+            _scene("open_inventory_for_sale"),
+            _scene("normalize_inventory"),
+            _scene("normalize_inventory"),
+            _scene("normalize_inventory"),
+            _scene("organize_inventory"),
+            _scene("scan_inventory"),
+            _scene("scan_inventory"),
+        ])
+        workflow = KaoguWorkflow(
+            target_digs=10,
+            initial_digs=10,
+            max_inventory_scan_drags=1,
+            classifier=_kaogu_classifier,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "未找到非真品古董"):
+            workflow.execute(WorkflowContext(adapter, adapter))
+
+        clicks = [entry for entry in adapter.trace if entry[0] == "click"]
+        drags = [entry for entry in adapter.trace if entry[0] == "drag"]
+        self.assertEqual(len(clicks), 2)
+        self.assertEqual(len(drags), 4)
 
 
 if __name__ == "__main__":

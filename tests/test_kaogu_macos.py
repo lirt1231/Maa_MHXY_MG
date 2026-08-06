@@ -44,7 +44,12 @@ def sale_flow_scenes(*, include_main=True):
         [
             text("物品", (600, 120, 70, 30)),
             text("包裹", (1070, 180, 55, 28)),
+            text("整理", (900, 620, 100, 45)),
         ],
+        {"inventory_page": (335, 5, 567, 58)},
+    )
+    antique_inventory = scene(
+        inventory.texts,
         {
             "inventory_page": (335, 5, 567, 58),
             "non_genuine_antique": (700, 220, 64, 42),
@@ -67,6 +72,10 @@ def sale_flow_scenes(*, include_main=True):
     )
     return ([main] if include_main else []) + [
         inventory,
+        inventory,
+        inventory,
+        inventory,
+        antique_inventory,
         pathing,
         sale_page,
         sale_page,
@@ -106,19 +115,34 @@ class KaoguSceneTests(unittest.TestCase):
         open_inventory = classify_kaogu_scene(
             main.texts, main.templates, IMAGE_SIZE, phase="sale_wait_main"
         )
-        activate = classify_kaogu_scene(
+        normalize = classify_kaogu_scene(
             inventory.texts,
             inventory.templates,
             IMAGE_SIZE,
-            phase="sale_inventory",
+            phase="sale_inventory_normalize",
+        )
+        organize = classify_kaogu_scene(
+            inventory.texts,
+            inventory.templates,
+            IMAGE_SIZE,
+            phase="sale_inventory_sort",
+        )
+        antique_inventory = sale_flow_scenes()[5]
+        activate = classify_kaogu_scene(
+            antique_inventory.texts,
+            antique_inventory.templates,
+            IMAGE_SIZE,
+            phase="sale_inventory_scan",
         )
 
         self.assertEqual(open_inventory["status"], "open_inventory_for_sale")
+        self.assertEqual(normalize, {"status": "normalize_inventory"})
+        self.assertEqual(organize["status"], "organize_inventory")
         self.assertEqual(activate["status"], "activate_antique")
         self.assertEqual(activate["box"], [700, 220, 64, 42])
 
     def test_genuine_confirmation_can_only_cancel(self):
-        prompt = sale_flow_scenes()[5]
+        prompt = sale_flow_scenes()[9]
 
         decision = classify_kaogu_scene(
             prompt.texts, prompt.templates, IMAGE_SIZE, phase="sale_sell"
@@ -136,6 +160,18 @@ class KaoguSceneTests(unittest.TestCase):
         )
 
         self.assertEqual(decision, {"status": "wait_for_antique_sale"})
+
+    def test_sorted_inventory_without_visible_antique_scans_next_rows(self):
+        inventory = sale_flow_scenes()[1]
+
+        decision = classify_kaogu_scene(
+            inventory.texts,
+            inventory.templates,
+            IMAGE_SIZE,
+            phase="sale_inventory_scan",
+        )
+
+        self.assertEqual(decision, {"status": "scan_inventory"})
 
     def test_sale_main_tolerates_partial_team_ocr_with_cross_region_anchors(self):
         decision = classify_kaogu_scene(
@@ -759,6 +795,7 @@ class FakeRuntime:
     def __init__(self, _guard):
         self._scenes = iter(type(self).scenes)
         self.clicks = []
+        self.drags = []
         type(self).instances.append(self)
 
     def read_scene(self, _templates):
@@ -766,6 +803,9 @@ class FakeRuntime:
 
     def click_box(self, box, _scene, reason):
         self.clicks.append((list(box), reason))
+
+    def drag(self, start, end, _scene, reason):
+        self.drags.append((tuple(start), tuple(end), reason))
 
 
 class FailingClickRuntime(FakeRuntime):
@@ -965,7 +1005,7 @@ class KaoguRunnerTests(unittest.TestCase):
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["digs"], 1)
         self.assertIn(5.0, waits)
-        self.assertEqual(len(FakeRuntime.instances[0].clicks), 8)
+        self.assertEqual(len(FakeRuntime.instances[0].clicks), 9)
 
     @patch("tools.run_kaogu_macos.MacOSTaskRuntime", FakeRuntime)
     def test_purchase_once_and_complete_exactly_ten_digs(self):

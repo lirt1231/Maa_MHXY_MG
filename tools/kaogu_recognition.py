@@ -177,8 +177,23 @@ def _classify_antique_sale(texts, templates, image_size, phase):
         image_size,
         {"min_x": 0.3, "max_x": 0.75, "min_y": 0.35, "max_y": 0.9},
     )
-    if phase in {"sale_wait_main", "sale_inventory"} and inventory_page and antique:
+    organize_buttons = find_items(
+        texts,
+        r"^整理$",
+        image_size,
+        {"min_x": 0.55, "max_x": 0.9, "min_y": 0.72, "max_y": 0.95},
+    )
+    if phase == "sale_inventory_normalize" and inventory_page:
+        return {"status": "normalize_inventory"}
+    if phase == "sale_inventory_sort" and inventory_page and organize_buttons:
+        return {
+            "status": "organize_inventory",
+            "box": valid_box(organize_buttons[-1]),
+        }
+    if phase == "sale_inventory_scan" and inventory_page and antique:
         return {"status": "activate_antique", "box": antique}
+    if phase == "sale_inventory_scan" and inventory_page:
+        return {"status": "scan_inventory"}
     if phase == "sale_pathing" and inventory_page and use_buttons:
         return {"status": "use_antique", "box": valid_box(use_buttons[-1])}
 

@@ -371,6 +371,77 @@ class RelativeClickAction(AtomicAction):
         return result
 
 
+class RelativeDragAction(AtomicAction):
+    """Drag between stable scene-relative points after page recognition."""
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        statuses: Sequence[str],
+        start_ratio: Sequence[float],
+        end_ratio: Sequence[float],
+        reason: str | ReasonFactory,
+        wait_seconds: float,
+        repeat_limit: int = 2,
+        repeat_error: str | None = None,
+    ):
+        if not name or not statuses:
+            raise ValueError("相对拖动动作需要名称和至少一个识别状态")
+        if wait_seconds < 0 or repeat_limit <= 0:
+            raise ValueError("相对拖动动作等待时间和重复上限无效")
+        relative_point(start_ratio, (1, 1))
+        relative_point(end_ratio, (1, 1))
+        self.name = name
+        self.statuses = frozenset(statuses)
+        self.start_ratio = tuple(start_ratio)
+        self.end_ratio = tuple(end_ratio)
+        self.reason = reason
+        self.wait_seconds = wait_seconds
+        self.repeat_limit = repeat_limit
+        self.repeat_error = repeat_error
+        self._last_signature: Any = None
+        self._consecutive_repeats = 0
+
+    def execute(self, context: ActionContext) -> ActionResult:
+        if not self.accepts(context):
+            raise RuntimeError(
+                f"动作 {self.name} 不接受状态 {context.decision_status or 'missing'}"
+            )
+        start = relative_point(self.start_ratio, context.scene.image_size)
+        end = relative_point(self.end_ratio, context.scene.image_size)
+        signature = context.decision_status, start, end
+        repeated = self._consecutive_repeats + 1 if signature == self._last_signature else 1
+        if repeated > self.repeat_limit:
+            message = self.repeat_error or (
+                f"{context.task_label}连续重复执行 {context.decision_status}，已安全停止"
+            )
+            raise RuntimeError(message)
+        self._last_signature = signature
+        self._consecutive_repeats = repeated
+
+        reason = self.reason(context) if callable(self.reason) else self.reason
+        context.input.drag(start, end, context.scene, reason)
+        if self.wait_seconds:
+            context.waiter.wait(self.wait_seconds)
+        result = ActionResult(
+            name=self.name,
+            decision_status=context.decision_status,
+            actions=1,
+            drags=1,
+            wait_seconds=self.wait_seconds,
+        )
+        context.emit(
+            "action_completed",
+            action=self.name,
+            task=context.task_label,
+            decision=context.decision_status,
+            clicks=0,
+            drags=1,
+        )
+        return result
+
+
 class EvidenceThenRelativeClickAction(AtomicAction):
     """Open a transient control and select its stable scene-relative item."""
 
@@ -491,5 +562,6 @@ __all__ = [
     "EvidenceThenRelativeClickAction",
     "EvidenceClickAction",
     "RelativeClickAction",
+    "RelativeDragAction",
     "TextInputAction",
 ]
