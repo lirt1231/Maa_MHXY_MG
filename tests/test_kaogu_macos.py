@@ -29,6 +29,52 @@ def scene(texts=None, templates=None):
     )
 
 
+def sale_flow_scenes(*, include_main=True):
+    main = scene(
+        [
+            text("任务", (1100, 80, 45, 25)),
+            text("队伍", (1190, 95, 45, 25)),
+            text("包裹", (1190, 620, 45, 25)),
+        ],
+        {"menu_plus": (1206, 637, 44, 42)},
+    )
+    inventory = scene(
+        [
+            text("物品", (600, 120, 70, 30)),
+            text("包裹", (1070, 180, 55, 28)),
+        ],
+        {
+            "inventory_page": (335, 5, 567, 58),
+            "non_genuine_antique": (700, 220, 64, 42),
+        },
+    )
+    pathing = scene(templates={"auto_pathing": (1050, 620, 120, 30)})
+    sale_page = scene(templates={"antique_sale_page": (480, 60, 280, 79)})
+    genuine_prompt = scene(
+        [
+            text("取消", (464, 420, 142, 51)),
+            text("确定", (672, 408, 157, 69)),
+        ],
+        {"antique_sale_page": (480, 60, 280, 79)},
+    )
+    closing = scene(
+        templates={
+            "antique_sale_page": (480, 60, 280, 79),
+            "shop_close": (1125, 135, 48, 43),
+        }
+    )
+    return ([main] if include_main else []) + [
+        inventory,
+        pathing,
+        sale_page,
+        sale_page,
+        genuine_prompt,
+        closing,
+        main,
+        main,
+    ]
+
+
 class KaoguSceneTests(unittest.TestCase):
     def test_shovel_templates_include_current_923_canvas(self):
         self.assertIn(
@@ -42,6 +88,43 @@ class KaoguSceneTests(unittest.TestCase):
 
     def test_dig_keeps_workflow_in_digging_phase(self):
         self.assertEqual(next_kaogu_phase("dig", "enter"), "digging")
+
+    def test_sale_flow_opens_inventory_and_activates_only_known_antique(self):
+        main, inventory = sale_flow_scenes()[:2]
+
+        open_inventory = classify_kaogu_scene(
+            main.texts, main.templates, IMAGE_SIZE, phase="sale_wait_main"
+        )
+        activate = classify_kaogu_scene(
+            inventory.texts,
+            inventory.templates,
+            IMAGE_SIZE,
+            phase="sale_inventory",
+        )
+
+        self.assertEqual(open_inventory["status"], "open_inventory_for_sale")
+        self.assertEqual(activate["status"], "activate_antique")
+        self.assertEqual(activate["box"], [700, 220, 64, 42])
+
+    def test_genuine_confirmation_can_only_cancel(self):
+        prompt = sale_flow_scenes()[5]
+
+        decision = classify_kaogu_scene(
+            prompt.texts, prompt.templates, IMAGE_SIZE, phase="sale_sell"
+        )
+
+        self.assertEqual(decision["status"], "cancel_genuine_sale")
+        self.assertEqual(decision["box"], [464, 420, 142, 51])
+
+    def test_unknown_sale_page_never_proposes_input(self):
+        decision = classify_kaogu_scene(
+            [text("确定", (672, 408, 157, 69))],
+            {},
+            IMAGE_SIZE,
+            phase="sale_sell",
+        )
+
+        self.assertEqual(decision, {"status": "wait_for_antique_sale"})
 
     def test_main_menu_navigation_requires_visible_templates(self):
         plus = classify_kaogu_scene(
@@ -714,8 +797,7 @@ class KaoguRunnerTests(unittest.TestCase):
         FakeRuntime.scenes = [
             start,
             *[dig for _ in range(TARGET_DIGS - 1)],
-            main,
-            main,
+            *sale_flow_scenes(),
         ]
         guard = CancellationGuard()
         guard.wait = lambda _seconds: None
@@ -771,27 +853,11 @@ class KaoguRunnerTests(unittest.TestCase):
         )
         lingering_dig = scene([text("挖掘", (1044, 550, 101, 51))])
         transition = scene([text("考古中...", (450, 430, 100, 30))])
-        inventory = scene(
-            [
-                text("物品", (600, 120, 70, 30)),
-                text("包裹", (1070, 180, 55, 28)),
-                text("仓库", (1070, 330, 55, 28)),
-            ]
-        )
-        main = scene(
-            [
-                text("任务", (1100, 80, 45, 25)),
-                text("队伍", (1190, 95, 45, 25)),
-            ],
-            {"menu_plus": (1206, 637, 44, 42)},
-        )
         FakeRuntime.scenes = [
             start,
             lingering_dig,
             transition,
-            inventory,
-            main,
-            main,
+            *sale_flow_scenes(),
         ]
         guard = CancellationGuard()
         guard.wait = lambda _seconds: None
@@ -813,13 +879,10 @@ class KaoguRunnerTests(unittest.TestCase):
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["digs"], 1)
         click_reasons = [reason for _, reason in FakeRuntime.instances[0].clicks]
-        self.assertEqual(
-            click_reasons,
-            [
-                "考古流程：start_archaeology",
-                "考古流程：close_inventory",
-            ],
-        )
+        self.assertEqual(click_reasons[0], "考古流程：start_archaeology")
+        self.assertEqual(click_reasons.count("双击非真品古董并启动自动寻路"), 2)
+        self.assertIn("考古流程：cancel_genuine_sale", click_reasons)
+        self.assertNotIn("考古流程：close_inventory", click_reasons)
 
     @patch("tools.run_kaogu_macos.MacOSTaskRuntime", FakeRuntime)
     def test_transitional_main_before_final_battle_does_not_finish_early(self):
@@ -837,7 +900,7 @@ class KaoguRunnerTests(unittest.TestCase):
             {"menu_plus": (1206, 637, 44, 42)},
         )
         battle = scene([text("取消", (1215, 680, 50, 26))])
-        FakeRuntime.scenes = [start, main, battle, main, main]
+        FakeRuntime.scenes = [start, main, battle, *sale_flow_scenes(include_main=False)]
         guard = CancellationGuard()
         waits = []
         guard.wait = waits.append
@@ -859,7 +922,7 @@ class KaoguRunnerTests(unittest.TestCase):
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["digs"], 1)
         self.assertIn(5.0, waits)
-        self.assertEqual(len(FakeRuntime.instances[0].clicks), 1)
+        self.assertEqual(len(FakeRuntime.instances[0].clicks), 8)
 
     @patch("tools.run_kaogu_macos.MacOSTaskRuntime", FakeRuntime)
     def test_purchase_once_and_complete_exactly_ten_digs(self):
@@ -900,20 +963,7 @@ class KaoguRunnerTests(unittest.TestCase):
             use_shovel,
             start,
             *[dig for _ in range(TARGET_DIGS)],
-            scene(
-                [
-                    text("任务", (1100, 80, 45, 25)),
-                    text("队伍", (1190, 95, 45, 25)),
-                ],
-                {"menu_plus": (1206, 637, 44, 42)},
-            ),
-            scene(
-                [
-                    text("任务", (1100, 80, 45, 25)),
-                    text("队伍", (1190, 95, 45, 25)),
-                ],
-                {"menu_plus": (1206, 637, 44, 42)},
-            ),
+            *sale_flow_scenes(),
         ]
         guard = CancellationGuard()
         guard.wait = lambda _seconds: None
@@ -933,6 +983,11 @@ class KaoguRunnerTests(unittest.TestCase):
         self.assertEqual(result["digs"], 10)
         self.assertEqual(result["target_digs"], 10)
         self.assertEqual(result["purchases"], 1)
+        self.assertEqual(result["sale_clicks"], 1)
+        self.assertEqual(
+            result["sale_outcome"], "all_non_genuine_sold_genuine_retained"
+        )
+        self.assertTrue(result["genuine_protected"])
         click_reasons = [reason for _, reason in FakeRuntime.instances[0].clicks]
         self.assertEqual(click_reasons.count("购买一个洛阳铲"), 1)
         self.assertEqual(sum("次挖掘" in reason for reason in click_reasons), 10)

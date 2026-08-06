@@ -62,6 +62,152 @@ def _inventory_close_box(tab_box):
     ]
 
 
+def _main_screen_evidence(texts, templates, image_size):
+    main_task = find_items(
+        texts,
+        r".*任务",
+        image_size,
+        {"min_x": 0.72, "min_y": 0.05, "max_y": 0.3},
+    )
+    main_team = find_items(
+        texts,
+        r"队伍",
+        image_size,
+        {"min_x": 0.82, "min_y": 0.05, "max_y": 0.3},
+    )
+    return bool(templates.get("menu_plus") and main_task and main_team)
+
+
+def _classify_antique_sale(texts, templates, image_size, phase):
+    temporary_bag = find_items(
+        texts,
+        r"临时(?:道具|物品)(?:栏|包裹)",
+        image_size,
+        {"min_x": 0.3, "max_x": 0.7, "max_y": 0.4},
+    )
+    if temporary_bag:
+        return {
+            "status": "close_temporary_bag",
+            "box": _relative_box(image_size, 0.655, 0.205, 0.045, 0.07),
+        }
+
+    sale_page = _template_box(
+        templates,
+        "antique_sale_page",
+        image_size,
+        max_x=0.75,
+        max_y=0.5,
+    )
+    cancel_buttons = find_items(
+        texts,
+        r"^取消$",
+        image_size,
+        {"min_x": 0.3, "max_x": 0.65, "min_y": 0.45, "max_y": 0.75},
+    )
+    confirm_buttons = find_items(
+        texts,
+        r"^确定$",
+        image_size,
+        {"min_x": 0.5, "max_x": 0.75, "min_y": 0.45, "max_y": 0.75},
+    )
+    if sale_page and cancel_buttons and confirm_buttons:
+        return {
+            "status": "cancel_genuine_sale",
+            "box": valid_box(cancel_buttons[-1]),
+            "reason": "genuine_confirmation",
+        }
+
+    if templates.get("battle"):
+        return {"status": "wait_for_battle", "reason": "battle"}
+    if templates.get("auto_pathing") or find_items(texts, r"自动寻路中?|寻路中"):
+        return {"status": "wait_for_sale_pathing", "reason": "auto_pathing"}
+
+    inventory_page = bool(templates.get("inventory_page"))
+    inventory_title = find_items(
+        texts,
+        r"物品",
+        image_size,
+        {"min_x": 0.35, "max_x": 0.75, "max_y": 0.35},
+    )
+    inventory_tabs = find_items(
+        texts,
+        r"包裹",
+        image_size,
+        {"min_x": 0.75, "min_y": 0.1, "max_y": 0.5},
+    )
+    inventory_page = inventory_page or bool(inventory_title and inventory_tabs)
+    antique = _template_box(
+        templates,
+        "non_genuine_antique",
+        image_size,
+        min_x=0.4,
+        max_x=0.95,
+        min_y=0.12,
+        max_y=0.92,
+    )
+    use_buttons = find_items(
+        texts,
+        r"^使用$",
+        image_size,
+        {"min_x": 0.3, "max_x": 0.75, "min_y": 0.35, "max_y": 0.9},
+    )
+    if phase in {"sale_wait_main", "sale_inventory"} and inventory_page and antique:
+        return {"status": "activate_antique", "box": antique}
+    if phase == "sale_pathing" and inventory_page and use_buttons:
+        return {"status": "use_antique", "box": valid_box(use_buttons[-1])}
+
+    sale_complete = _template_box(
+        templates,
+        "antique_sale_complete",
+        image_size,
+        min_x=0.45,
+        max_x=0.95,
+        max_y=0.65,
+    )
+    if phase in {"sale_select", "sale_sell"} and sale_complete:
+        return {"status": "antique_sale_finished", "reason": "no_saleable_antique"}
+    if phase in {"sale_pathing", "sale_select"} and sale_page:
+        return {
+            "status": "select_sale_antique",
+            "box": _relative_box(image_size, 0.132, 0.212, 0.05, 0.09),
+        }
+    if phase == "sale_sell" and sale_page:
+        return {
+            "status": "sell_antique",
+            "box": _relative_box(image_size, 0.695, 0.822, 0.117, 0.081),
+        }
+    if phase == "sale_closing" and sale_page:
+        close_box = _template_box(
+            templates,
+            "shop_close",
+            image_size,
+            min_x=0.75,
+            max_y=0.4,
+        )
+        if close_box:
+            return {"status": "close_sale_shop", "box": close_box}
+
+    if _main_screen_evidence(texts, templates, image_size):
+        if phase in {"sale_wait_main", "sale_confirm_main"}:
+            main_inventory = find_items(
+                texts,
+                r"包裹",
+                image_size,
+                {"min_x": 0.88, "min_y": 0.72, "max_y": 0.95},
+            )
+            if phase == "sale_wait_main":
+                return {
+                    "status": "open_inventory_for_sale",
+                    "box": (
+                        valid_box(main_inventory[-1])
+                        if main_inventory
+                        else _relative_box(image_size, 0.925, 0.805, 0.07, 0.11)
+                    ),
+                }
+            return {"status": "antique_sale_main_confirmed"}
+    return {"status": "wait_for_antique_sale"}
+
+
 def classify_kaogu_scene(
     texts,
     templates,
@@ -73,6 +219,9 @@ def classify_kaogu_scene(
     """Choose one action backed by current OCR/template evidence."""
     if not image_size or len(image_size) != 2:
         return {"status": "unknown"}
+
+    if phase.startswith("sale_"):
+        return _classify_antique_sale(texts, templates, image_size, phase)
 
     battle_cancel = find_items(
         texts,

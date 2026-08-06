@@ -113,7 +113,14 @@ def _kaogu_classifier(
 ):
     status = texts[0]["text"]
     decision = {"status": status}
-    if status not in {"completed", "already_completed", "unknown", "wait_for_dig"}:
+    if status not in {
+        "completed",
+        "already_completed",
+        "unknown",
+        "wait_for_dig",
+        "wait_for_sale_pathing",
+        "antique_sale_main_confirmed",
+    }:
         decision["box"] = texts[0]["box"]
     return decision
 
@@ -943,15 +950,25 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
                     _scene("start_archaeology"),
                     _scene("dig"),
                     _scene("dig"),
-                    _scene("expand_menu"),
-                    _scene("expand_menu"),
+                    _scene("open_inventory_for_sale"),
+                    _scene("activate_antique"),
+                    _scene("wait_for_sale_pathing"),
+                    _scene("select_sale_antique"),
+                    _scene("sell_antique"),
+                    _scene("cancel_genuine_sale"),
+                    _scene("close_sale_shop"),
+                    _scene("antique_sale_main_confirmed"),
+                    _scene("antique_sale_main_confirmed"),
                 ],
                 {
                     "digs": 2,
                     "target_digs": 2,
                     "purchases": 1,
-                    "actions": 7,
-                    "clicks": 7,
+                    "sale_clicks": 1,
+                    "sale_outcome": "all_non_genuine_sold_genuine_retained",
+                    "genuine_protected": True,
+                    "actions": 13,
+                    "clicks": 14,
                 },
             ),
         )

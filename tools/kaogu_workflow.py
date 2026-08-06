@@ -9,6 +9,7 @@ try:
     from .automation_actions import (
         ActionMetrics,
         EvidenceClickAction,
+        EvidenceDoubleClickAction,
         EvidenceThenRelativeClickAction,
     )
     from .automation_workflows import (
@@ -22,6 +23,7 @@ except ImportError:  # Direct execution through a platform runner.
     from automation_actions import (
         ActionMetrics,
         EvidenceClickAction,
+        EvidenceDoubleClickAction,
         EvidenceThenRelativeClickAction,
     )
     from automation_workflows import (
@@ -64,6 +66,40 @@ KAOGU_TEMPLATES = {
         "jineng/yixuan_luoyangchan.png",
         "jineng/yixuan_luoyangchan_live_923.png",
     ],
+    "inventory_page": {
+        "templates": ["beibao/beibao_jiemian_panduan.png"],
+        "threshold": 0.78,
+    },
+    "non_genuine_antique": {
+        "templates": [
+            "jineng/gd/1.1.png",
+            "jineng/gd/1.2.png",
+            "jineng/gd/1.3.png",
+            "jineng/gd/1.4.png",
+            "jineng/gd/2.1.png",
+            "jineng/gd/2.2.png",
+            "jineng/gd/gaofang.png",
+            "jineng/gd/yanpin.png",
+        ],
+        "threshold": 0.8,
+    },
+    "auto_pathing": [
+        "zonghe/zidongxunlu1.png",
+        "zonghe/zidongxunlu2.png",
+        "zonghe/zidongxunlu3.png",
+        "zonghe/zidongxunlu4.png",
+    ],
+    "antique_sale_page": {
+        "templates": ["jineng/gudongshoumai.png"],
+        "threshold": 0.78,
+    },
+    "antique_sale_complete": {
+        "templates": [
+            "jineng/shoumai_wancheng.png",
+            "jineng/shoumai_wancheng2.png",
+        ],
+        "threshold": 0.8,
+    },
 }
 
 DEFAULT_ACTION_LIMITS = {
@@ -81,6 +117,12 @@ DEFAULT_ACTION_LIMITS = {
     "start_archaeology": 1,
     "close_temporary_bag": 3,
     "close_inventory": 2,
+    "open_inventory_for_sale": 1,
+    "use_antique": 1,
+    "select_sale_antique": 12,
+    "sell_antique": 12,
+    "cancel_genuine_sale": 1,
+    "close_sale_shop": 1,
 }
 
 
@@ -109,6 +151,13 @@ def next_kaogu_phase(status: str, phase: str) -> str:
         "start_archaeology": "digging",
         "dig": "digging",
         "close_temporary_bag": phase,
+        "open_inventory_for_sale": "sale_inventory",
+        "activate_antique": "sale_pathing",
+        "use_antique": "sale_pathing",
+        "select_sale_antique": "sale_sell",
+        "sell_antique": "sale_select",
+        "cancel_genuine_sale": "sale_closing",
+        "close_sale_shop": "sale_confirm_main",
     }.get(status, phase)
 
 
@@ -120,7 +169,8 @@ class KaoguWorkflow:
     max_purchases: int = 1
     max_unknown_polls: int = 3
     max_wait_polls: int = 18
-    max_final_observations: int = 180
+    max_final_observations: int = 360
+    max_sale_wait_polls: int = 300
     final_main_confirmations: int = 2
     final_confirmation_wait_seconds: float = 5.0
     action_limits: Mapping[str, int] = field(default_factory=lambda: dict(DEFAULT_ACTION_LIMITS))
@@ -145,6 +195,7 @@ class KaoguWorkflow:
             self.max_unknown_polls,
             self.max_wait_polls,
             self.max_final_observations,
+            self.max_sale_wait_polls,
             self.final_main_confirmations,
         )
         if any(value <= 0 for value in values) or any(
@@ -163,6 +214,9 @@ class KaoguWorkflow:
         wait_polls = 0
         final_observations = 0
         confirmed_main_polls = 0
+        sale_wait_polls = 0
+        sale_clicks = 0
+        sale_outcome = None
 
         actions = {
             status: EvidenceClickAction(
@@ -205,6 +259,15 @@ class KaoguWorkflow:
             repeat_error="考古挖掘已达到目标次数，已停止额外输入",
             signature_factory=lambda action_context: action_context.decision_status,
         )
+        activate_antique = EvidenceDoubleClickAction(
+            name="activate_non_genuine_antique",
+            statuses=("activate_antique",),
+            reason="双击非真品古董并启动自动寻路",
+            click_interval_seconds=0.12,
+            wait_seconds=1.0,
+            repeat_limit=1,
+            repeat_error="古董已双击一次，未确认页面变化前不会重复双击",
+        )
 
         def result(status: str) -> WorkflowResult:
             if (
@@ -218,6 +281,9 @@ class KaoguWorkflow:
                     "digs": digs,
                     "target_digs": self.target_digs,
                     "purchases": purchases,
+                    "sale_clicks": sale_clicks,
+                    "sale_outcome": sale_outcome,
+                    "genuine_protected": True,
                     "actions": metrics.actions,
                     "clicks": metrics.clicks,
                 },
@@ -291,16 +357,29 @@ class KaoguWorkflow:
                     raise RuntimeError(
                         "最后一次考古长时间未结束，已安全停止"
                     )
-                if status == "expand_menu":
+                if status == "antique_sale_main_confirmed":
                     confirmed_main_polls += 1
                     if confirmed_main_polls >= self.final_main_confirmations:
                         return result("completed")
                     context.waiter.wait(self.final_confirmation_wait_seconds)
                     continue
                 confirmed_main_polls = 0
-                if status not in {"close_inventory", "close_temporary_bag"}:
+                if status == "antique_sale_finished":
+                    sale_outcome = "all_non_genuine_sold"
+                    phase = "sale_closing"
+                    context.waiter.wait(0.5)
+                    continue
+                if status in {
+                    "wait_for_antique_sale",
+                    "wait_for_sale_pathing",
+                    "wait_for_battle",
+                }:
+                    sale_wait_polls += 1
+                    if sale_wait_polls > self.max_sale_wait_polls:
+                        raise RuntimeError("古董售卖页面长时间未就绪，已安全停止并保留现场")
                     context.waiter.wait(1.0)
                     continue
+                sale_wait_polls = 0
             if status in {"completed", "already_completed"}:
                 return result(status)
             if status == "blocked_resource":
@@ -358,11 +437,17 @@ class KaoguWorkflow:
                     context.waiter.wait(0.8)
                 else:
                     context.waiter.wait(1.8)
+            elif status == "activate_antique":
+                metrics.record(activate_antique.execute(action_context))
             else:
                 action = actions.get(status)
                 if action is None:
                     raise RuntimeError(f"考古流程返回了不支持的动作：{status}")
                 metrics.record(action.execute(action_context))
+                if status == "sell_antique":
+                    sale_clicks += 1
+                elif status == "cancel_genuine_sale":
+                    sale_outcome = "all_non_genuine_sold_genuine_retained"
                 if status == "start_archaeology" and self.tool_mode == "selected":
                     # The production-page click performs the first excavation;
                     # the game then exposes only the remaining map dig buttons.
@@ -370,6 +455,8 @@ class KaoguWorkflow:
                     if digs >= self.target_digs:
                         context.waiter.wait(0.8)
             phase = next_kaogu_phase(status, phase)
+            if digs >= self.target_digs and status in {"dig", "start_archaeology"}:
+                phase = "sale_wait_main"
 
         raise RuntimeError("考古流程超过最大识别步骤，已安全停止")
 
