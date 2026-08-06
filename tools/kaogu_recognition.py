@@ -785,7 +785,7 @@ def classify_kaogu_scene(
 
     skill_page_titles = find_items(
         texts,
-        r"^(?:人物|帮派|修炼|辅助)技能$",
+        r"(?:人物|帮派|修炼|辅助)技能.*",
         image_size,
         {"min_x": 0.35, "max_x": 0.65, "max_y": 0.25},
     )

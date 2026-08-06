@@ -530,6 +530,24 @@ class KaoguSceneTests(unittest.TestCase):
             {"status": "open_auxiliary", "box": [898, 512, 29, 46]},
         )
 
+    def test_character_skills_page_tolerates_title_suffix_noise(self):
+        decision = classify_kaogu_scene(
+            [
+                text("人物技能修", (436, 115, 222, 22)),
+                text("帮派", (867, 320, 29, 46)),
+                text("修炼", (866, 420, 32, 48)),
+                text("辅助", (868, 523, 28, 43)),
+            ],
+            {},
+            (986, 720),
+            phase="skills",
+        )
+
+        self.assertEqual(
+            decision,
+            {"status": "open_auxiliary", "box": [868, 523, 28, 43]},
+        )
+
     def test_auxiliary_skills_page_prefers_archaeology_ocr_entry(self):
         decision = classify_kaogu_scene(
             [
