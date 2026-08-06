@@ -403,7 +403,7 @@ def classify_return_scene(task_id: str, scene) -> dict[str, Any]:
     shimen_reward_item = _find_region(
         scene, r"^(?:绿芦羹|红罗羹)$", min_x=0.72, min_y=0.55, max_y=0.92
     ) and _find_region(
-        scene, r"^使用$", min_x=0.72, min_y=0.65, max_y=0.98
+        scene, r"^使\s*用$", min_x=0.72, min_y=0.65, max_y=0.98
     )
     reward_close = valid_box({"box": scene.templates.get("close_generic")})
     if (

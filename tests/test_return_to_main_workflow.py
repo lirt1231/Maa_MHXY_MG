@@ -482,6 +482,25 @@ class ReturnToMainWorkflowTests(unittest.TestCase):
         self.assertEqual(result.clicks, 1)
         self.assertEqual(runtime.clicks[0][0], [821, 466, 32, 37])
 
+    def test_live_shimen_reward_popup_accepts_split_use_ocr(self):
+        reward = scene(
+            [
+                ("绿芦羹", [841, 549, 58, 23]),
+                ("使 用", [841, 589, 60, 28]),
+            ],
+            {"close_generic": [905, 439, 39, 40]},
+        )
+        runtime = Runtime([reward, main_scene(), main_scene()])
+
+        result = ReturnToMainWorkflow("shimen", wait_seconds=0).execute(
+            runtime,
+            Guard(),
+        )
+
+        self.assertEqual(result.status, "confirmed")
+        self.assertEqual(result.clicks, 1)
+        self.assertEqual(runtime.clicks[0][0], [905, 439, 39, 40])
+
     def test_live_red_luo_soup_reward_popup_has_a_distinct_close_path(self):
         reward = scene(
             [
