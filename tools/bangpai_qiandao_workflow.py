@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
 try:
-    from .automation_actions import ActionMetrics, EvidenceClickAction
+    from .automation_actions import ActionMetrics
     from .automation_workflows import (
         WorkflowContext,
         WorkflowInspection,
@@ -14,9 +14,13 @@ try:
         WorkflowResult,
     )
     from .bangpai_qiandao_recognition import classify_clan_sign_in_scene
-    from .game_atomic_actions import ClanWelfareAction
+    from .game_atomic_actions import (
+        ClanWelfareAction,
+        CloseKnownWelfareOverlayAction,
+        ExpandMainShortcutMenuAction,
+    )
 except ImportError:  # Direct execution through a platform runner.
-    from automation_actions import ActionMetrics, EvidenceClickAction
+    from automation_actions import ActionMetrics
     from automation_workflows import (
         WorkflowContext,
         WorkflowInspection,
@@ -24,7 +28,11 @@ except ImportError:  # Direct execution through a platform runner.
         WorkflowResult,
     )
     from bangpai_qiandao_recognition import classify_clan_sign_in_scene
-    from game_atomic_actions import ClanWelfareAction
+    from game_atomic_actions import (
+        ClanWelfareAction,
+        CloseKnownWelfareOverlayAction,
+        ExpandMainShortcutMenuAction,
+    )
 
 
 CLAN_SIGN_IN_TEMPLATES = {
@@ -65,33 +73,12 @@ class ClanSignInWorkflow:
         idle_polls = 0
         metrics = ActionMetrics()
 
-        def click_action(status, name, reason, *, wait_seconds=0.8, repeat_limit=None, repeat_error=None):
-            return EvidenceClickAction(
-                name=name,
-                statuses=(status,),
-                reason=reason,
-                wait_seconds=wait_seconds,
-                repeat_limit=repeat_limit or self.max_steps,
-                repeat_error=repeat_error,
-                signature_factory=lambda action_context: action_context.decision_status,
-            )
-
         actions = {
-            "expand_menu": click_action(
-                "expand_menu",
-                "expand_main_menu",
-                "展开主界面菜单",
+            "expand_menu": ExpandMainShortcutMenuAction(
                 repeat_limit=2,
                 repeat_error="主界面菜单连续两次未能展开，已安全停止",
             ),
-            "close_known_welfare_overlay": click_action(
-                "close_known_welfare_overlay",
-                "close_known_welfare_overlay",
-                "关闭上一任务遗留的福利页面",
-                wait_seconds=1.5,
-                repeat_limit=1,
-                repeat_error="福利页面关闭后仍未变化，已安全停止",
-            ),
+            "close_known_welfare_overlay": CloseKnownWelfareOverlayAction(),
             "open_clan": ClanWelfareAction("open_clan", repeat_limit=self.max_steps),
             "open_welfare": ClanWelfareAction("open_welfare", repeat_limit=self.max_steps),
             "sign_in": ClanWelfareAction(

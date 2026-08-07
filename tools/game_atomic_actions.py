@@ -21,6 +21,32 @@ class OpenActivityCenterAction(EvidenceClickAction):
         )
 
 
+class ExpandMainShortcutMenuAction(EvidenceClickAction):
+    def __init__(self, *, repeat_limit: int, repeat_error: str | None = None):
+        super().__init__(
+            name="expand_main_shortcut_menu",
+            statuses=("expand_menu",),
+            reason="展开主界面菜单",
+            wait_seconds=0.8,
+            repeat_limit=repeat_limit,
+            repeat_error=repeat_error,
+            signature_factory=lambda context: context.decision_status,
+        )
+
+
+class CloseKnownWelfareOverlayAction(EvidenceClickAction):
+    def __init__(self):
+        super().__init__(
+            name="close_known_welfare_overlay",
+            statuses=("close_known_welfare_overlay",),
+            reason="关闭上一任务遗留的福利页面",
+            wait_seconds=1.5,
+            repeat_limit=1,
+            repeat_error="福利页面关闭后仍未变化，已安全停止",
+            signature_factory=lambda context: context.decision_status,
+        )
+
+
 class SelectActivityTabAction(EvidenceClickAction):
     def __init__(self, *, budget: ActionBudget | None = None):
         super().__init__(
@@ -275,7 +301,9 @@ __all__ = [
     "ConfirmEscortAction",
     "ContinueTrackedTaskAction",
     "EnterDungeonStageAction",
+    "ExpandMainShortcutMenuAction",
     "ClanWelfareAction",
+    "CloseKnownWelfareOverlayAction",
     "ConfirmFreeRewardAction",
     "LikeVisibleFeedItemAction",
     "JoinIdentifiedActivityAction",
