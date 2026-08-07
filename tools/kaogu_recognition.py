@@ -632,6 +632,15 @@ def classify_kaogu_scene(
             "status": "open_shovel_shop",
             "box": _purchase_slot_box(purchase_slot),
         }
+    if choose_tool and use_buttons and not empty_shovel_notice:
+        # In the current fixed tool dialog, an occupied first slot can be
+        # icon-only. The dialog, visible Use button, and absence of the
+        # explicit empty-inventory notice jointly identify it as selectable.
+        return {
+            "status": "select_shovel",
+            "box": _relative_box(image_size, 0.3, 0.34, 0.075, 0.1),
+            "reason": "occupied_first_tool_slot",
+        }
     if choose_tool:
         return {"status": "tool_selection_idle"}
 
