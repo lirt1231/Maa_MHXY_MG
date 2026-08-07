@@ -562,7 +562,11 @@ def classify_kaogu_scene(
     if phase == "shop_closing" and shop_close:
         return {"status": "close_shop", "box": shop_close}
     if shovel_products and buy_buttons and shop_close:
-        return {"status": "buy_shovel", "box": valid_box(buy_buttons[-1])}
+        return {
+            "status": "buy_shovel",
+            "box": valid_box(buy_buttons[-1]),
+            "close_box": shop_close,
+        }
 
     choose_tool = find_items(
         texts,

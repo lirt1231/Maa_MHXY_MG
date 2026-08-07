@@ -413,10 +413,22 @@ class KaoguWorkflow:
                 and self.purchase_guard is not None
                 and self.purchase_guard.is_reserved()
             ):
-                decision = {
-                    "status": "purchase_blocked",
-                    "reason": "本轮考古已经购买或尝试购买过洛阳铲，不再自动购买",
-                }
+                close_box = decision.get("close_box")
+                if close_box:
+                    # Keep the durable purchase reservation intact. A prior
+                    # interrupted run may already have bought the shovel and
+                    # left the shop open, so only close this positively
+                    # identified dialog and verify the tool selection next.
+                    decision = {
+                        "status": "close_shop",
+                        "box": close_box,
+                        "reason": "已有购买保护，关闭商店后验证背包工具",
+                    }
+                else:
+                    decision = {
+                        "status": "purchase_blocked",
+                        "reason": "本轮考古已经购买或尝试购买过洛阳铲，不再自动购买",
+                    }
                 status = decision["status"]
             context.emit(
                 "scene",
