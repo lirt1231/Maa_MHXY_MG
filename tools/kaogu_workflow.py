@@ -193,6 +193,9 @@ class KaoguWorkflow:
     max_unknown_polls: int = 3
     max_wait_polls: int = 18
     max_dig_attempts_per_round: int = 3
+    start_main_confirmations: int = 2
+    max_start_recoveries: int = 1
+    max_start_pathing_polls: int = 300
     max_final_observations: int = 360
     max_sale_wait_polls: int = 300
     sale_empty_confirmations: int = 3
@@ -222,6 +225,9 @@ class KaoguWorkflow:
             self.max_unknown_polls,
             self.max_wait_polls,
             self.max_dig_attempts_per_round,
+            self.start_main_confirmations,
+            self.max_start_recoveries,
+            self.max_start_pathing_polls,
             self.max_final_observations,
             self.max_sale_wait_polls,
             self.sale_empty_confirmations,
@@ -257,6 +263,9 @@ class KaoguWorkflow:
         pending_dig = False
         pending_dig_attempts = 0
         pending_dig_polls = 0
+        start_main_polls = 0
+        start_recoveries = 0
+        start_pathing_polls = 0
 
         actions = {
             status: EvidenceClickAction(
@@ -493,7 +502,53 @@ class KaoguWorkflow:
                     )
                 context.waiter.wait(0.8)
                 continue
+            if status == "start_transition_main":
+                # A main screen can flash briefly while the client hands off
+                # to the excavation panel. Observe it twice before replaying
+                # the bounded navigation sequence, and never replay twice.
+                start_main_polls += 1
+                if start_main_polls < self.start_main_confirmations:
+                    context.waiter.wait(1.0)
+                    continue
+                if start_recoveries >= self.max_start_recoveries:
+                    raise RuntimeError(
+                        "开始考古后未出现挖掘面板，已安全停止并保留现场"
+                    )
+                start_recoveries += 1
+                for navigation_status in (
+                    "expand_menu",
+                    "open_skills",
+                    "open_auxiliary",
+                    "open_archaeology",
+                    "open_production",
+                    "switch_tier",
+                    "open_tool_selection",
+                    "select_shovel",
+                    "use_shovel",
+                    "start_archaeology",
+                ):
+                    actions[navigation_status].reset_repetition()
+                phase = "enter"
+                pending_dig = False
+                pending_dig_attempts = 0
+                pending_dig_polls = 0
+                context.emit(
+                    "start_recovery",
+                    attempt=start_recoveries,
+                    reason="main_screen_without_excavation_panel",
+                )
+                context.waiter.wait(1.0)
+                continue
+            if status == "wait_for_start_pathing":
+                start_main_polls = 0
+                start_pathing_polls += 1
+                if start_pathing_polls > self.max_start_pathing_polls:
+                    raise RuntimeError("前往考古地点长时间未结束，已安全停止并保留现场")
+                context.waiter.wait(1.0)
+                continue
             if status == "wait_for_dig":
+                start_main_polls = 0
+                start_pathing_polls = 0
                 wait_polls += 1
                 if pending_dig:
                     pending_dig_polls += 1
@@ -518,6 +573,8 @@ class KaoguWorkflow:
 
             unknown_polls = 0
             wait_polls = 0
+            start_main_polls = 0
+            start_pathing_polls = 0
             if status == "expand_menu" and phase == "tool_select":
                 # Closing 洛阳杂货铺 can return the client to the main screen.
                 # That transition is positively identified above, so a single

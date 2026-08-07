@@ -330,6 +330,12 @@ def classify_kaogu_scene(
     if phase.startswith("sale_"):
         return _classify_antique_sale(texts, templates, image_size, phase)
 
+    if phase == "digging" and (
+        templates.get("auto_pathing")
+        or find_items(texts, r"自动寻路中?|寻路中")
+    ):
+        return {"status": "wait_for_start_pathing", "reason": "auto_pathing"}
+
     battle_cancel = find_items(
         texts,
         r"^取消$",
@@ -477,7 +483,18 @@ def classify_kaogu_scene(
         {"min_x": 0.82, "min_y": 0.05, "max_y": 0.3},
     )
     if (
-        phase in {"digging", "tool_select"}
+        phase == "digging"
+        and settled_menu_plus
+        and settled_main_task
+        and settled_main_team
+    ):
+        # Starting archaeology normally replaces this page with the right-side
+        # excavation panel. A confirmed return to the main screen means that
+        # transition did not become observable, so leave recovery policy to
+        # the workflow instead of consuming a regular menu-click budget.
+        return {"status": "start_transition_main", "box": settled_menu_plus}
+    if (
+        phase == "tool_select"
         and settled_menu_plus
         and settled_main_task
         and settled_main_team

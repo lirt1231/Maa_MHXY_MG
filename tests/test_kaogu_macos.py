@@ -176,6 +176,25 @@ class KaoguSceneTests(unittest.TestCase):
         self.assertEqual(decision["status"], "expand_menu")
         self.assertEqual(decision["box"], [1206, 637, 44, 42])
 
+    def test_main_screen_after_start_is_a_non_input_recovery_signal(self):
+        main = scene(
+            [
+                text("福利", (15, 129, 33, 16)),
+                text("任务", (1100, 80, 45, 25)),
+                text("队伍", (1190, 95, 45, 25)),
+            ],
+            {"menu_plus": (1206, 637, 44, 42)},
+        )
+
+        decision = classify_kaogu_scene(
+            main.texts, main.templates, IMAGE_SIZE, phase="digging"
+        )
+
+        self.assertEqual(
+            decision,
+            {"status": "start_transition_main", "box": [1206, 637, 44, 42]},
+        )
+
     def test_sale_flow_opens_inventory_and_activates_only_known_antique(self):
         main, inventory = sale_flow_scenes()[:2]
 
@@ -1051,6 +1070,19 @@ class KaoguSceneTests(unittest.TestCase):
             },
         )
 
+    def test_start_pathing_is_wait_only_before_excavation_panel_appears(self):
+        decision = classify_kaogu_scene(
+            [],
+            {"auto_pathing": (780, 590, 120, 30)},
+            (1020, 718),
+            phase="digging",
+        )
+
+        self.assertEqual(
+            decision,
+            {"status": "wait_for_start_pathing", "reason": "auto_pathing"},
+        )
+
     def test_excavation_settlement_is_explicit_completion_evidence(self):
         decision = classify_kaogu_scene(
             [
@@ -1104,6 +1136,9 @@ class FakeRuntime:
 
     def click_box(self, box, _scene, reason):
         self.clicks.append((list(box), reason))
+
+    def click(self, point, _scene, reason):
+        self.clicks.append((list(point), reason))
 
     def drag(self, start, end, _scene, reason):
         self.drags.append((tuple(start), tuple(end), reason))
@@ -1228,6 +1263,144 @@ class KaoguRunnerTests(unittest.TestCase):
             )
 
         self.assertEqual(FakeRuntime.instances[0].clicks, [])
+
+    @patch("tools.run_kaogu_macos.MacOSTaskRuntime", FakeRuntime)
+    def test_start_transition_main_replays_navigation_once_without_reusing_menu_budget(self):
+        start = scene(
+            [
+                text("二阶", (246, 166, 35, 24)),
+                text("工坊·考古", (548, 98, 185, 33)),
+                text("10/1", (730, 330, 39, 17)),
+                text("考古", (705, 560, 74, 29)),
+            ]
+        )
+        main = scene(
+            [
+                text("福利", (15, 129, 33, 16)),
+                text("任务", (1100, 80, 45, 25)),
+                text("队伍", (1190, 95, 45, 25)),
+            ],
+            {"menu_plus": (1206, 637, 44, 42)},
+        )
+        reopened_start = scene(
+            [
+                text("二阶", (246, 166, 35, 24)),
+                text("工坊·考古", (548, 98, 185, 33)),
+                text("10/1", (730, 330, 39, 17)),
+                text("考古", (705, 560, 74, 29)),
+            ]
+        )
+        skills = scene(
+            [
+                text("人物技能", (500, 87, 96, 26)),
+                text("辅助", (1100, 512, 29, 46)),
+            ]
+        )
+        auxiliary = scene(
+            [
+                text("辅助技能", (500, 87, 96, 27)),
+                text("考古", (950, 304, 62, 32)),
+            ]
+        )
+        archaeology = scene(
+            [
+                text("工坊·考古", (548, 98, 148, 33)),
+                text("技能生产", (1100, 302, 28, 76)),
+            ]
+        )
+        FakeRuntime.scenes = [
+            start,
+            main,
+            main,
+            main,
+            skills,
+            auxiliary,
+            archaeology,
+            reopened_start,
+            scene(
+                [text("挖掘", (1044, 550, 101, 51))],
+                {"shovel": (1030, 398, 76, 78)},
+            ),
+            dig_settlement(),
+            *sale_flow_scenes(),
+        ]
+        guard = CancellationGuard()
+        guard.wait = lambda _seconds: None
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            return_code = run(
+                self._args(tool_mode="luoyang_shovel", target_digs=1),
+                guard,
+                FakePurchaseGuard(),
+            )
+
+        self.assertEqual(return_code, 0)
+        reasons = [reason for _, reason in FakeRuntime.instances[0].clicks]
+        self.assertEqual(reasons.count("开始考古并前往挖掘地点"), 2)
+        self.assertEqual(reasons.count("展开主界面快捷菜单"), 1)
+
+    @patch("tools.run_kaogu_macos.MacOSTaskRuntime", FakeRuntime)
+    def test_second_start_transition_main_stops_without_further_menu_clicks(self):
+        start = scene(
+            [
+                text("二阶", (246, 166, 35, 24)),
+                text("工坊·考古", (548, 98, 185, 33)),
+                text("10/1", (730, 330, 39, 17)),
+                text("考古", (705, 560, 74, 29)),
+            ]
+        )
+        main = scene(
+            [
+                text("福利", (15, 129, 33, 16)),
+                text("任务", (1100, 80, 45, 25)),
+                text("队伍", (1190, 95, 45, 25)),
+            ],
+            {"menu_plus": (1206, 637, 44, 42)},
+        )
+        skills = scene(
+            [
+                text("人物技能", (500, 87, 96, 26)),
+                text("辅助", (1100, 512, 29, 46)),
+            ]
+        )
+        auxiliary = scene(
+            [
+                text("辅助技能", (500, 87, 96, 27)),
+                text("考古", (950, 304, 62, 32)),
+            ]
+        )
+        archaeology = scene(
+            [
+                text("工坊·考古", (548, 98, 148, 33)),
+                text("技能生产", (1100, 302, 28, 76)),
+            ]
+        )
+        FakeRuntime.scenes = [
+            start,
+            main,
+            main,
+            main,
+            skills,
+            auxiliary,
+            archaeology,
+            start,
+            main,
+            main,
+        ]
+        guard = CancellationGuard()
+        guard.wait = lambda _seconds: None
+
+        with self.assertRaisesRegex(RuntimeError, "未出现挖掘面板"):
+            run(
+                self._args(tool_mode="luoyang_shovel", target_digs=1),
+                guard,
+                FakePurchaseGuard(),
+            )
+
+        reasons = [reason for _, reason in FakeRuntime.instances[0].clicks]
+        self.assertEqual(reasons.count("开始考古并前往挖掘地点"), 2)
+        self.assertEqual(reasons.count("展开主界面快捷菜单"), 1)
 
     @patch("tools.run_kaogu_macos.MacOSTaskRuntime", FakeRuntime)
     def test_final_dig_waits_for_main_screen_without_clicking_a_new_dig(self):
