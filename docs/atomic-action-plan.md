@@ -1,6 +1,6 @@
 # 游戏原子操作规划
 
-状态：规划中（2026-08-07）。目标是让每个任务只描述业务状态机和原子操作序列；截图、页面证据、窗口标定、输入预算、取消和日志由共享操作层统一执行。
+状态：第一批动态活动操作已实现（2026-08-07）。`OpenActivityCenter`、`SelectActivityTab`、`JoinIdentifiedActivity`、`AcceptIdentifiedDialogue`、`ContinueTrackedTask`、普通运镖确认和秘境进入/挑战已落在 `tools/game_atomic_actions.py`，并已迁移宝图、师门、普通运镖、秘境及趣闻鉴赏共享的活动导航。固定主界面、资源快照、答题、队伍、福利和考古操作仍待迁移。
 
 ## 边界
 
