@@ -1421,6 +1421,55 @@ class KaoguRunnerTests(unittest.TestCase):
         self.assertEqual(purchase_guard.releases, 1)
 
     @patch("tools.run_kaogu_macos.MacOSTaskRuntime", FakeRuntime)
+    def test_recent_purchase_selects_icon_only_first_tool_slot(self):
+        icon_only_tool_dialog = scene(
+            [
+                text("选择工具", (467, 184, 89, 27)),
+                text("使用", (608, 488, 51, 24)),
+            ]
+        )
+        selected_tool = scene(
+            [
+                text("选择工具", (467, 184, 89, 27)),
+                text("洛阳铲", (320, 266, 52, 21)),
+                text("使用", (608, 488, 51, 24)),
+            ]
+        )
+        start = scene(
+            [
+                text("工坊·考古", (436, 98, 148, 33)),
+                text("考古", (564, 560, 59, 29)),
+                text("消耗活力：54", (500, 490, 96, 23)),
+            ]
+        )
+        FakeRuntime.scenes = [
+            icon_only_tool_dialog,
+            selected_tool,
+            start,
+            scene(
+                [
+                    text("洛阳铲", (1040, 510, 58, 23)),
+                    text("挖掘", (1044, 550, 52, 29)),
+                ]
+            ),
+            dig_settlement(),
+            *sale_flow_scenes(),
+        ]
+        guard = CancellationGuard()
+        guard.wait = lambda _seconds: None
+        purchase_guard = FakePurchaseGuard(reserved=True)
+
+        with redirect_stdout(io.StringIO()):
+            return_code = run(
+                self._args(target_digs=1), guard, purchase_guard
+            )
+
+        self.assertEqual(return_code, 0)
+        reasons = [reason for _, reason in FakeRuntime.instances[0].clicks]
+        self.assertIn("考古流程：select_shovel", reasons)
+        self.assertNotIn("购买一个洛阳铲", reasons)
+
+    @patch("tools.run_kaogu_macos.MacOSTaskRuntime", FakeRuntime)
     def test_start_transition_main_replays_navigation_once_without_reusing_menu_budget(self):
         start = scene(
             [

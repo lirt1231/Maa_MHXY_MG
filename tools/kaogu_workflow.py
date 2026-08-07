@@ -431,6 +431,27 @@ class KaoguWorkflow:
                         "reason": "本轮考古已经购买或尝试购买过洛阳铲，不再自动购买",
                     }
                 status = decision["status"]
+            if (
+                status == "tool_selection_idle"
+                and self.purchase_guard is not None
+                and self.purchase_guard.is_reserved()
+            ):
+                # The current skin can show a purchased LuoYang shovel as an
+                # icon-only first slot. Its identity is bounded by the recent
+                # single-purchase reservation, the recognized tool dialog,
+                # and the visible Use control; do not apply this fallback to
+                # arbitrary tool dialogs.
+                decision = {
+                    "status": "select_shovel",
+                    "box": [
+                        round(scene.image_size[0] * 0.30),
+                        round(scene.image_size[1] * 0.34),
+                        max(1, round(scene.image_size[0] * 0.075)),
+                        max(1, round(scene.image_size[1] * 0.10)),
+                    ],
+                    "reason": "recent_purchase_first_tool_slot",
+                }
+                status = decision["status"]
             context.emit(
                 "scene",
                 step=step,
