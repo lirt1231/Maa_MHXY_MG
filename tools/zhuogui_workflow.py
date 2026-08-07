@@ -2,31 +2,24 @@
 
 from __future__ import annotations
 
-import math
 import time
 from dataclasses import dataclass
 from typing import Callable, Protocol
 
 try:
     from .automation_actions import (
-        ActionContext,
         ActionMetrics,
-        ActionResult,
-        AtomicAction,
     )
-    from .automation_geometry import relative_point
     from .automation_workflows import WorkflowContext, WorkflowResult
     from .zhuogui_domain import RuntimeBudget, round_completion_action
+    from .zhuogui_atomic_actions import AdjustTargetLevelAction, ZhuoguiEvidenceClickAction, level_drag_end
 except ImportError:  # Direct execution through tools/run_zhuogui_macos.py.
     from automation_actions import (
-        ActionContext,
         ActionMetrics,
-        ActionResult,
-        AtomicAction,
     )
-    from automation_geometry import relative_point
     from automation_workflows import WorkflowContext, WorkflowResult
     from zhuogui_domain import RuntimeBudget, round_completion_action
+    from zhuogui_atomic_actions import AdjustTargetLevelAction, ZhuoguiEvidenceClickAction, level_drag_end
 
 
 MAX_TARGET_LEVEL_SWIPES = 64
@@ -64,32 +57,6 @@ class WorkflowState:
     last_ghost_progress: int | None = None
 
 
-def level_drag_end(current_level: int, target_level: int) -> float:
-    difference = current_level - target_level
-    if difference == 0:
-        raise ValueError("current level already matches target")
-    if difference > 0:
-        return 0.75 if difference > 15 else 0.45
-    return 0.10 if difference < -15 else 0.34
-
-
-def _point(value, image_size):
-    if not isinstance(value, (list, tuple)) or len(value) != 2:
-        return None
-    x, y = value
-    width, height = image_size
-    if not all(
-        isinstance(item, (int, float))
-        and not isinstance(item, bool)
-        and math.isfinite(item)
-        for item in (x, y, width, height)
-    ):
-        return None
-    if width <= 0 or height <= 0 or not (0 <= x < width and 0 <= y < height):
-        return None
-    return x, y
-
-
 def _box_center(box):
     if not isinstance(box, (list, tuple)) or len(box) != 4:
         return None
@@ -97,56 +64,6 @@ def _box_center(box):
     if width <= 0 or height <= 0:
         return None
     return x + width / 2, y + height / 2
-
-
-class ZhuoguiClickAction(AtomicAction):
-    name = "zhuogui_evidence_click"
-    statuses = frozenset(("click",))
-
-    def execute(self, context: ActionContext) -> ActionResult:
-        point = _point(context.decision.get("point"), context.scene.image_size)
-        if point is None:
-            raise RuntimeError(
-                f"{context.decision.get('reason', '捉鬼动作')} 缺少经过识别的点击位置"
-            )
-        context.input.click(point, context.scene, str(context.decision["reason"]))
-        result = ActionResult(self.name, "click", 1, clicks=1)
-        context.emit(
-            "action_completed",
-            action=str(context.decision.get("semantic", self.name)),
-            task=context.task_label,
-            decision="click",
-            clicks=1,
-            drags=0,
-        )
-        return result
-
-
-class AdjustTargetLevelAction(AtomicAction):
-    name = "adjust_zhuogui_minimum_level"
-    statuses = frozenset(("adjust_level",))
-
-    def execute(self, context: ActionContext) -> ActionResult:
-        current = context.decision.get("current_level")
-        target = context.decision.get("target_level")
-        if not isinstance(current, int) or not isinstance(target, int):
-            raise RuntimeError("调整捉鬼最低等级缺少可靠等级证据")
-        end_y = level_drag_end(current, target)
-        start = relative_point((0.623, 0.38), context.scene.image_size)
-        end = relative_point((0.623, end_y), context.scene.image_size)
-        context.input.drag(start, end, context.scene, f"调整最低等级至{target}")
-        result = ActionResult(self.name, "adjust_level", 1, drags=1)
-        context.emit(
-            "action_completed",
-            action=self.name,
-            task=context.task_label,
-            decision="adjust_level",
-            currentLevel=current,
-            targetLevel=target,
-            clicks=0,
-            drags=1,
-        )
-        return result
 
 
 @dataclass(frozen=True)
@@ -175,7 +92,7 @@ class ZhuoguiWorkflow:
             max_rebuilds=self.max_rebuilds,
         )
         metrics = ActionMetrics()
-        click_action = ZhuoguiClickAction()
+        click_action = ZhuoguiEvidenceClickAction()
         level_action = AdjustTargetLevelAction()
 
         def click(point, scene, reason, semantic, *, box=False):
