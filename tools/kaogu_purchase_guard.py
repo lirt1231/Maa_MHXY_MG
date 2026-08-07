@@ -42,7 +42,7 @@ class FilePurchaseGuard:
             marker.flush()
             os.fsync(marker.fileno())
 
-    def reset_if_owner_exited(self) -> bool:
+    def reset_if_owner_exited(self, *, minimum_age_seconds: float = 300.0) -> bool:
         """Release a reservation left by an exited runner process.
 
         A marker only protects one live automation run. Retaining it forever
@@ -54,13 +54,19 @@ class FilePurchaseGuard:
             pid = payload.get("pid")
             if not isinstance(pid, int) or pid <= 0:
                 return False
+            reserved_at = datetime.fromisoformat(payload.get("reserved_at", ""))
+            if reserved_at.tzinfo is None:
+                return False
+            age_seconds = (datetime.now(timezone.utc) - reserved_at).total_seconds()
+            if age_seconds < minimum_age_seconds:
+                return False
             os.kill(pid, 0)
         except FileNotFoundError:
             return False
         except ProcessLookupError:
             self.release()
             return True
-        except (OSError, json.JSONDecodeError):
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
             # An unreadable marker cannot prove that another live task owns
             # the purchase slot, so preserve it for a manual safety stop.
             return False

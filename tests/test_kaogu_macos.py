@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
@@ -1853,7 +1854,15 @@ class FilePurchaseGuardTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             marker = FilePurchaseGuard(Path(directory) / "purchase.json")
             marker.path.write_text(
-                json.dumps({"task_id": "kaogu", "pid": 999_999_999}),
+                json.dumps(
+                    {
+                        "task_id": "kaogu",
+                        "pid": 999_999_999,
+                        "reserved_at": (
+                            datetime.now(timezone.utc) - timedelta(minutes=6)
+                        ).isoformat(),
+                    }
+                ),
                 encoding="utf-8",
             )
 
@@ -1864,7 +1873,30 @@ class FilePurchaseGuardTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             marker = FilePurchaseGuard(Path(directory) / "purchase.json")
             marker.path.write_text(
-                json.dumps({"task_id": "kaogu", "pid": os.getpid()}),
+                json.dumps(
+                    {
+                        "task_id": "kaogu",
+                        "pid": os.getpid(),
+                        "reserved_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            self.assertFalse(marker.reset_if_owner_exited())
+            self.assertTrue(marker.is_reserved())
+
+    def test_recent_exited_owner_reservation_remains_protected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            marker = FilePurchaseGuard(Path(directory) / "purchase.json")
+            marker.path.write_text(
+                json.dumps(
+                    {
+                        "task_id": "kaogu",
+                        "pid": 999_999_999,
+                        "reserved_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                ),
                 encoding="utf-8",
             )
 
