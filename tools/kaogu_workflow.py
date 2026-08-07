@@ -20,6 +20,7 @@ try:
         WorkflowResult,
     )
     from .kaogu_recognition import classify_kaogu_scene
+    from .kaogu_atomic_actions import archaeology_actions, dig_archaeology_site_action, purchase_shovel_action
 except ImportError:  # Direct execution through a platform runner.
     from automation_actions import (
         ActionMetrics,
@@ -35,6 +36,7 @@ except ImportError:  # Direct execution through a platform runner.
         WorkflowResult,
     )
     from kaogu_recognition import classify_kaogu_scene
+    from kaogu_atomic_actions import archaeology_actions, dig_archaeology_site_action, purchase_shovel_action
 
 
 KAOGU_TEMPLATES = {
@@ -269,26 +271,7 @@ class KaoguWorkflow:
         start_pathing_polls = 0
         purchase_verify_polls = 0
 
-        actions = {
-            status: EvidenceClickAction(
-                name=f"kaogu_{status}",
-                statuses=(status,),
-                reason=(
-                    "开始考古并前往挖掘地点"
-                    if status == "start_archaeology"
-                    else f"考古流程：{status}"
-                ),
-                wait_seconds=(
-                    1.8
-                    if status == "start_archaeology"
-                    else 2.0 if status == "close_sale_shop" else 1.0
-                ),
-                repeat_limit=limit,
-                repeat_error=f"考古步骤 {status} 重复达到上限，已安全停止",
-                signature_factory=lambda action_context: action_context.decision_status,
-            )
-            for status, limit in self.action_limits.items()
-        }
+        actions = archaeology_actions(self.action_limits, normalize_drags=self.inventory_normalize_drags, scan_drags=self.max_inventory_scan_drags)
         actions["expand_menu"] = EvidenceThenRelativeClickAction(
             name="open_skills_from_main_menu",
             statuses=("expand_menu",),
@@ -300,53 +283,11 @@ class KaoguWorkflow:
             repeat_limit=self.action_limits["expand_menu"],
             repeat_error="主界面快捷菜单打开失败，已安全停止",
         )
-        buy_shovel = EvidenceClickAction(
-            name="buy_archaeology_shovel",
-            statuses=("buy_shovel",),
-            reason="购买一个洛阳铲",
-            wait_seconds=1.8,
-            repeat_limit=self.max_purchases,
-            repeat_error="洛阳铲购买已达到一次上限，已停止以避免重复购买",
-            signature_factory=lambda action_context: action_context.decision_status,
-        )
-        dig = EvidenceClickAction(
-            name="dig_archaeology_site",
-            statuses=("dig",),
-            reason=lambda _action_context: f"进行第 {digs + 1} 次挖掘",
-            wait_seconds=0.0,
-            repeat_limit=self.max_dig_attempts_per_round,
-            repeat_error="本次挖掘按钮连续点击仍未进入结算，已安全停止",
-            signature_factory=lambda action_context: action_context.decision_status,
-        )
-        activate_antique = EvidenceDoubleClickAction(
-            name="activate_non_genuine_antique",
-            statuses=("activate_antique",),
-            reason="双击非真品古董并启动自动寻路",
-            click_interval_seconds=0.12,
-            wait_seconds=1.0,
-            repeat_limit=1,
-            repeat_error="古董已双击一次，未确认页面变化前不会重复双击",
-        )
-        normalize_inventory = RelativeDragAction(
-            name="normalize_antique_inventory",
-            statuses=("normalize_inventory",),
-            start_ratio=(0.71, 0.31),
-            end_ratio=(0.71, 0.62),
-            reason="将包裹物品列表下拉到顶部",
-            wait_seconds=0.6,
-            repeat_limit=self.inventory_normalize_drags,
-            repeat_error="包裹归顶动作达到上限，已安全停止",
-        )
-        scan_inventory = RelativeDragAction(
-            name="scan_antique_inventory",
-            statuses=("scan_inventory",),
-            start_ratio=(0.71, 0.64),
-            end_ratio=(0.71, 0.50),
-            reason="继续浏览包裹中的非真品古董",
-            wait_seconds=0.5,
-            repeat_limit=self.max_inventory_scan_drags,
-            repeat_error="已浏览完整包裹但未找到非真品古董，保留现场待确认",
-        )
+        buy_shovel = purchase_shovel_action(self.max_purchases)
+        dig = dig_archaeology_site_action(self.max_dig_attempts_per_round, lambda: digs + 1)
+        activate_antique = actions["activate_antique"]
+        normalize_inventory = actions["normalize_inventory"]
+        scan_inventory = actions["scan_inventory"]
 
         def result(status: str) -> WorkflowResult:
             if (
