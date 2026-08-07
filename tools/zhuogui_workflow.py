@@ -12,14 +12,27 @@ try:
     )
     from .automation_workflows import WorkflowContext, WorkflowResult
     from .zhuogui_domain import RuntimeBudget, round_completion_action
-    from .zhuogui_atomic_actions import AdjustTargetLevelAction, ZhuoguiEvidenceClickAction, level_drag_end
+    from .zhuogui_atomic_actions import (
+        AdjustTargetLevelAction,
+        ZhuoguiEvidenceClickAction,
+        level_drag_end,
+    )
 except ImportError:  # Direct execution through tools/run_zhuogui_macos.py.
     from automation_actions import (
         ActionMetrics,
     )
     from automation_workflows import WorkflowContext, WorkflowResult
     from zhuogui_domain import RuntimeBudget, round_completion_action
-    from zhuogui_atomic_actions import AdjustTargetLevelAction, ZhuoguiEvidenceClickAction, level_drag_end
+    from zhuogui_atomic_actions import (
+        AdjustTargetLevelAction,
+        ZhuoguiEvidenceClickAction,
+        level_drag_end,
+    )
+
+
+# Compatibility export for existing platform runners; new code uses the
+# explicit ZhuoguiEvidenceClickAction name from the atomic-action module.
+ZhuoguiClickAction = ZhuoguiEvidenceClickAction
 
 
 MAX_TARGET_LEVEL_SWIPES = 64
