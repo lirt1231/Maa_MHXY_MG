@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
 try:
-    from .automation_actions import ActionBudget, ActionMetrics, EvidenceClickAction
+    from .automation_actions import ActionBudget, ActionMetrics
     from .automation_workflows import (
         WorkflowContext,
         WorkflowInspection,
@@ -15,9 +15,14 @@ try:
     )
     from .daily_activity_actions import DailyActivityActions
     from .daily_workflow_common import DAILY_TASK_TEMPLATES
+    from .game_atomic_actions import (
+        ContinueTrackedTaskAction,
+        EnterDungeonStageAction,
+        StartDungeonChallengeAction,
+    )
     from .mijingxiangyao_recognition import classify_mijingxiangyao_scene
 except ImportError:  # Direct execution through a platform runner.
-    from automation_actions import ActionBudget, ActionMetrics, EvidenceClickAction
+    from automation_actions import ActionBudget, ActionMetrics
     from automation_workflows import (
         WorkflowContext,
         WorkflowInspection,
@@ -26,6 +31,11 @@ except ImportError:  # Direct execution through a platform runner.
     )
     from daily_activity_actions import DailyActivityActions
     from daily_workflow_common import DAILY_TASK_TEMPLATES
+    from game_atomic_actions import (
+        ContinueTrackedTaskAction,
+        EnterDungeonStageAction,
+        StartDungeonChallengeAction,
+    )
     from mijingxiangyao_recognition import classify_mijingxiangyao_scene
 
 
@@ -111,40 +121,31 @@ class MijingxiangyaoWorkflow:
             )
 
         task_actions = {
-            "continue_task": EvidenceClickAction(
-                name="continue_mijingxiangyao_task",
-                statuses=("continue_task",),
-                reason="继续秘境降妖",
+            "continue_task": ContinueTrackedTaskAction(
+                "秘境降妖",
                 wait_seconds=self.continue_task_delay_seconds,
                 budget=navigation_budget,
                 repeat_limit=self.continue_task_repeat_limit,
                 signature_factory=battle_signature,
             ),
-            "enter_dungeon": EvidenceClickAction(
-                name="enter_mijingxiangyao_dungeon",
-                statuses=("enter_dungeon",),
+            "enter_dungeon": EnterDungeonStageAction(
+                status="enter_dungeon",
                 reason="进入秘境降妖",
                 wait_seconds=2.0,
                 budget=navigation_budget,
                 signature_factory=battle_signature,
             ),
-            "start_challenge": EvidenceClickAction(
-                name="start_mijingxiangyao_challenge",
-                statuses=("start_challenge",),
-                reason="开始秘境挑战",
-                wait_seconds=1.0,
+            "start_challenge": StartDungeonChallengeAction(
                 signature_factory=battle_signature,
             ),
-            "select_stage": EvidenceClickAction(
-                name="select_mijingxiangyao_stage",
-                statuses=("select_stage",),
+            "select_stage": EnterDungeonStageAction(
+                status="select_stage",
                 reason="选择秘境关卡",
                 wait_seconds=1.0,
                 signature_factory=battle_signature,
             ),
-            "enter_battle": EvidenceClickAction(
-                name="enter_mijingxiangyao_battle",
-                statuses=("enter_battle",),
+            "enter_battle": EnterDungeonStageAction(
+                status="enter_battle",
                 reason="进入秘境战斗",
                 wait_seconds=1.0,
                 signature_factory=battle_signature,

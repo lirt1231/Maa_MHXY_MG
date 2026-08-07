@@ -11,6 +11,11 @@ try:
         EvidenceClickAction,
     )
     from .daily_activity_scroll import DailyActivityScrollAction
+    from .game_atomic_actions import (
+        JoinIdentifiedActivityAction,
+        OpenActivityCenterAction,
+        SelectActivityTabAction,
+    )
 except ImportError:  # Direct execution through tools/run_*.py.
     from automation_actions import (
         ActionBudget,
@@ -20,6 +25,11 @@ except ImportError:  # Direct execution through tools/run_*.py.
         EvidenceClickAction,
     )
     from daily_activity_scroll import DailyActivityScrollAction
+    from game_atomic_actions import (
+        JoinIdentifiedActivityAction,
+        OpenActivityCenterAction,
+        SelectActivityTabAction,
+    )
 
 
 class ScrollDailyActivitiesAction(AtomicAction):
@@ -84,27 +94,9 @@ class DailyActivityActions:
         )
         self.scroll = ScrollDailyActivitiesAction(budget=self.budget)
         self.actions: dict[str, AtomicAction] = {
-            "open_activity": EvidenceClickAction(
-                name="open_activity",
-                statuses=("open_activity",),
-                reason="打开活动面板",
-                wait_seconds=1.0,
-                budget=self.budget,
-            ),
-            "open_daily": EvidenceClickAction(
-                name="open_daily_activity_tab",
-                statuses=("open_daily",),
-                reason="打开日常活动页签",
-                wait_seconds=2.0,
-                budget=self.budget,
-            ),
-            "join_task": EvidenceClickAction(
-                name="join_daily_activity",
-                statuses=("join_task",),
-                reason=lambda context: f"参加{context.task_label}",
-                wait_seconds=2.0,
-                budget=self.budget,
-            ),
+            "open_activity": OpenActivityCenterAction(budget=self.budget),
+            "open_daily": SelectActivityTabAction(budget=self.budget),
+            "join_task": JoinIdentifiedActivityAction(budget=self.budget),
             "scroll_daily": self.scroll,
         }
 

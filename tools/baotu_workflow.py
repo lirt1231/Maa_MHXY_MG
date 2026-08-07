@@ -12,7 +12,7 @@ TASK_ENTRY_TRANSITION_STATUSES = frozenset(
 )
 
 try:
-    from .automation_actions import ActionMetrics, EvidenceClickAction
+    from .automation_actions import ActionMetrics
     from .automation_workflows import (
         WorkflowContext,
         WorkflowInspection,
@@ -26,8 +26,9 @@ try:
         GameDrivenTaskMonitor,
         StableMainCompletionTracker,
     )
+    from .game_atomic_actions import AcceptIdentifiedDialogueAction
 except ImportError:  # Direct execution through a platform runner.
-    from automation_actions import ActionMetrics, EvidenceClickAction
+    from automation_actions import ActionMetrics
     from automation_workflows import (
         WorkflowContext,
         WorkflowInspection,
@@ -41,6 +42,7 @@ except ImportError:  # Direct execution through a platform runner.
         GameDrivenTaskMonitor,
         StableMainCompletionTracker,
     )
+    from game_atomic_actions import AcceptIdentifiedDialogueAction
 
 
 @dataclass(frozen=True)
@@ -68,12 +70,7 @@ class BaotuWorkflow:
             max_unknown_polls=12,
         )
         completion_tracker = StableMainCompletionTracker()
-        accept_dialogue = EvidenceClickAction(
-            name="accept_baotu_dialogue",
-            statuses=("accept_dialogue",),
-            reason="接受宝图任务对话",
-            wait_seconds=1.0,
-        )
+        accept_dialogue = AcceptIdentifiedDialogueAction("宝图任务", wait_seconds=1.0)
 
         for step in range(1, self.max_steps + 1):
             scene = context.runtime.read_scene(DAILY_TASK_TEMPLATES)

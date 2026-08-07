@@ -20,6 +20,7 @@ try:
         GameDrivenTaskMonitor,
         StableMainCompletionTracker,
     )
+    from .game_atomic_actions import ContinueTrackedTaskAction
 except ImportError:  # Direct execution through a platform runner.
     from automation_actions import ActionBudget, ActionMetrics, EvidenceClickAction
     from automation_workflows import (
@@ -35,6 +36,7 @@ except ImportError:  # Direct execution through a platform runner.
         GameDrivenTaskMonitor,
         StableMainCompletionTracker,
     )
+    from game_atomic_actions import ContinueTrackedTaskAction
 
 
 @dataclass(frozen=True)
@@ -85,10 +87,8 @@ class ShimenWorkflow:
             repeat_limit=2,
             repeat_error="师门领取入口点击后页面仍未变化，已安全停止",
         )
-        continue_task = EvidenceClickAction(
-            name="continue_shimen_task",
-            statuses=("continue_task",),
-            reason="继续右侧师门任务",
+        continue_task = ContinueTrackedTaskAction(
+            "右侧师门任务",
             wait_seconds=7.0,
             budget=task_budget,
             repeat_limit=self.max_task_clicks,

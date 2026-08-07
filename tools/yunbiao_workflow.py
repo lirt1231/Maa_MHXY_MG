@@ -8,8 +8,6 @@ from typing import Any, Callable, Mapping
 try:
     from .automation_actions import (
         ActionMetrics,
-        ContinueSidebarTaskAction,
-        EvidenceClickAction,
     )
     from .automation_workflows import (
         WorkflowContext,
@@ -19,12 +17,15 @@ try:
     )
     from .daily_activity_actions import DailyActivityActions
     from .daily_workflow_common import DAILY_TASK_TEMPLATES
+    from .game_atomic_actions import (
+        ConfirmEscortAction,
+        ContinueTrackedTaskAction,
+        SelectEscortModeAction,
+    )
     from .yunbiao_recognition import classify_yunbiao_scene
 except ImportError:  # Direct execution through a platform runner.
     from automation_actions import (
         ActionMetrics,
-        ContinueSidebarTaskAction,
-        EvidenceClickAction,
     )
     from automation_workflows import (
         WorkflowContext,
@@ -34,6 +35,11 @@ except ImportError:  # Direct execution through a platform runner.
     )
     from daily_activity_actions import DailyActivityActions
     from daily_workflow_common import DAILY_TASK_TEMPLATES
+    from game_atomic_actions import (
+        ConfirmEscortAction,
+        ContinueTrackedTaskAction,
+        SelectEscortModeAction,
+    )
     from yunbiao_recognition import classify_yunbiao_scene
 
 
@@ -67,26 +73,14 @@ class YunbiaoWorkflow:
         unknown_polls = 0
         confirmed_final_main_polls = 0
         daily_actions = DailyActivityActions("普通运镖")
-        continue_task = ContinueSidebarTaskAction("普通运镖任务", wait_seconds=2.0)
-        select_normal = EvidenceClickAction(
-            name="select_ordinary_escort",
-            statuses=("select_normal",),
-            reason="选择押送普通镖银",
-            wait_seconds=1.0,
-            repeat_limit=1,
-            repeat_error="普通镖选项点击后页面未变化，已安全停止",
+        continue_task = ContinueTrackedTaskAction("普通运镖任务", wait_seconds=2.0)
+        select_normal = SelectEscortModeAction(
             signature_factory=lambda action_context: (
                 accepted_rounds + 1,
                 tuple(action_context.decision["box"]),
             ),
         )
-        confirm_normal = EvidenceClickAction(
-            name="confirm_ordinary_escort",
-            statuses=("confirm_normal",),
-            reason="确认押送普通镖银",
-            wait_seconds=2.0,
-            repeat_limit=3,
-        )
+        confirm_normal = ConfirmEscortAction()
 
         for step in range(1, self.max_steps + 1):
             scene = context.runtime.read_scene(DAILY_TASK_TEMPLATES)
