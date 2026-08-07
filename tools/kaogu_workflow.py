@@ -723,6 +723,7 @@ class KaoguWorkflow:
                     for batch_status in (
                         "open_inventory_for_sale",
                         "organize_inventory",
+                        "use_antique",
                         "select_sale_antique",
                         "sell_antique",
                         "cancel_genuine_sale",
