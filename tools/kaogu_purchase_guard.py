@@ -42,7 +42,7 @@ class FilePurchaseGuard:
             marker.flush()
             os.fsync(marker.fileno())
 
-    def reset_if_owner_exited(self, *, minimum_age_seconds: float = 300.0) -> bool:
+    def reset_if_owner_exited(self, *, minimum_age_seconds: float = 1800.0) -> bool:
         """Release a reservation left by an exited runner process.
 
         A marker only protects one live automation run. Retaining it forever

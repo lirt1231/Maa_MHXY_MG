@@ -1908,7 +1908,7 @@ class FilePurchaseGuardTests(unittest.TestCase):
                         "task_id": "kaogu",
                         "pid": 999_999_999,
                         "reserved_at": (
-                            datetime.now(timezone.utc) - timedelta(minutes=6)
+                            datetime.now(timezone.utc) - timedelta(minutes=31)
                         ).isoformat(),
                     }
                 ),
