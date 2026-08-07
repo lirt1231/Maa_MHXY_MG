@@ -168,7 +168,8 @@ def next_kaogu_phase(status: str, phase: str) -> str:
         "select_shovel": "tool_select",
         "use_shovel": "tool_ready",
         "start_archaeology": "digging",
-        "dig": "digging",
+    "dig": "digging",
+    "dig_confirmed_on_main": "enter",
         "close_temporary_bag": phase,
         "open_inventory_for_sale": "sale_inventory_normalize",
         "normalize_inventory": phase,
@@ -500,6 +501,44 @@ class KaoguWorkflow:
                         if digs >= self.target_digs
                         else "digging"
                     )
+                context.waiter.wait(0.8)
+                continue
+            if status == "dig_confirmed_on_main":
+                if not pending_dig:
+                    raise RuntimeError(
+                        "主界面收获消息未关联本次挖掘，已安全停止并保留现场"
+                    )
+                digs += 1
+                pending_dig = False
+                pending_dig_attempts = 0
+                pending_dig_polls = 0
+                dig.reset_repetition()
+                context.emit(
+                    "dig_confirmed",
+                    digs=digs,
+                    targetDigs=self.target_digs,
+                    evidence="main_screen_personal_receipt",
+                )
+                if digs >= self.target_digs:
+                    phase = "sale_wait_main"
+                else:
+                    # The client has closed the panel after an evidenced
+                    # completion. Restart only identity-checked navigation;
+                    # the one-purchase guard is deliberately not reset.
+                    for navigation_status in (
+                        "expand_menu",
+                        "open_skills",
+                        "open_auxiliary",
+                        "open_archaeology",
+                        "open_production",
+                        "switch_tier",
+                        "open_tool_selection",
+                        "select_shovel",
+                        "use_shovel",
+                        "start_archaeology",
+                    ):
+                        actions[navigation_status].reset_repetition()
+                    phase = "enter"
                 context.waiter.wait(0.8)
                 continue
             if status == "start_transition_main":

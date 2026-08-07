@@ -370,6 +370,18 @@ def classify_kaogu_scene(
     if archaeology_settlement:
         return {"status": "dig_confirmed", "reason": "archaeology_settlement"}
 
+    # On some client builds the excavation panel closes immediately after a
+    # successful dig. The personal-channel receipt is then the only remaining
+    # completion signal on the returned main screen. It is intentionally
+    # accepted only in the active digging phase; the workflow additionally
+    # requires a pending, evidence-backed dig click before it increments.
+    archaeology_main_receipt = find_items(
+        texts,
+        r".*(?:个人|系统).*你获得了?\d*个.*",
+        image_size,
+        {"max_x": 0.32, "min_y": 0.82},
+    )
+
     archaeology_transition = find_items(
         texts,
         r".*考古中[.。…]*.*",
@@ -488,6 +500,11 @@ def classify_kaogu_scene(
         and settled_main_task
         and settled_main_team
     ):
+        if archaeology_main_receipt:
+            return {
+                "status": "dig_confirmed_on_main",
+                "reason": "archaeology_main_receipt",
+            }
         # Starting archaeology normally replaces this page with the right-side
         # excavation panel. A confirmed return to the main screen means that
         # transition did not become observable, so leave recovery policy to

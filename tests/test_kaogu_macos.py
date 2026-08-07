@@ -195,6 +195,29 @@ class KaoguSceneTests(unittest.TestCase):
             {"status": "start_transition_main", "box": [1206, 637, 44, 42]},
         )
 
+    def test_main_screen_personal_receipt_confirms_pending_dig(self):
+        main = scene(
+            [
+                text("福利", (15, 129, 33, 16)),
+                text("任务", (1100, 80, 45, 25)),
+                text("队伍", (1190, 95, 45, 25)),
+                text("个人你获得了1个战国山字镜", (8, 676, 235, 20)),
+            ],
+            {"menu_plus": (1206, 637, 44, 42)},
+        )
+
+        decision = classify_kaogu_scene(
+            main.texts, main.templates, IMAGE_SIZE, phase="digging"
+        )
+
+        self.assertEqual(
+            decision,
+            {
+                "status": "dig_confirmed_on_main",
+                "reason": "archaeology_main_receipt",
+            },
+        )
+
     def test_sale_flow_opens_inventory_and_activates_only_known_antique(self):
         main, inventory = sale_flow_scenes()[:2]
 
