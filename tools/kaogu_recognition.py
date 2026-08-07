@@ -826,7 +826,7 @@ def classify_kaogu_scene(
     )
     auxiliary_labels = find_items(
         texts,
-        r"^辅助$",
+        r"^辅(?:助)?$",
         image_size,
         {"min_x": 0.82, "min_y": 0.55, "max_y": 0.9},
     )
