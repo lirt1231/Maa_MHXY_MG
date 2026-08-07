@@ -12,6 +12,7 @@ from typing import Any, Mapping, Sequence
 RESOURCE_FIELDS = frozenset(
     {"level", "experience", "experience_required", "gold", "silver"}
 )
+YIELD_FIELDS = frozenset({"experience", "gold", "silver"})
 SNAPSHOT_PHASES = frozenset({"before", "after", "standalone"})
 SNAPSHOT_STATUSES = frozenset({"success", "partial", "failed"})
 FIELD_STATUSES = frozenset({"captured", "missing", "invalid", "corrected"})
@@ -142,6 +143,7 @@ class ResourceSnapshot:
     character_id: str | None = None
     snapshot_id: int | None = None
     error: str | None = None
+    captured_fields: frozenset[str] = RESOURCE_FIELDS
 
     def __post_init__(self) -> None:
         if not isinstance(self.target_id, str) or not TARGET_ID_RE.fullmatch(
@@ -165,6 +167,10 @@ class ResourceSnapshot:
             raise ValueError("资源快照编号无效")
         if self.error is not None and not isinstance(self.error, str):
             raise ValueError("资源快照错误信息无效")
+        if not isinstance(self.captured_fields, frozenset) or not self.captured_fields or (
+            self.captured_fields - RESOURCE_FIELDS
+        ):
+            raise ValueError("资源快照采集范围无效")
 
         evidence = dict(self.evidence)
         if set(evidence) - RESOURCE_FIELDS or not all(
@@ -179,9 +185,9 @@ class ResourceSnapshot:
                 raise ValueError("缺失或无效的资源字段不能携带数值")
         object.__setattr__(self, "evidence", evidence)
 
-        present = sum(value is not None for value in values.values())
+        present = sum(values[name] is not None for name in self.captured_fields)
         expected_status = (
-            "success" if present == len(RESOURCE_FIELDS) else "partial" if present else "failed"
+            "success" if present == len(self.captured_fields) else "partial" if present else "failed"
         )
         if self.status is not None and self.status not in SNAPSHOT_STATUSES:
             raise ValueError("资源快照状态无效")
@@ -212,6 +218,7 @@ class ResourceSnapshot:
                 name: item.to_payload() for name, item in self.evidence.items()
             },
             "error": self.error,
+            "capturedFields": sorted(self.captured_fields),
         }
 
 
@@ -225,12 +232,17 @@ class ResourceYield:
     reasons: tuple[str, ...] = ()
     before_snapshot_id: int | None = None
     after_snapshot_id: int | None = None
+    tracked_fields: frozenset[str] = YIELD_FIELDS
 
     def __post_init__(self) -> None:
         if self.task_status not in TASK_STATUSES:
             raise ValueError("任务资源收益的任务状态无效")
         if self.attribution_status not in ATTRIBUTION_STATUSES:
             raise ValueError("任务资源收益归因状态无效")
+        if not isinstance(self.tracked_fields, frozenset) or not self.tracked_fields or (
+            self.tracked_fields - YIELD_FIELDS
+        ):
+            raise ValueError("任务资源收益统计范围无效")
         for name, value in {
             "experience_delta": self.experience_delta,
             "gold_delta": self.gold_delta,
@@ -252,13 +264,17 @@ class ResourceYield:
             not isinstance(reason, str) or not reason.strip() for reason in self.reasons
         ):
             raise ValueError("任务资源收益原因无效")
-        deltas = (self.experience_delta, self.gold_delta, self.silver_delta)
+        deltas = {
+            "experience": self.experience_delta,
+            "gold": self.gold_delta,
+            "silver": self.silver_delta,
+        }
         if self.attribution_status == "reliable" and any(
-            value is None for value in deltas
+            deltas[name] is None for name in self.tracked_fields
         ):
-            raise ValueError("可靠的任务资源收益必须包含全部差值")
+            raise ValueError("可靠的任务资源收益必须包含统计范围内的全部差值")
         if self.attribution_status in {"unavailable", "not_run"} and any(
-            value is not None for value in deltas
+            value is not None for value in deltas.values()
         ):
             raise ValueError("未采集或未执行的任务不能携带资源差值")
 
@@ -272,6 +288,7 @@ class ResourceYield:
             "goldDelta": self.gold_delta,
             "silverDelta": self.silver_delta,
             "reasons": list(self.reasons),
+            "trackedFields": sorted(self.tracked_fields),
         }
 
 
@@ -324,6 +341,7 @@ def calculate_resource_yield(
     task_status: str,
     level_requirements: Mapping[int, int] | None = None,
     interference_reasons: Sequence[str] = (),
+    tracked_fields: frozenset[str] = YIELD_FIELDS,
 ) -> ResourceYield:
     """Calculate auditable net changes without claiming gross task rewards."""
     if not isinstance(before, ResourceSnapshot):
@@ -336,12 +354,17 @@ def calculate_resource_yield(
         interference_reasons, Sequence
     ):
         raise ValueError("任务资源收益干扰原因无效")
+    if not isinstance(tracked_fields, frozenset) or not tracked_fields or (
+        tracked_fields - YIELD_FIELDS
+    ):
+        raise ValueError("任务资源收益统计范围无效")
     if task_status == "already_completed":
         return ResourceYield(
             task_status=task_status,
             attribution_status="not_run",
             reasons=("task_not_run",),
             before_snapshot_id=before.snapshot_id,
+            tracked_fields=tracked_fields,
         )
     if after is not None and not isinstance(after, ResourceSnapshot):
         raise ValueError("任务收益的执行后快照无效")
@@ -352,6 +375,7 @@ def calculate_resource_yield(
             reasons=("resource_snapshot_unavailable",),
             before_snapshot_id=before.snapshot_id,
             after_snapshot_id=None if after is None else after.snapshot_id,
+            tracked_fields=tracked_fields,
         )
     if before.captured_datetime > after.captured_datetime:
         raise ValueError("任务收益快照时间顺序无效")
@@ -372,15 +396,24 @@ def calculate_resource_yield(
             reasons=tuple(identity_reasons),
             before_snapshot_id=before.snapshot_id,
             after_snapshot_id=after.snapshot_id,
+            tracked_fields=tracked_fields,
         )
 
-    experience_delta, experience_reason = _experience_difference(
-        before.values,
-        after.values,
-        level_requirements or {},
+    experience_delta, experience_reason = (None, None)
+    if "experience" in tracked_fields:
+        experience_delta, experience_reason = _experience_difference(
+            before.values,
+            after.values,
+            level_requirements or {},
+        )
+    gold_delta = (
+        _difference(before.values.gold, after.values.gold)
+        if "gold" in tracked_fields else None
     )
-    gold_delta = _difference(before.values.gold, after.values.gold)
-    silver_delta = _difference(before.values.silver, after.values.silver)
+    silver_delta = (
+        _difference(before.values.silver, after.values.silver)
+        if "silver" in tracked_fields else None
+    )
     if any(not isinstance(reason, str) for reason in interference_reasons):
         raise ValueError("任务资源收益干扰原因无效")
     interferences = [reason.strip() for reason in interference_reasons if reason.strip()]
@@ -402,7 +435,11 @@ def calculate_resource_yield(
     elif (
         before.status != "success"
         or after.status != "success"
-        or None in (experience_delta, gold_delta, silver_delta)
+        or any({
+            "experience": experience_delta,
+            "gold": gold_delta,
+            "silver": silver_delta,
+        }[name] is None for name in tracked_fields)
     ):
         attribution_status = "partial"
     else:
@@ -417,6 +454,7 @@ def calculate_resource_yield(
         reasons=tuple(reasons),
         before_snapshot_id=before.snapshot_id,
         after_snapshot_id=after.snapshot_id,
+        tracked_fields=tracked_fields,
     )
 
 
@@ -424,6 +462,7 @@ __all__ = [
     "ATTRIBUTION_STATUSES",
     "FIELD_STATUSES",
     "RESOURCE_FIELDS",
+    "YIELD_FIELDS",
     "ResourceFieldEvidence",
     "ResourceSnapshot",
     "ResourceValues",

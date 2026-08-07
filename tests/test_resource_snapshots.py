@@ -187,6 +187,30 @@ class ResourceYieldCalculationTests(unittest.TestCase):
         self.assertEqual(result.gold_delta, 100)
         self.assertIsNone(result.silver_delta)
 
+    def test_silver_only_tracking_is_reliable_without_other_resource_fields(self):
+        before = ResourceSnapshot(
+            target_id="local-primary", character_id="character-1", phase="before",
+            captured_at=BEFORE_TIME, snapshot_id=1,
+            values=ResourceValues(silver=20000),
+            captured_fields=frozenset({"silver"}),
+        )
+        after = ResourceSnapshot(
+            target_id="local-primary", character_id="character-1", phase="after",
+            captured_at=AFTER_TIME, snapshot_id=2,
+            values=ResourceValues(silver=20750),
+            captured_fields=frozenset({"silver"}),
+        )
+
+        result = calculate_resource_yield(
+            before, after, task_status="completed", tracked_fields=frozenset({"silver"})
+        )
+
+        self.assertEqual(result.attribution_status, "reliable")
+        self.assertIsNone(result.experience_delta)
+        self.assertIsNone(result.gold_delta)
+        self.assertEqual(result.silver_delta, 750)
+        self.assertEqual(result.to_payload()["trackedFields"], ["silver"])
+
     def test_already_completed_is_not_a_zero_yield(self):
         result = calculate_resource_yield(
             snapshot(),

@@ -15,6 +15,7 @@ from tools.resource_snapshots import (
     ResourceFieldEvidence,
     ResourceSnapshot,
     ResourceValues,
+    YIELD_FIELDS,
     calculate_resource_yield,
 )
 
@@ -32,6 +33,13 @@ INSPECTION_TIMEOUT_SECONDS = 15.0
 RESULT_PREFIX = "result_json="
 HOME_RECOVERY_PREFIX = "home_recovery_json="
 RESOURCE_SNAPSHOT_PREFIX = "resource_snapshot_json="
+BEFORE_RESOURCE_CAPTURE_ATTEMPTS = 2
+RESOURCE_CAPTURE_FIELDS_BY_TASK = {
+    "kaogu": frozenset({"silver"}),
+}
+RESOURCE_YIELD_FIELDS_BY_TASK = {
+    "kaogu": frozenset({"silver"}),
+}
 TASK_SUCCESS_RESULTS = {"completed", "already_completed"}
 TASK_RESULT_STATUSES = TASK_SUCCESS_RESULTS | {"safe_stopped", "cancelled"}
 TASK_RESULT_NUMERIC_FIELDS = {
@@ -593,13 +601,17 @@ class RunnerManager:
         ]
 
     @staticmethod
-    def _resource_snapshot_command(phase: str) -> list[str]:
-        return [
+    def _resource_snapshot_command(task_id: str, phase: str) -> list[str]:
+        fields = RESOURCE_CAPTURE_FIELDS_BY_TASK.get(task_id)
+        command = [
             sys.executable,
             str(ROOT / "tools/run_resource_snapshot_macos.py"),
             "--phase",
             phase,
         ]
+        if fields is not None:
+            command.extend(("--fields", ",".join(sorted(fields))))
+        return command
 
     @staticmethod
     def _parse_resource_snapshot(
@@ -650,24 +662,34 @@ class RunnerManager:
                 evidence=evidence,
                 status=payload.get("status"),
                 error=payload.get("error"),
+                captured_fields=frozenset(payload.get("capturedFields") or {
+                    "level", "experience", "experience_required", "gold", "silver"
+                }),
             )
         except (TypeError, ValueError) as exc:
             raise RuntimeError("资源采集结果不符合快照契约") from exc
 
     @staticmethod
-    def _failed_resource_snapshot(phase: str, reason: str) -> ResourceSnapshot:
+    def _failed_resource_snapshot(
+        phase: str, reason: str, *, captured_fields: frozenset[str]
+    ) -> ResourceSnapshot:
         return ResourceSnapshot(
             target_id="local-primary",
             phase=phase,
             captured_at=utc_now(),
             values=ResourceValues(),
             error=reason,
+            captured_fields=captured_fields,
         )
 
     def _capture_resource_snapshot(
-        self, run: dict, phase: str
+        self, run: dict, phase: str, *, attempt: int = 1
     ) -> ResourceSnapshot | None:
         label = "任务前" if phase == "before" else "任务完成后"
+        captured_fields = RESOURCE_CAPTURE_FIELDS_BY_TASK.get(
+            run["taskId"],
+            frozenset({"level", "experience", "experience_required", "gold", "silver"}),
+        )
         output_lines: list[str] = []
         process = None
         try:
@@ -686,10 +708,10 @@ class RunnerManager:
                     )
                 self._emit(
                     "info", "resource", f"正在记录{label}的金币、银币和经验",
-                    {"phase": phase, "status": "running"},
+                {"phase": phase, "status": "running", "attempt": attempt},
                 )
                 self._process = subprocess.Popen(
-                    self._resource_snapshot_command(phase),
+                    self._resource_snapshot_command(run["taskId"], phase),
                     cwd=ROOT,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
@@ -721,7 +743,9 @@ class RunnerManager:
                     return None
                 if process is not None and self._process is process:
                     self._process = None
-            snapshot = self._failed_resource_snapshot(phase, str(exc))
+            snapshot = self._failed_resource_snapshot(
+                phase, str(exc), captured_fields=captured_fields
+            )
 
         stored = self.database.add_resource_snapshot(run["id"], snapshot)
         level = "info" if stored.status == "success" else "warning"
@@ -734,9 +758,30 @@ class RunnerManager:
             level,
             "resource",
             message,
-            {"phase": phase, "snapshot": stored.to_payload()},
+            {"phase": phase, "attempt": attempt, "snapshot": stored.to_payload()},
         )
         return stored
+
+    def _capture_before_resource_snapshot(self, run: dict) -> ResourceSnapshot | None:
+        """Retry one fully failed pre-task capture after its subprocess has restored state."""
+        snapshot = self._capture_resource_snapshot(run, "before")
+        if snapshot is None or snapshot.status != "failed":
+            return snapshot
+        with self._lock:
+            if self._stop_requested:
+                return None
+        self._emit(
+            "info",
+            "resource",
+            "任务前资源记录失败，正在重试一次",
+            {
+                "phase": "before",
+                "attempt": 2,
+                "maxAttempts": BEFORE_RESOURCE_CAPTURE_ATTEMPTS,
+                "reason": snapshot.error,
+            },
+        )
+        return self._capture_resource_snapshot(run, "before", attempt=2)
 
     def _store_resource_yield(
         self,
@@ -749,6 +794,9 @@ class RunnerManager:
             before,
             after,
             task_status=task_status,
+            tracked_fields=RESOURCE_YIELD_FIELDS_BY_TASK.get(
+                run["taskId"], YIELD_FIELDS
+            ),
         )
         stored = self.database.add_resource_yield(
             run["id"], run["taskId"], calculated
@@ -1194,7 +1242,7 @@ class RunnerManager:
         resource_yield_stored = False
         try:
             if self._resource_tracking:
-                before_snapshot = self._capture_resource_snapshot(run, "before")
+                before_snapshot = self._capture_before_resource_snapshot(run)
             command = self._command(run["taskId"], run["options"])
             with self._lock:
                 if self._stop_requested:

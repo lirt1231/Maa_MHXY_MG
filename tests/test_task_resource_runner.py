@@ -206,7 +206,7 @@ class TaskResourceRunnerTests(unittest.TestCase):
         self.assertEqual(current["resourceYield"]["attributionStatus"], "unavailable")
         self.assertIsNone(current["resourceYield"]["after"])
 
-    def test_failed_before_capture_does_not_block_task(self):
+    def test_failed_before_capture_retries_once_before_starting_task(self):
         processes = [
             snapshot_process(
                 "before",
@@ -218,6 +218,7 @@ class TaskResourceRunnerTests(unittest.TestCase):
                 silver=None,
                 error="当前页面无法安全返回主界面",
             ),
+            snapshot_process("before", captured_at="2026-08-05T02:00:05+00:00"),
             task_process(),
             recovery_process(),
             snapshot_process("after", captured_at="2026-08-05T02:10:00+00:00"),
@@ -226,8 +227,37 @@ class TaskResourceRunnerTests(unittest.TestCase):
             self.start()
             current = self.wait_for(lambda run: run["status"] == "succeeded")
 
-        self.assertEqual(popen.call_count, 4)
+        self.assertEqual(popen.call_count, 5)
+        self.assertEqual(current["resourceYield"]["attributionStatus"], "reliable")
+        self.assertTrue(all(
+            "--phase" in call.args[0] and "before" in call.args[0]
+            for call in popen.call_args_list[:2]
+        ))
+
+    def test_failed_before_capture_continues_after_one_retry(self):
+        failed = lambda captured_at: snapshot_process(
+            "before", captured_at=captured_at, level=None, experience=None,
+            experience_required=None, gold=None, silver=None,
+            error="等待包裹页面打开超时",
+        )
+        processes = [
+            failed("2026-08-05T02:00:00+00:00"),
+            failed("2026-08-05T02:00:05+00:00"),
+            task_process(),
+            recovery_process(),
+            snapshot_process("after", captured_at="2026-08-05T02:10:00+00:00"),
+        ]
+        with patch("dashboard.runner.subprocess.Popen", side_effect=processes) as popen:
+            self.start()
+            current = self.wait_for(lambda run: run["status"] == "succeeded")
+
+        self.assertEqual(popen.call_count, 5)
         self.assertEqual(current["resourceYield"]["attributionStatus"], "unavailable")
+
+    def test_kaogu_resource_snapshot_command_collects_only_silver(self):
+        command = self.manager._resource_snapshot_command("kaogu", "before")
+
+        self.assertEqual(command[-2:], ["--fields", "silver"])
 
     def test_stop_during_after_capture_cancels_capture_and_spawns_nothing_else(self):
         after = BlockingProcess()

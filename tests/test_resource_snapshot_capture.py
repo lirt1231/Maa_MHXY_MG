@@ -89,6 +89,33 @@ class ResourceSnapshotCaptureTests(unittest.TestCase):
         self.assertIsNone(snapshot.values.silver)
         self.assertEqual(snapshot.evidence["silver"].status, "missing")
 
+    def test_silver_only_capture_is_complete_for_its_declared_scope(self):
+        captured = {
+            "gold": None,
+            "silver": 20000,
+            "level": None,
+            "experience": None,
+            "experienceRequired": None,
+            "error": None,
+            "resourceEvidence": {
+                "silver": {
+                    "status": "captured", "sourcePage": "backpack",
+                    "rawText": "20.000", "confidence": None,
+                    "box": [350, 571, 88, 19], "frameId": "frame-1",
+                },
+            },
+        }
+        with patch(
+            "tools.run_resource_snapshot_macos.capture_visible_metrics",
+            return_value=captured,
+        ) as capture:
+            snapshot = build_snapshot("before", captured_fields=frozenset({"silver"}))
+
+        capture.assert_called_once_with(captured_fields=frozenset({"silver"}))
+        self.assertEqual(snapshot.status, "success")
+        self.assertEqual(snapshot.captured_fields, frozenset({"silver"}))
+        self.assertEqual(snapshot.values.silver, 20000)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -120,6 +120,7 @@ class Database:
                     experience_required INTEGER,
                     gold INTEGER,
                     silver INTEGER,
+                    captured_fields_json TEXT NOT NULL DEFAULT '["experience","experience_required","gold","level","silver"]',
                     evidence_json TEXT NOT NULL DEFAULT '{}',
                     error TEXT,
                     FOREIGN KEY(run_id) REFERENCES task_runs(id)
@@ -136,6 +137,7 @@ class Database:
                     experience_delta INTEGER,
                     gold_delta INTEGER,
                     silver_delta INTEGER,
+                    tracked_fields_json TEXT NOT NULL DEFAULT '["experience","gold","silver"]',
                     reasons_json TEXT NOT NULL DEFAULT '[]',
                     calculation_version INTEGER NOT NULL DEFAULT 1,
                     created_at TEXT NOT NULL,
@@ -156,6 +158,22 @@ class Database:
                 db.execute("ALTER TABLE task_runs ADD COLUMN home_recovery_json TEXT")
             if "failure_phase" not in columns:
                 db.execute("ALTER TABLE task_runs ADD COLUMN failure_phase TEXT")
+            resource_snapshot_columns = {
+                row["name"] for row in db.execute("PRAGMA table_info(resource_snapshots)")
+            }
+            if "captured_fields_json" not in resource_snapshot_columns:
+                db.execute(
+                    "ALTER TABLE resource_snapshots ADD COLUMN captured_fields_json "
+                    "TEXT NOT NULL DEFAULT '[\"experience\",\"experience_required\",\"gold\",\"level\",\"silver\"]'"
+                )
+            resource_yield_columns = {
+                row["name"] for row in db.execute("PRAGMA table_info(task_resource_yields)")
+            }
+            if "tracked_fields_json" not in resource_yield_columns:
+                db.execute(
+                    "ALTER TABLE task_resource_yields ADD COLUMN tracked_fields_json "
+                    "TEXT NOT NULL DEFAULT '[\"experience\",\"gold\",\"silver\"]'"
+                )
             game_data_columns = {
                 row["name"]
                 for row in db.execute("PRAGMA table_info(game_data_snapshots)")
@@ -310,8 +328,8 @@ class Database:
                 """INSERT INTO resource_snapshots(
                 run_id, target_id, character_id, phase, captured_at, status,
                 level, experience, experience_required, gold, silver,
-                evidence_json, error
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                captured_fields_json, evidence_json, error
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     run_id,
                     snapshot.target_id,
@@ -324,6 +342,7 @@ class Database:
                     values.experience_required,
                     values.gold,
                     values.silver,
+                    json.dumps(sorted(snapshot.captured_fields), ensure_ascii=False),
                     evidence_json,
                     snapshot.error,
                 ),
@@ -349,8 +368,8 @@ class Database:
                 """INSERT INTO task_resource_yields(
                 run_id, task_id, before_snapshot_id, after_snapshot_id,
                 task_status, attribution_status, experience_delta, gold_delta,
-                silver_delta, reasons_json, calculation_version, created_at
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,1,?)
+                silver_delta, tracked_fields_json, reasons_json, calculation_version, created_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,1,?)
                 ON CONFLICT(run_id) DO UPDATE SET
                     task_id=excluded.task_id,
                     before_snapshot_id=excluded.before_snapshot_id,
@@ -360,6 +379,7 @@ class Database:
                     experience_delta=excluded.experience_delta,
                     gold_delta=excluded.gold_delta,
                     silver_delta=excluded.silver_delta,
+                    tracked_fields_json=excluded.tracked_fields_json,
                     reasons_json=excluded.reasons_json,
                     calculation_version=excluded.calculation_version,
                     created_at=excluded.created_at""",
@@ -373,6 +393,7 @@ class Database:
                     resource_yield.experience_delta,
                     resource_yield.gold_delta,
                     resource_yield.silver_delta,
+                    json.dumps(sorted(resource_yield.tracked_fields), ensure_ascii=False),
                     reasons_json,
                     utc_now(),
                 ),
@@ -997,6 +1018,7 @@ class Database:
             },
             "evidence": json.loads(row["evidence_json"]),
             "error": row["error"],
+            "capturedFields": json.loads(row["captured_fields_json"]),
         }
 
     @classmethod
@@ -1021,6 +1043,7 @@ class Database:
             "experienceDelta": row["experience_delta"],
             "goldDelta": row["gold_delta"],
             "silverDelta": row["silver_delta"],
+            "trackedFields": json.loads(row["tracked_fields_json"]),
             "reasons": json.loads(row["reasons_json"]),
             "calculationVersion": row["calculation_version"],
             "createdAt": row["created_at"],

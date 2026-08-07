@@ -121,6 +121,7 @@ export type ResourceSnapshot = {
   };
   evidence: Record<string, unknown>;
   error?: string | null;
+  capturedFields?: ("level" | "experience" | "experience_required" | "gold" | "silver")[];
 };
 
 export type TaskResourceYield = {
@@ -132,6 +133,7 @@ export type TaskResourceYield = {
   goldDelta: number | null;
   silverDelta: number | null;
   reasons: string[];
+  trackedFields?: TaskYieldMetric[];
   calculationVersion: number;
   createdAt: string;
   before: ResourceSnapshot;

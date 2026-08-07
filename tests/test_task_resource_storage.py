@@ -81,6 +81,7 @@ class TaskResourceStorageTests(unittest.TestCase):
         self.assertEqual(stored["experienceDelta"], 350)
         self.assertEqual(stored["goldDelta"], 120)
         self.assertEqual(stored["silverDelta"], -200)
+        self.assertEqual(stored["trackedFields"], ["experience", "gold", "silver"])
         self.assertEqual(stored["before"]["values"]["gold"], 10000)
         self.assertEqual(stored["after"]["values"]["silver"], 19800)
         self.assertEqual(run["benefitStatus"], "reliable")

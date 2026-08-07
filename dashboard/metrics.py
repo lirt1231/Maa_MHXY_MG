@@ -14,6 +14,9 @@ from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 OCR_SIZE = (1020, 718)
+RESOURCE_CAPTURE_FIELDS = frozenset(
+    {"level", "experience", "experience_required", "gold", "silver"}
+)
 
 
 def parse_number(value: str) -> int | None:
@@ -222,7 +225,14 @@ def _close_panel(native_input) -> None:
     time.sleep(1)
 
 
-def _wait_for(tasker, window_id: int, predicate, timeout: float = 8) -> tuple[np.ndarray, list[dict]]:
+def _wait_for(
+    tasker,
+    window_id: int,
+    predicate,
+    timeout: float = 8,
+    *,
+    step: str = "游戏页面切换",
+) -> tuple[np.ndarray, list[dict]]:
     deadline = time.monotonic() + timeout
     last_image, last_results = None, []
     while time.monotonic() < deadline:
@@ -231,7 +241,7 @@ def _wait_for(tasker, window_id: int, predicate, timeout: float = 8) -> tuple[np
         if predicate(last_results):
             return last_image, last_results
         time.sleep(0.6)
-    raise RuntimeError("游戏页面切换超时，请确认窗口完整可见且当前不在战斗中")
+    raise RuntimeError(f"{step}超时，请确认窗口完整可见且当前不在战斗中")
 
 
 def _wait_for_stable_values(
@@ -269,7 +279,13 @@ def _field_evidence(item: dict | None, source_page: str, frame_id: str) -> dict:
 
 def _ensure_main(tasker, native_input, window_id: int) -> list[dict]:
     for _ in range(4):
-        _, results = _wait_for(tasker, window_id, lambda value: bool(value), timeout=4)
+        _, results = _wait_for(
+            tasker,
+            window_id,
+            lambda value: bool(value),
+            timeout=4,
+            step="等待游戏画面",
+        )
         if _is_main(results):
             return results
         if _is_profile(results) or _is_backpack(results):
@@ -289,7 +305,13 @@ def _restore_known_resource_panel(tasker, native_input, window_id: int) -> bool:
         if not (_is_backpack(results) or _is_profile(results)):
             return False
         _close_panel(native_input)
-        _wait_for(tasker, window_id, _is_main, timeout=6)
+        _wait_for(
+            tasker,
+            window_id,
+            _is_main,
+            timeout=6,
+            step="等待关闭资源面板后主界面恢复",
+        )
         return True
     except Exception:
         return False
@@ -312,8 +334,14 @@ def _resolve_game_window(toolkit, native_input_class):
     return window_id, native_input
 
 
-def capture_visible_metrics() -> dict:
+def capture_visible_metrics(
+    *, captured_fields: frozenset[str] = RESOURCE_CAPTURE_FIELDS,
+) -> dict:
     """Capture stable currencies and experience, then restore the main page."""
+    if not isinstance(captured_fields, frozenset) or not captured_fields or (
+        captured_fields - RESOURCE_CAPTURE_FIELDS
+    ):
+        raise ValueError("资源采集范围无效")
     from maa.controller import MacOSController, MaaMacOSInputMethodEnum, MaaMacOSScreencapMethodEnum
     from maa.resource import Resource
     from maa.tasker import Tasker
@@ -339,66 +367,93 @@ def capture_visible_metrics() -> dict:
 
     try:
         main_results = _ensure_main(tasker, native_input, window_id)
-        if not _click_text(native_input, main_results, "包裹", min_y=500):
-            # The fixed bag icon is used only after cross-region main-screen OCR.
-            native_input.click(985, 630, OCR_SIZE)
-        _, bag_results = _wait_for(tasker, window_id, _is_backpack)
-        try:
-            bag_image, bag_results, currencies = _wait_for_stable_values(
+        currencies = {"gold": None, "silver": None, "goldItem": None, "silverItem": None}
+        bag_results, bag_image = [], None
+        if captured_fields & {"gold", "silver"}:
+            if not _click_text(native_input, main_results, "包裹", min_y=500):
+                # The fixed bag icon is used only after cross-region main-screen OCR.
+                native_input.click(985, 630, OCR_SIZE)
+            _, bag_results = _wait_for(
                 tasker,
                 window_id,
-                parse_backpack_resources,
-                ("gold", "silver"),
-                bag_results,
+                _is_backpack,
+                step="等待包裹页面打开",
             )
-        finally:
-            _close_panel(native_input)
+            try:
+                bag_image, bag_results, currencies = _wait_for_stable_values(
+                    tasker,
+                    window_id,
+                    parse_backpack_resources,
+                    tuple(field for field in ("gold", "silver") if field in captured_fields),
+                    bag_results,
+                )
+            finally:
+                _close_panel(native_input)
+            _wait_for(
+                tasker,
+                window_id,
+                _is_main,
+                step="等待关闭包裹后主界面恢复",
+            )
 
-        _wait_for(tasker, window_id, _is_main)
-        native_input.click(978, 55, OCR_SIZE)
-        _, profile_results = _wait_for(tasker, window_id, _is_profile)
-        try:
-            profile_image, profile_results, profile = _wait_for_stable_values(
+        profile = {"level": None, "experience": None, "experienceRequired": None, "levelItem": None, "experienceItem": None}
+        profile_results, profile_image = [], None
+        if captured_fields & {"level", "experience", "experience_required"}:
+            native_input.click(978, 55, OCR_SIZE)
+            _, profile_results = _wait_for(
                 tasker,
                 window_id,
-                parse_profile_resources,
-                ("level", "experience", "experienceRequired"),
-                profile_results,
+                _is_profile,
+                step="等待人物属性页面打开",
             )
-        finally:
-            _close_panel(native_input)
-        _wait_for(tasker, window_id, _is_main)
+            try:
+                profile_image, profile_results, profile = _wait_for_stable_values(
+                    tasker,
+                    window_id,
+                    parse_profile_resources,
+                    tuple(
+                        field
+                        for field in ("level", "experience", "experienceRequired")
+                        if field.replace("Required", "_required") in captured_fields
+                    ),
+                    profile_results,
+                )
+            finally:
+                _close_panel(native_input)
+            _wait_for(
+                tasker,
+                window_id,
+                _is_main,
+                step="等待关闭人物属性后主界面恢复",
+            )
     finally:
         _restore_known_resource_panel(tasker, native_input, window_id)
 
     raw_text = "背包：" + " | ".join(item["text"] for item in bag_results)
     raw_text += "\n人物属性：" + " | ".join(item["text"] for item in profile_results)
-    bag_frame_id = hashlib.sha256(bag_image.tobytes()).hexdigest()
-    profile_frame_id = hashlib.sha256(profile_image.tobytes()).hexdigest()
+    bag_frame_id = None if bag_image is None else hashlib.sha256(bag_image.tobytes()).hexdigest()
+    profile_frame_id = None if profile_image is None else hashlib.sha256(profile_image.tobytes()).hexdigest()
     values = {
-        "gold": currencies["gold"],
-        "silver": currencies["silver"],
-        "level": profile["level"],
-        "experience": profile["experience"],
-        "experienceRequired": profile["experienceRequired"],
+        "gold": currencies["gold"] if "gold" in captured_fields else None,
+        "silver": currencies["silver"] if "silver" in captured_fields else None,
+        "level": profile["level"] if "level" in captured_fields else None,
+        "experience": profile["experience"] if "experience" in captured_fields else None,
+        "experienceRequired": profile["experienceRequired"] if "experience_required" in captured_fields else None,
     }
-    captured_count = sum(value is not None for value in values.values())
-    status = "success" if captured_count == len(values) else "partial" if captured_count else "failed"
-    missing = [name for name, value in values.items() if value is None]
+    external_names = {
+        "level": "level", "experience": "experience", "experience_required": "experienceRequired",
+        "gold": "gold", "silver": "silver",
+    }
+    missing = [name for name, key in external_names.items() if name in captured_fields and values[key] is None]
     return {
         **values,
         "rawText": raw_text,
-        "status": status,
         "error": f"未能识别字段：{', '.join(missing)}" if missing else None,
         "resourceEvidence": {
-            "gold": _field_evidence(currencies["goldItem"], "backpack", bag_frame_id),
-            "silver": _field_evidence(currencies["silverItem"], "backpack", bag_frame_id),
-            "level": _field_evidence(profile["levelItem"], "character_profile", profile_frame_id),
-            "experience": _field_evidence(
-                profile["experienceItem"], "character_profile", profile_frame_id
-            ),
-            "experience_required": _field_evidence(
-                profile["experienceItem"], "character_profile", profile_frame_id
-            ),
+            **({"gold": _field_evidence(currencies["goldItem"], "backpack", bag_frame_id)} if "gold" in captured_fields else {}),
+            **({"silver": _field_evidence(currencies["silverItem"], "backpack", bag_frame_id)} if "silver" in captured_fields else {}),
+            **({"level": _field_evidence(profile["levelItem"], "character_profile", profile_frame_id)} if "level" in captured_fields else {}),
+            **({"experience": _field_evidence(profile["experienceItem"], "character_profile", profile_frame_id)} if "experience" in captured_fields else {}),
+            **({"experience_required": _field_evidence(profile["experienceItem"], "character_profile", profile_frame_id)} if "experience_required" in captured_fields else {}),
         },
     }
