@@ -15,9 +15,14 @@ from tools.fixed_game_controls import (
     REFERENCE_SIZE,
 )
 from tools.resource_panel_actions import (
+    CaptureExperience,
+    CaptureWallet,
     CloseStandardPanelAction,
     OpenBackpackAction,
     OpenCharacterProfileAction,
+    parse_backpack_resources,
+    parse_number,
+    parse_profile_resources,
 )
 
 
@@ -30,18 +35,6 @@ PROFILE_ENTRY_POINT = OpenCharacterProfileAction().control.point
 RESOURCE_CAPTURE_FIELDS = frozenset(
     {"level", "experience", "experience_required", "gold", "silver"}
 )
-
-
-def parse_number(value: str) -> int | None:
-    normalized = str(value or "").translate(str.maketrans("０１２３４５６７８９", "0123456789"))
-    match = re.search(r"-?\d[\d,，.]*", normalized)
-    if not match:
-        return None
-    digits = re.sub(r"[,，.]", "", match.group(0))
-    try:
-        return int(digits)
-    except ValueError:
-        return None
 
 
 def parse_visible_metrics(texts: Iterable[str]) -> dict:
@@ -65,71 +58,8 @@ def parse_visible_metrics(texts: Iterable[str]) -> dict:
     return result
 
 
-def parse_backpack_resources(results: list[dict]) -> dict:
-    """Read the two fixed currency slots in the normalized bag footer."""
-    candidates: list[tuple[float, dict, int]] = []
-    for item in results:
-        x, y, width, _ = item["box"]
-        text = re.sub(r"\s+", "", item["text"])
-        center_x = x + width / 2
-        if not 565 <= y <= 640 or not re.fullmatch(r"\d[\d,，.]*", text):
-            continue
-        value = parse_number(text)
-        if value is not None:
-            candidates.append((center_x, item, value))
-
-    def in_slot(left: float, right: float, target: float):
-        matches = [item for item in candidates if left <= item[0] < right]
-        return min(matches, key=lambda item: abs(item[0] - target)) if matches else None
-
-    gold = in_slot(120, 300, 210)
-    silver = in_slot(300, 520, 395)
-    return {
-        "gold": None if gold is None else gold[2],
-        "silver": None if silver is None else silver[2],
-        "goldItem": None if gold is None else gold[1],
-        "silverItem": None if silver is None else silver[1],
-    }
-
-
 def parse_backpack_gold(results: list[dict]) -> int | None:
     return parse_backpack_resources(results)["gold"]
-
-
-def parse_profile_resources(results: list[dict]) -> dict:
-    level = None
-    experience = None
-    required = None
-    level_item = None
-    experience_item = None
-    for item in results:
-        text = re.sub(r"\s+", "", item["text"])
-        if "级" in text:
-            match = re.search(r"(\d+)级", text)
-            if match:
-                digits = match.group(1)
-                for width in (3, 2, 1):
-                    if len(digits) >= width:
-                        candidate = int(digits[-width:])
-                        if 20 <= candidate <= 200:
-                            level = candidate
-                            level_item = item
-                            break
-        x, y, _, _ = item["box"]
-        fraction = re.fullmatch(r"(\d[\d,，.]*)/(\d[\d,，.]*)", text)
-        if fraction and y >= 500 and x >= 450:
-            numerator = parse_number(fraction.group(1))
-            denominator = parse_number(fraction.group(2))
-            if numerator is not None and denominator is not None and numerator >= 10000:
-                experience, required = numerator, denominator
-                experience_item = item
-    return {
-        "level": level,
-        "experience": experience,
-        "experienceRequired": required,
-        "levelItem": level_item,
-        "experienceItem": experience_item,
-    }
 
 
 def parse_profile_metrics(results: list[dict]) -> dict:
@@ -369,6 +299,7 @@ def capture_visible_metrics(
 
     try:
         main_results = _ensure_main(tasker, native_input, window_id)
+        wallet = CaptureWallet()
         currencies = {"gold": None, "silver": None, "goldItem": None, "silverItem": None}
         bag_results, bag_image = [], None
         if captured_fields & {"gold", "silver"}:
@@ -387,7 +318,7 @@ def capture_visible_metrics(
                 bag_image, bag_results, currencies = _wait_for_stable_values(
                     tasker,
                     window_id,
-                    parse_backpack_resources,
+                    wallet.capture,
                     tuple(field for field in ("gold", "silver") if field in captured_fields),
                     bag_results,
                 )
@@ -400,6 +331,7 @@ def capture_visible_metrics(
                 step="等待关闭包裹后主界面恢复",
             )
 
+        experience_capture = CaptureExperience()
         profile = {"level": None, "experience": None, "experienceRequired": None, "levelItem": None, "experienceItem": None}
         profile_results, profile_image = [], None
         if captured_fields & {"level", "experience", "experience_required"}:
@@ -414,7 +346,7 @@ def capture_visible_metrics(
                 profile_image, profile_results, profile = _wait_for_stable_values(
                     tasker,
                     window_id,
-                    parse_profile_resources,
+                    experience_capture.capture,
                     tuple(
                         field
                         for field in ("level", "experience", "experienceRequired")
