@@ -1,6 +1,6 @@
 # 游戏原子操作规划
 
-状态：第一批动态活动操作已实现（2026-08-07）。`OpenActivityCenter`、`SelectActivityTab`、`JoinIdentifiedActivity`、`AcceptIdentifiedDialogue`、`ContinueTrackedTask`、普通运镖确认和秘境进入/挑战已落在 `tools/game_atomic_actions.py`，并已迁移宝图、师门、普通运镖、秘境及趣闻鉴赏共享的活动导航。固定主界面、资源快照、答题、队伍、福利和考古操作仍待迁移。
+状态：两批低风险操作已实现（2026-08-07）。`OpenActivityCenter`、`SelectActivityTab`、`JoinIdentifiedActivity`、`AcceptIdentifiedDialogue`、`ContinueTrackedTask`、普通运镖确认、秘境进入/挑战、福利入口/确认、帮派福利/分红及趣闻点赞/刷新已落在 `tools/game_atomic_actions.py`，并迁移到对应工作流。固定主界面、资源快照、答题、队伍、刮卡和考古操作仍待迁移。
 
 ## 边界
 
