@@ -1,6 +1,6 @@
 # 游戏原子操作规划
 
-状态：两批低风险操作已实现（2026-08-07）。`OpenActivityCenter`、`SelectActivityTab`、`JoinIdentifiedActivity`、`AcceptIdentifiedDialogue`、`ContinueTrackedTask`、普通运镖确认、秘境进入/挑战、福利入口/确认、帮派福利/分红及趣闻点赞/刷新已落在 `tools/game_atomic_actions.py`，并迁移到对应工作流。固定主界面、资源快照、答题、队伍、刮卡和考古操作仍待迁移。
+状态：两批低风险操作已实现（2026-08-07）。`OpenActivityCenter`、`SelectActivityTab`、`JoinIdentifiedActivity`、`AcceptIdentifiedDialogue`、`ContinueTrackedTask`、普通运镖确认、秘境进入/挑战、福利入口/确认、帮派福利/分红及趣闻点赞/刷新已落在 `tools/game_atomic_actions.py`，并迁移到对应工作流。答题和刮卡已有独立原子实现：`AnswerOptionClickAction` 统一三界奇缘/科举的答案选择，`ScratchWelfareCardAction` 处理有界刮卡。固定主界面、资源快照、队伍和考古操作仍待迁移。
 
 ## 边界
 
