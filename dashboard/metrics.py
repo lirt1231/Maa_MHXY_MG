@@ -12,17 +12,17 @@ import numpy as np
 from PIL import Image
 
 from tools.fixed_game_controls import (
-    CLOSE_STANDARD_PANEL,
-    OPEN_BACKPACK,
-    OPEN_CHARACTER_PROFILE,
     REFERENCE_SIZE,
+)
+from tools.resource_panel_actions import (
+    CloseStandardPanelAction,
+    OpenBackpackAction,
+    OpenCharacterProfileAction,
 )
 
 
 ROOT = Path(__file__).resolve().parents[1]
 OCR_SIZE = REFERENCE_SIZE
-BACKPACK_ENTRY_POINT = OPEN_BACKPACK.point
-PROFILE_ENTRY_POINT = OPEN_CHARACTER_PROFILE.point
 RESOURCE_CAPTURE_FIELDS = frozenset(
     {"level", "experience", "experience_required", "gold", "silver"}
 )
@@ -219,8 +219,7 @@ def _is_profile(results: list[dict]) -> bool:
 
 
 def _close_panel(native_input) -> None:
-    # Standard bag/profile panels share this close-button position at the normalized macOS layout.
-    native_input.click(*CLOSE_STANDARD_PANEL.point, OCR_SIZE)
+    CloseStandardPanelAction().execute(native_input, confirmed_scene="standard_panel")
     time.sleep(1)
 
 
@@ -373,7 +372,7 @@ def capture_visible_metrics(
             # location is mapped from OCR_SIZE by NativeMacOSInput, so OCR is
             # reserved for the changing currency values rather than click
             # placement.
-            native_input.click(*BACKPACK_ENTRY_POINT, OCR_SIZE)
+            OpenBackpackAction().execute(native_input, confirmed_scene="main_screen")
             _, bag_results = _wait_for(
                 tasker,
                 window_id,
@@ -400,7 +399,7 @@ def capture_visible_metrics(
         profile = {"level": None, "experience": None, "experienceRequired": None, "levelItem": None, "experienceItem": None}
         profile_results, profile_image = [], None
         if captured_fields & {"level", "experience", "experience_required"}:
-            native_input.click(*PROFILE_ENTRY_POINT, OCR_SIZE)
+            OpenCharacterProfileAction().execute(native_input, confirmed_scene="main_screen")
             _, profile_results = _wait_for(
                 tasker,
                 window_id,
