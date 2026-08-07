@@ -40,6 +40,9 @@ RESOURCE_CAPTURE_FIELDS_BY_TASK = {
 RESOURCE_YIELD_FIELDS_BY_TASK = {
     "kaogu": frozenset({"silver"}),
 }
+# 宝图任务领取后由游戏自动推进，当前没有可归因的角色资源变化。
+# 跳过边界快照与收益记录，而不是将未发生的变化写成 0。
+RESOURCE_TRACKING_DISABLED_TASKS = frozenset({"baotu"})
 TASK_SUCCESS_RESULTS = {"completed", "already_completed"}
 TASK_RESULT_STATUSES = TASK_SUCCESS_RESULTS | {"safe_stopped", "cancelled"}
 TASK_RESULT_NUMERIC_FIELDS = {
@@ -612,6 +615,9 @@ class RunnerManager:
         if fields is not None:
             command.extend(("--fields", ",".join(sorted(fields))))
         return command
+
+    def _tracks_task_resources(self, task_id: str) -> bool:
+        return self._resource_tracking and task_id not in RESOURCE_TRACKING_DISABLED_TASKS
 
     @staticmethod
     def _parse_resource_snapshot(
@@ -1241,7 +1247,7 @@ class RunnerManager:
         after_snapshot = None
         resource_yield_stored = False
         try:
-            if self._resource_tracking:
+            if self._tracks_task_resources(run["taskId"]):
                 before_snapshot = self._capture_before_resource_snapshot(run)
             command = self._command(run["taskId"], run["options"])
             with self._lock:
@@ -1379,7 +1385,7 @@ class RunnerManager:
                                 failure_phase = None
                                 run["homeRecovery"] = home_recovery
                                 if (
-                                    self._resource_tracking
+                                    self._tracks_task_resources(run["taskId"])
                                     and task_result["status"] == "completed"
                                 ):
                                     after_snapshot = self._capture_resource_snapshot(
@@ -1419,7 +1425,7 @@ class RunnerManager:
         finally:
             try:
                 if (
-                    self._resource_tracking
+                    self._tracks_task_resources(run["taskId"])
                     and before_snapshot is not None
                     and not resource_yield_stored
                 ):

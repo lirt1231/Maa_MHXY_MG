@@ -82,13 +82,17 @@ def snapshot_process(
     ])
 
 
-def task_process(status="completed"):
-    payload = {
-        "task_id": "sanjieqiyuan",
-        "status": status,
-        "questions": 10,
-        "clicks": 10,
-    }
+def task_process(status="completed", *, task_id="sanjieqiyuan"):
+    payload = (
+        {"task_id": task_id, "status": status, "actions": 2, "clicks": 2}
+        if task_id == "baotu"
+        else {
+            "task_id": task_id,
+            "status": status,
+            "questions": 10,
+            "clicks": 10,
+        }
+    )
     if status == "safe_stopped":
         payload = {
             "task_id": "sanjieqiyuan",
@@ -150,6 +154,9 @@ class TaskResourceRunnerTests(unittest.TestCase):
             "sanjieqiyuan", {}, checklist_confirmed=True
         )
 
+    def start_baotu(self):
+        return self.manager.start("baotu", {}, checklist_confirmed=True)
+
     def test_completed_task_records_before_after_and_net_changes(self):
         processes = [
             snapshot_process("before", captured_at="2026-08-05T02:00:00+00:00"),
@@ -192,6 +199,20 @@ class TaskResourceRunnerTests(unittest.TestCase):
         self.assertEqual(current["resourceYield"]["attributionStatus"], "not_run")
         self.assertIsNone(current["resourceYield"]["after"])
         self.assertIsNone(current["resourceYield"]["goldDelta"])
+
+    def test_baotu_skips_resource_snapshots_and_yield_recording(self):
+        processes = [task_process(task_id="baotu"), recovery_process()]
+        with patch("dashboard.runner.subprocess.Popen", side_effect=processes) as popen:
+            self.start_baotu()
+            current = self.wait_for(lambda run: run["status"] == "succeeded")
+
+        self.assertEqual(popen.call_count, 2)
+        self.assertTrue(all(
+            not any("run_resource_snapshot_macos.py" in part for part in call.args[0])
+            for call in popen.call_args_list
+        ))
+        self.assertIsNone(current["resourceYield"])
+        self.assertIsNone(self.database.recent_runs(1)[0]["resourceYield"])
 
     def test_safe_stop_never_captures_after(self):
         processes = [
