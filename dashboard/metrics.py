@@ -23,6 +23,10 @@ from tools.resource_panel_actions import (
 
 ROOT = Path(__file__).resolve().parents[1]
 OCR_SIZE = REFERENCE_SIZE
+# Compatibility exports for callers that inspect the calibrated fixed controls.
+# Input is performed exclusively through the semantic actions below.
+BACKPACK_ENTRY_POINT = OpenBackpackAction().control.point
+PROFILE_ENTRY_POINT = OpenCharacterProfileAction().control.point
 RESOURCE_CAPTURE_FIELDS = frozenset(
     {"level", "experience", "experience_required", "gold", "silver"}
 )
