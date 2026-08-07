@@ -384,6 +384,20 @@ class LegacyMacOSWindowBackend:
             scale = signature.pixel_scale
             pixel_width = signature.content_rect[2]
             pixel_height = signature.content_rect[3]
+            # `screencapture` reports backing pixels, while CGWindow bounds
+            # can switch coordinate spaces when the window crosses displays.
+            # Prefer a larger integral ratio derived from both observations if
+            # it puts the captured content back inside this exact window.
+            inferred_scale = pixel_width / window_width
+            rounded_scale = round(inferred_scale)
+            if (
+                rounded_scale > scale
+                and abs(inferred_scale - rounded_scale) <= 0.03
+            ):
+                inferred_height = pixel_height / rounded_scale
+                title_bar_height = window_height - inferred_height
+                if -2 <= title_bar_height <= MACOS_TITLE_BAR_HEIGHT_POINTS + 8:
+                    scale = float(rounded_scale)
         else:
             pixel_width, pixel_height = signature.image_size
             scale = pixel_width / window_width

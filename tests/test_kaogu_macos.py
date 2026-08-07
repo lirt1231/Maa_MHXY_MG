@@ -514,10 +514,11 @@ class KaoguSceneTests(unittest.TestCase):
             {"status": "wait_for_busy_task", "reason": "运镖任务"},
         )
 
-    def test_right_side_active_task_blocks_archaeology_before_any_navigation(self):
+    def test_right_side_task_offer_does_not_block_archaeology_navigation(self):
         decision = classify_kaogu_scene(
             [
                 text("师门任务", (827, 137, 78, 25)),
+                text("领取今天师门任务", (828, 164, 134, 19)),
                 text("任务", (869, 98, 42, 23)),
                 text("队伍", (966, 97, 49, 23)),
             ],
@@ -527,7 +528,7 @@ class KaoguSceneTests(unittest.TestCase):
 
         self.assertEqual(
             decision,
-            {"status": "wait_for_busy_task", "reason": "师门任务"},
+            {"status": "expand_menu", "box": [979, 663, 28, 35]},
         )
 
     def test_expanded_menu_stops_before_reclicking_false_plus_match(self):

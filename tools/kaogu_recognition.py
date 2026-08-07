@@ -349,7 +349,7 @@ def classify_kaogu_scene(
         texts,
         r".*(?:运镖|捉鬼|师门|宝图)任务.*",
         image_size,
-        {"min_x": 0.2, "min_y": 0.15, "max_y": 0.75},
+        {"min_x": 0.2, "max_x": 0.75, "min_y": 0.15, "max_y": 0.75},
     )
     if busy_tasks:
         return {

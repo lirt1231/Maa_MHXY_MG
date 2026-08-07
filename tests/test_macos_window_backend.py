@@ -182,6 +182,26 @@ class LegacyMacOSWindowBackendTests(unittest.TestCase):
         self.assertEqual(captured.content_rect_points, (100.0, -22.0, 1020.0, 718.0))
         self.assertEqual(captured.scale_factor, 2.0)
 
+    def test_system_frame_infers_larger_window_coordinate_scale_when_needed(self):
+        current = frame(
+            source="system",
+            source_size=(2238, 1776),
+            content_rect=(68, 100, 2064, 1560),
+            pixel_scale=2.0,
+        )
+        backend, _native = self.backend(
+            current,
+            geometry=(-1531.0, -70.0, 516.0, 402.0, 77),
+        )
+
+        captured = backend.capture(Mock())
+
+        self.assertEqual(captured.scale_factor, 4.0)
+        self.assertEqual(
+            captured.content_rect_points,
+            (-1531.0, -58.0, 516.0, 390.0),
+        )
+
     def test_transient_capture_geometry_mismatch_is_recaptured_before_use(self):
         mismatched = frame(
             source="system",
