@@ -684,6 +684,63 @@ class HybridAnswerTests(unittest.TestCase):
         self.assertEqual(recognizer.last_answer, "A")
         self.assertEqual(recognizer.last_options["A"], "泥鳅")
 
+    def test_huishi_recognizer_answers_reasoned_model_guess_without_evidence(self):
+        """Timed 会试 must not inherit 乡试's strict-evidence stop behavior."""
+        recognizer = object.__new__(keju_hybrid.KejuHybridAnswer)
+        image = np.ones((720, 923, 3), dtype=np.uint8)
+        context = SimpleNamespace(get_node_data=lambda _name: {"attach": {}})
+        option_results = iter([
+            ("A.甲", [340, 315, 225, 80]),
+            ("B.乙", [570, 315, 230, 80]),
+            ("C.丙", [340, 395, 225, 75]),
+            ("D.丁", [570, 395, 230, 75]),
+        ])
+
+        with (
+            patch.dict("os.environ", {
+                "MAA_KEJU_EXAM_TYPE": "huishi",
+                "MAA_KEJU_RECOGNIZE_ONLY": "1",
+                "MAA_KEJU_API_KEY": "test-key",
+                "MAA_KEJU_URL": "https://example.test/v1/chat/completions",
+                "MAA_KEJU_MODEL": "test-model",
+                "MAA_KEJU_WEB_SEARCH_ENABLED": "0",
+            }),
+            patch.object(
+                keju_hybrid,
+                "_ocr_region",
+                side_effect=[
+                    "科举会试",
+                    "第3/20题剩余时间20冷门会试题",
+                ],
+            ),
+            patch.object(
+                keju_hybrid,
+                "_ocr_region_with_box",
+                side_effect=lambda *_args: next(option_results),
+            ),
+            patch.object(keju_hybrid, "search_candidates", return_value=[]),
+            patch.object(keju_hybrid, "search_knowledge", return_value=[]),
+            patch.object(
+                keju_hybrid,
+                "_request_model",
+                return_value=json.dumps({
+                    "answer": "C",
+                    "confidence": 0.35,
+                    "evidence_ids": [],
+                    "reason": "无检索证据，根据题意低置信度选择 C。",
+                }),
+            ),
+        ):
+            recognizer._analyze(
+                context,
+                SimpleNamespace(image=image),
+                keju_hybrid._StageTimings(),
+            )
+
+        self.assertEqual(recognizer.last_status, "ready")
+        self.assertEqual(recognizer.last_answer, "C")
+        self.assertEqual(recognizer.last_source, "huishi_forced_model_guess")
+
     def test_recognizer_preserves_raw_round_metadata_after_cleaning_question(self):
         recognizer = object.__new__(keju_hybrid.KejuHybridAnswer)
         image = np.ones((720, 923, 3), dtype=np.uint8)
