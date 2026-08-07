@@ -477,7 +477,7 @@ def classify_kaogu_scene(
         {"min_x": 0.82, "min_y": 0.05, "max_y": 0.3},
     )
     if (
-        phase == "digging"
+        phase in {"digging", "tool_select"}
         and settled_menu_plus
         and settled_main_task
         and settled_main_team

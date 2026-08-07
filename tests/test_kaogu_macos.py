@@ -159,6 +159,23 @@ class KaoguSceneTests(unittest.TestCase):
     def test_dig_keeps_workflow_in_digging_phase(self):
         self.assertEqual(next_kaogu_phase("dig", "enter"), "digging")
 
+    def test_main_screen_after_shop_replays_navigation_to_tool_selection(self):
+        main = scene(
+            [
+                text("福利", (15, 129, 33, 16)),
+                text("任务", (1100, 80, 45, 25)),
+                text("队伍", (1190, 95, 45, 25)),
+            ],
+            {"menu_plus": (1206, 637, 44, 42)},
+        )
+
+        decision = classify_kaogu_scene(
+            main.texts, main.templates, IMAGE_SIZE, phase="tool_select"
+        )
+
+        self.assertEqual(decision["status"], "expand_menu")
+        self.assertEqual(decision["box"], [1206, 637, 44, 42])
+
     def test_sale_flow_opens_inventory_and_activates_only_known_antique(self):
         main, inventory = sale_flow_scenes()[:2]
 

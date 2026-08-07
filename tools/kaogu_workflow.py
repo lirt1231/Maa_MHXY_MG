@@ -518,6 +518,21 @@ class KaoguWorkflow:
 
             unknown_polls = 0
             wait_polls = 0
+            if status == "expand_menu" and phase == "tool_select":
+                # Closing 洛阳杂货铺 can return the client to the main screen.
+                # That transition is positively identified above, so a single
+                # navigation replay is safe and must not consume the first
+                # pass's repetition budget.
+                for navigation_status in (
+                    "expand_menu",
+                    "open_skills",
+                    "open_auxiliary",
+                    "open_archaeology",
+                    "open_production",
+                    "switch_tier",
+                    "open_tool_selection",
+                ):
+                    actions[navigation_status].reset_repetition()
             action_context = context.action_context(scene, decision, "工坊考古")
             if status == "buy_shovel":
                 if purchases >= self.max_purchases:
