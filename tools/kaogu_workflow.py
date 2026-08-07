@@ -163,7 +163,7 @@ def next_kaogu_phase(status: str, phase: str) -> str:
         "switch_tier": "production",
         "open_tool_selection": "tool_select",
         "open_shovel_shop": "shop",
-        "buy_shovel": "shop_closing",
+    "buy_shovel": "shop_purchase_verify",
         "close_shop": "tool_select",
         "select_shovel": "tool_select",
         "use_shovel": "tool_ready",
@@ -267,6 +267,7 @@ class KaoguWorkflow:
         start_main_polls = 0
         start_recoveries = 0
         start_pathing_polls = 0
+        purchase_verify_polls = 0
 
         actions = {
             status: EvidenceClickAction(
@@ -490,6 +491,14 @@ class KaoguWorkflow:
             if status in {"wait_for_battle", "wait_for_busy_task"}:
                 context.waiter.wait(1.0)
                 continue
+            if status == "wait_for_purchase":
+                purchase_verify_polls += 1
+                if purchase_verify_polls >= self.max_wait_polls:
+                    raise RuntimeError(
+                        "购买洛阳铲后未确认工具到账，已安全停止并保留商店现场"
+                    )
+                context.waiter.wait(0.8)
+                continue
             if status in {"tool_selection_idle", "production_idle"}:
                 wait_polls += 1
                 if wait_polls >= 4:
@@ -649,6 +658,7 @@ class KaoguWorkflow:
                     self.purchase_guard.reserve()
                 metrics.record(buy_shovel.execute(action_context))
                 purchases += 1
+                purchase_verify_polls = 0
             elif status == "dig":
                 if digs >= self.target_digs:
                     return result("completed")

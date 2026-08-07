@@ -561,6 +561,11 @@ def classify_kaogu_scene(
         buy_buttons = [{"box": _union_boxes(split_buy_button)}]
     if phase == "shop_closing" and shop_close:
         return {"status": "close_shop", "box": shop_close}
+    if phase == "shop_purchase_verify" and shop_titles and shovel_products:
+        # Do not close the shop based only on the click. The tool must become
+        # visible in the selection dialog or a separate success signal must be
+        # recognized before the workflow proceeds.
+        return {"status": "wait_for_purchase", "reason": "awaiting_tool_delivery"}
     if shovel_products and buy_buttons and shop_close:
         return {
             "status": "buy_shovel",

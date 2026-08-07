@@ -164,6 +164,24 @@ class KaoguSceneTests(unittest.TestCase):
         self.assertEqual(decision["status"], "buy_shovel")
         self.assertEqual(decision["close_box"], [906, 199, 33, 28])
 
+    def test_shop_after_purchase_waits_for_tool_delivery_evidence(self):
+        decision = classify_kaogu_scene(
+            [
+                text("洛阳杂货铺", (415, 104, 166, 38)),
+                text("洛阳铲", (712, 190, 67, 26)),
+                text("购买", (735, 540, 66, 29)),
+                text("×", (906, 199, 33, 28)),
+            ],
+            {},
+            (1020, 718),
+            phase="shop_purchase_verify",
+        )
+
+        self.assertEqual(
+            decision,
+            {"status": "wait_for_purchase", "reason": "awaiting_tool_delivery"},
+        )
+
     def test_sale_completion_uses_only_explicit_no_goods_template(self):
         completion = KAOGU_TEMPLATES["antique_sale_complete"]
 
