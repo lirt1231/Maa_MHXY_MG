@@ -70,6 +70,10 @@ def run(args, guard, purchase_guard=None):
     tool_mode = getattr(args, "tool_mode", "luoyang_shovel")
     if purchase_guard is None:
         purchase_guard = FilePurchaseGuard(PURCHASE_GUARD_PATH)
+    if not (args.inspect_scene or args.recognize_only):
+        reset_orphan = getattr(purchase_guard, "reset_if_owner_exited", None)
+        if callable(reset_orphan) and reset_orphan():
+            print("purchase_guard_recovered=orphaned_owner", flush=True)
     outcome = KaoguWorkflow(
         target_digs=target_digs,
         tool_mode=tool_mode,

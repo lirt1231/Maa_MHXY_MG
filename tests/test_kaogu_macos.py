@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -1829,6 +1830,28 @@ class FilePurchaseGuardTests(unittest.TestCase):
 
             restarted_process.release()
             self.assertFalse(marker.is_reserved())
+
+    def test_exited_owner_reservation_is_recovered_for_a_new_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            marker = FilePurchaseGuard(Path(directory) / "purchase.json")
+            marker.path.write_text(
+                json.dumps({"task_id": "kaogu", "pid": 999_999_999}),
+                encoding="utf-8",
+            )
+
+            self.assertTrue(marker.reset_if_owner_exited())
+            self.assertFalse(marker.is_reserved())
+
+    def test_live_owner_reservation_remains_protected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            marker = FilePurchaseGuard(Path(directory) / "purchase.json")
+            marker.path.write_text(
+                json.dumps({"task_id": "kaogu", "pid": os.getpid()}),
+                encoding="utf-8",
+            )
+
+            self.assertFalse(marker.reset_if_owner_exited())
+            self.assertTrue(marker.is_reserved())
 
 
 if __name__ == "__main__":

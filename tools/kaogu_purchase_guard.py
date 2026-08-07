@@ -42,6 +42,30 @@ class FilePurchaseGuard:
             marker.flush()
             os.fsync(marker.fileno())
 
+    def reset_if_owner_exited(self) -> bool:
+        """Release a reservation left by an exited runner process.
+
+        A marker only protects one live automation run. Retaining it forever
+        turns an interrupted attempt into an unrecoverable global purchase
+        ban, even after the player has explicitly started a new task.
+        """
+        try:
+            payload = json.loads(self.path.read_text(encoding="utf-8"))
+            pid = payload.get("pid")
+            if not isinstance(pid, int) or pid <= 0:
+                return False
+            os.kill(pid, 0)
+        except FileNotFoundError:
+            return False
+        except ProcessLookupError:
+            self.release()
+            return True
+        except (OSError, json.JSONDecodeError):
+            # An unreadable marker cannot prove that another live task owns
+            # the purchase slot, so preserve it for a manual safety stop.
+            return False
+        return False
+
     def release(self) -> None:
         try:
             self.path.unlink()
