@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -15,55 +14,16 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from dashboard.metrics import RESOURCE_CAPTURE_FIELDS, capture_visible_metrics
-from tools.resource_snapshots import (
-    ResourceFieldEvidence,
-    ResourceSnapshot,
-    ResourceValues,
-)
+from tools.resource_snapshot_workflow import ResourceSnapshotWorkflow
+from tools.resource_snapshots import ResourceSnapshot
 
 
 PREFIX = "resource_snapshot_json="
 
 
 def build_snapshot(phase: str, *, captured_fields: frozenset[str] = RESOURCE_CAPTURE_FIELDS) -> ResourceSnapshot:
-    captured_at = datetime.now(timezone.utc).isoformat()
-    try:
-        captured = capture_visible_metrics(captured_fields=captured_fields)
-    except Exception as exc:
-        return ResourceSnapshot(
-            target_id="local-primary",
-            phase=phase,
-            captured_at=captured_at,
-            values=ResourceValues(),
-            error=str(exc),
-            captured_fields=captured_fields,
-        )
-
-    evidence = {
-        name: ResourceFieldEvidence(
-            status=item["status"],
-            source_page=item["sourcePage"],
-            raw_text=item.get("rawText"),
-            confidence=item.get("confidence"),
-            box=None if item.get("box") is None else tuple(item["box"]),
-            frame_id=item.get("frameId"),
-        )
-        for name, item in captured.get("resourceEvidence", {}).items()
-    }
-    return ResourceSnapshot(
-        target_id="local-primary",
-        phase=phase,
-        captured_at=captured_at,
-        values=ResourceValues(
-            level=captured.get("level"),
-            experience=captured.get("experience"),
-            experience_required=captured.get("experienceRequired"),
-            gold=captured.get("gold"),
-            silver=captured.get("silver"),
-        ),
-        evidence=evidence,
-        error=captured.get("error"),
-        captured_fields=captured_fields,
+    return ResourceSnapshotWorkflow(capture_visible_metrics).execute(
+        phase, captured_fields=captured_fields
     )
 
 
