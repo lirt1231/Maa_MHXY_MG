@@ -14,6 +14,7 @@ try:
         WorkflowResult,
     )
     from .bangpai_qiandao_recognition import classify_clan_sign_in_scene
+    from .game_atomic_actions import ClanWelfareAction
 except ImportError:  # Direct execution through a platform runner.
     from automation_actions import ActionMetrics, EvidenceClickAction
     from automation_workflows import (
@@ -23,6 +24,7 @@ except ImportError:  # Direct execution through a platform runner.
         WorkflowResult,
     )
     from bangpai_qiandao_recognition import classify_clan_sign_in_scene
+    from game_atomic_actions import ClanWelfareAction
 
 
 CLAN_SIGN_IN_TEMPLATES = {
@@ -90,26 +92,20 @@ class ClanSignInWorkflow:
                 repeat_limit=1,
                 repeat_error="福利页面关闭后仍未变化，已安全停止",
             ),
-            "open_clan": click_action("open_clan", "open_clan", "打开帮派"),
-            "open_welfare": click_action("open_welfare", "open_clan_welfare", "打开帮派福利"),
-            "sign_in": click_action(
+            "open_clan": ClanWelfareAction("open_clan", repeat_limit=self.max_steps),
+            "open_welfare": ClanWelfareAction("open_welfare", repeat_limit=self.max_steps),
+            "sign_in": ClanWelfareAction(
                 "sign_in",
-                "clan_sign_in",
-                "执行帮派签到",
                 repeat_limit=1,
                 repeat_error="帮派签到按钮点击后仍未变化，已安全停止",
             ),
-            "claim_dividend": click_action(
+            "claim_dividend": ClanWelfareAction(
                 "claim_dividend",
-                "claim_clan_dividend",
-                "领取帮派分红",
                 repeat_limit=1,
                 repeat_error="帮派分红按钮点击后仍未变化，已安全停止",
             ),
-            "confirm_dividend": click_action(
+            "confirm_dividend": ClanWelfareAction(
                 "confirm_dividend",
-                "confirm_clan_dividend",
-                "确认领取帮派分红",
                 repeat_limit=1,
                 repeat_error="帮派分红确认后页面仍未变化，已安全停止",
             ),

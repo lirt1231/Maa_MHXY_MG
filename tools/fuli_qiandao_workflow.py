@@ -11,7 +11,6 @@ try:
         ActionMetrics,
         ActionResult,
         AtomicAction,
-        EvidenceClickAction,
     )
     from .automation_geometry import valid_box
     from .automation_workflows import (
@@ -21,13 +20,17 @@ try:
         WorkflowResult,
     )
     from .fuli_qiandao_recognition import classify_welfare_scene, scratch_gestures
+    from .game_atomic_actions import (
+        ConfirmFreeRewardAction,
+        OpenScratchCardAction,
+        OpenWelfareAction,
+    )
 except ImportError:  # Direct execution through a platform runner.
     from automation_actions import (
         ActionContext,
         ActionMetrics,
         ActionResult,
         AtomicAction,
-        EvidenceClickAction,
     )
     from automation_geometry import valid_box
     from automation_workflows import (
@@ -37,6 +40,11 @@ except ImportError:  # Direct execution through a platform runner.
         WorkflowResult,
     )
     from fuli_qiandao_recognition import classify_welfare_scene, scratch_gestures
+    from game_atomic_actions import (
+        ConfirmFreeRewardAction,
+        OpenScratchCardAction,
+        OpenWelfareAction,
+    )
 
 
 WELFARE_SIGN_IN_TEMPLATES = {
@@ -106,25 +114,10 @@ class WelfareSignInWorkflow:
         unknown_polls = 0
         metrics = ActionMetrics()
         actions = {
-            "open_welfare": EvidenceClickAction(
-                name="open_welfare",
-                statuses=("open_welfare",),
-                reason="打开福利",
-                wait_seconds=1.2,
-            ),
-            "open_scratch": EvidenceClickAction(
-                name="open_welfare_scratch_card",
-                statuses=("open_scratch",),
-                reason="打开刮刮乐",
-                wait_seconds=2.5,
-            ),
+            "open_welfare": OpenWelfareAction(),
+            "open_scratch": OpenScratchCardAction(),
             "scratch_ready": ScratchWelfareCardAction(),
-            "confirm_reward": EvidenceClickAction(
-                name="confirm_welfare_reward",
-                statuses=("confirm_reward",),
-                reason="确认签到奖励",
-                wait_seconds=0.8,
-            ),
+            "confirm_reward": ConfirmFreeRewardAction(),
         }
 
         for step in range(1, self.max_steps + 1):

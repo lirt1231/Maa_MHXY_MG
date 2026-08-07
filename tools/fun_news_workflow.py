@@ -6,11 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
 try:
-    from .automation_actions import (
-        ActionMetrics,
-        EvidenceClickAction,
-        RelativeDragAction,
-    )
+    from .automation_actions import ActionMetrics
     from .automation_workflows import (
         WorkflowContext,
         WorkflowInspection,
@@ -23,8 +19,9 @@ try:
         classify_fun_news_scene,
         fun_news_feed_signature,
     )
+    from .game_atomic_actions import LikeVisibleFeedItemAction, RefreshFeedAction
 except ImportError:  # Direct execution through a platform runner.
-    from automation_actions import ActionMetrics, EvidenceClickAction, RelativeDragAction
+    from automation_actions import ActionMetrics
     from automation_workflows import (
         WorkflowContext,
         WorkflowInspection,
@@ -37,6 +34,7 @@ except ImportError:  # Direct execution through a platform runner.
         classify_fun_news_scene,
         fun_news_feed_signature,
     )
+    from game_atomic_actions import LikeVisibleFeedItemAction, RefreshFeedAction
 
 
 TARGET_LIKES = 5
@@ -69,25 +67,8 @@ class FunNewsWorkflow:
     def execute(self, context: WorkflowContext, *, inspect: bool = False) -> WorkflowOutcome:
         metrics = ActionMetrics()
         daily_actions = DailyActivityActions("趣闻鉴赏")
-        like_action = EvidenceClickAction(
-            name="like_fun_news",
-            statuses=("like",),
-            reason="点赞当前趣闻动态",
-            wait_seconds=1.2,
-            repeat_limit=1,
-            repeat_error="同一条趣闻动态的点赞控件重复出现，已停止以避免重复点赞",
-        )
-        scroll_feed = RelativeDragAction(
-            name="scroll_fun_news_feed",
-            statuses=("like", "refresh_feed"),
-            # Finger moves upward so the feed advances to older unseen posts.
-            start_ratio=(0.37, 0.68),
-            end_ratio=(0.37, 0.40),
-            reason="下滑趣闻动态以加载下一条",
-            wait_seconds=1.5,
-            repeat_limit=self.max_feed_scrolls,
-            repeat_error="趣闻动态连续滚动未出现新的可点赞内容，已安全停止",
-        )
+        like_action = LikeVisibleFeedItemAction()
+        scroll_feed = RefreshFeedAction(repeat_limit=self.max_feed_scrolls)
         unknown_polls = 0
         likes = 0
         feed_scrolls = 0
