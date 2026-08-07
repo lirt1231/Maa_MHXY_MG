@@ -280,6 +280,10 @@ class KejuMacOSObservationSource:
             decision["reason"] = (
                 f"无法确认当前是科举{expected_label}页面，已停止且未执行点击"
             )
+        elif status in {"unreliable", "no_question"}:
+            decision["reason"] = str(
+                getattr(self.recognizer, "last_reason", "")
+            )
         print(
             json.dumps(
                 {
@@ -447,8 +451,10 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
         elif event == "waiting_for_formal_question":
             print("waiting_for_formal_question=true", flush=True)
         elif event == "recognition_retry":
+            reason = str(payload.get("reason") or "")
             print(
-                f"recognition_retry={payload['polls']} status={payload['status']}",
+                f"recognition_retry={payload['polls']}/{payload['limit']} "
+                f"status={payload['status']} reason={reason}",
                 flush=True,
             )
 

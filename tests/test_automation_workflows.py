@@ -490,6 +490,35 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
             ["wait", "wait", "click", "wait"],
         )
 
+    def test_keju_retry_reports_the_recognition_reason(self):
+        adapter = _DesktopAdapterA([])
+        source = _QuizSource([
+            _quiz_observation("unreliable", reason="模型没有引用有效网页证据"),
+            _quiz_observation(
+                "ready",
+                question="第1/1题 示例题",
+                question_key="round:1",
+                question_round=(1, 1),
+                answer="甲",
+                click=(620, 360),
+            ),
+        ])
+        events = []
+
+        outcome = KejuWorkflow(source, max_answers=1, delay=0).execute(
+            WorkflowContext(
+                adapter,
+                adapter,
+                lambda event, **payload: events.append((event, payload)),
+            )
+        )
+
+        self.assertEqual(outcome.status, "completed")
+        retry = next(payload for event, payload in events if event == "recognition_retry")
+        self.assertEqual(retry["polls"], 1)
+        self.assertEqual(retry["limit"], 8)
+        self.assertEqual(retry["reason"], "模型没有引用有效网页证据")
+
     def test_keju_stops_after_bounded_unreliable_frames_without_clicking(self):
         adapter = _DesktopAdapterA([])
         source = _QuizSource([

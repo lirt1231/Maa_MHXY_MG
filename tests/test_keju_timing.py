@@ -153,6 +153,7 @@ class AnalyzeAuditTests(unittest.TestCase):
             self.recognizer.analyze(None, None)
 
         self.assertEqual(self.recognizer.last_timings["status"], "unreliable")
+        self.assertEqual(self.recognizer.last_reason, "no reliable answer")
         self.assertEqual(
             self.recognizer.last_timings["stages"]["model_request"]["calls"], 1
         )

@@ -364,8 +364,12 @@ class KejuHybridAnswer(CustomRecognition):
     ) -> CustomRecognition.AnalyzeResult:
         timings = _StageTimings()
         self.last_status = "running"
+        self.last_reason = ""
         try:
             return self._analyze(context, argv, timings)
+        except RuntimeError as exc:
+            self.last_reason = str(exc).strip() or exc.__class__.__name__
+            raise
         finally:
             status = self.last_status
             if status == "running":
@@ -481,7 +485,8 @@ class KejuHybridAnswer(CustomRecognition):
                     box=(0, 0, 0, 0), detail="等待第1题，已记录部分题面"
                 )
             self.last_status = "unreliable"
-            raise RuntimeError(f"科举选项识别不足，已识别：{valid_options}")
+            self.last_reason = f"科举选项识别不足，已识别：{valid_options}"
+            raise RuntimeError(self.last_reason)
         is_answer_result = looks_like_answer_result(question, valid_options)
         if record_only_waiting:
             _record_waiting_capture(
@@ -769,10 +774,11 @@ class KejuHybridAnswer(CustomRecognition):
             self.last_question = question
             self.last_options = valid_options
             best_similarity = candidates[0]["similarity"] if candidates else 0
-            raise RuntimeError(
+            self.last_reason = (
                 "科举答题无法可靠决策，已停止避免盲选："
                 f"model_error={model_error}, best_similarity={best_similarity}"
             )
+            raise RuntimeError(self.last_reason)
 
         target = option_boxes.get(final_answer) or option_rois[final_answer]
         center_x = target[0] + target[2] // 2
