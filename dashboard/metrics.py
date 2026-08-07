@@ -11,11 +11,18 @@ from typing import Iterable
 import numpy as np
 from PIL import Image
 
+from tools.fixed_game_controls import (
+    CLOSE_STANDARD_PANEL,
+    OPEN_BACKPACK,
+    OPEN_CHARACTER_PROFILE,
+    REFERENCE_SIZE,
+)
+
 
 ROOT = Path(__file__).resolve().parents[1]
-OCR_SIZE = (1020, 718)
-BACKPACK_ENTRY_POINT = (985, 630)
-PROFILE_ENTRY_POINT = (978, 55)
+OCR_SIZE = REFERENCE_SIZE
+BACKPACK_ENTRY_POINT = OPEN_BACKPACK.point
+PROFILE_ENTRY_POINT = OPEN_CHARACTER_PROFILE.point
 RESOURCE_CAPTURE_FIELDS = frozenset(
     {"level", "experience", "experience_required", "gold", "silver"}
 )
@@ -213,7 +220,7 @@ def _is_profile(results: list[dict]) -> bool:
 
 def _close_panel(native_input) -> None:
     # Standard bag/profile panels share this close-button position at the normalized macOS layout.
-    native_input.click(890, 112, OCR_SIZE)
+    native_input.click(*CLOSE_STANDARD_PANEL.point, OCR_SIZE)
     time.sleep(1)
 
 
