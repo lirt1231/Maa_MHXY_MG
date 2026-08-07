@@ -73,7 +73,7 @@ class KejuWorkflow:
     delay: float = 3.0
     max_waiting_polls: int = 180
     max_same_question_polls: int = 8
-    max_recognition_failures: int = 8
+    max_recognition_failures: int = 4
 
     def __post_init__(self):
         if (

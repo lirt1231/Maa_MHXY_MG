@@ -516,7 +516,7 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
         self.assertEqual(outcome.status, "completed")
         retry = next(payload for event, payload in events if event == "recognition_retry")
         self.assertEqual(retry["polls"], 1)
-        self.assertEqual(retry["limit"], 8)
+        self.assertEqual(retry["limit"], 4)
         self.assertEqual(retry["reason"], "模型没有引用有效网页证据")
 
     def test_keju_stops_after_bounded_unreliable_frames_without_clicking(self):
