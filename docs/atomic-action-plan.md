@@ -1,6 +1,6 @@
 # 游戏原子操作规划
 
-状态：两批低风险操作已实现（2026-08-07）。`OpenActivityCenter`、`SelectActivityTab`、`JoinIdentifiedActivity`、`AcceptIdentifiedDialogue`、`ContinueTrackedTask`、普通运镖确认、秘境进入/挑战、福利入口/确认、帮派福利/分红及趣闻点赞/刷新已落在 `tools/game_atomic_actions.py`，并迁移到对应工作流。答题和刮卡已有独立原子实现：`AnswerOptionClickAction` 统一三界奇缘/科举的答案选择，`ScratchWelfareCardAction` 处理有界刮卡。固定主界面、资源快照、队伍和考古操作仍待迁移。
+状态：原子操作抽象与当前 11 个任务的适配已完成（2026-08-07）。工作流不再直接构造通用点击、双击或拖动，也不直接调用平台输入；每个输入均经命名动作和新鲜页面证据。`tools/game_atomic_actions.py` 覆盖活动、师门、运镖、秘境、福利、帮派与趣闻；答题、刮卡、捉鬼、三界导航、考古资产、资源面板及主界面恢复分别有领域模块。完整离线和实机矩阵尚未执行，按约定作为下一阶段工作。
 
 ## 边界
 
@@ -16,7 +16,7 @@
 | 操作 | 类型 | 责任 |
 | --- | --- | --- |
 | `ObserveScene` | 只读 | 截取一帧并输出 OCR、模板、窗口标定和帧标识。 |
-| `ConfirmMainScreen` | 只读 | 以跨区域锚点确认主界面；恢复完成时要求两帧不同 frameId。 |
+| `ConfirmMainScreen` | 只读 | `MainScreenConfirmation` 以跨区域锚点确认主界面；恢复完成时要求两帧不同 frameId 和兼容标定。 |
 | `AwaitScene` | 只读 | 在有限观察次数内等待声明的页面身份，不产生输入。 |
 | `AwaitStableValue` | 只读 | 连续读取固定资源槽，数值稳定后才接受。 |
 | `MonitorGameAutomation` | 只读 | 监视寻路、战斗、任务栏变化和明确完成证据；只读期间绝不推进游戏。 |
@@ -26,12 +26,12 @@
 
 | 操作 | 目标 | 页面身份与结果 |
 | --- | --- | --- |
-| `ToggleMainShortcutMenu` | 主界面固定加号/收起控件 | 已确认主界面和菜单状态；结果为菜单展开或收起。 |
+| `ToggleMainShortcutMenu` | 主界面固定加号/收起控件 | `ExpandMainShortcutMenuAction` 在已确认主界面和菜单状态下展开快捷栏。 |
 | `OpenActivityCenter` | 主界面固定活动入口 | 已确认主界面；等待活动页锚点。 |
-| `OpenBackpack` | 主界面固定包裹入口 | 已确认主界面；等待背包页身份。 |
-| `OpenCharacterProfile` | 主界面固定头像入口 | 已确认主界面；等待人物属性页身份。 |
-| `CloseStandardPanel` | 背包、人物属性等标准关闭区 | 已确认具体面板；等待主界面，不接受孤立 X。 |
-| `CloseFixedOverlay` | 已登记的临时包裹、队伍快捷栏、聊天栏等 | 每个覆盖层独立身份锚点与坐标；同一关闭动作每轮最多一次。 |
+| `OpenBackpack` | 主界面固定包裹入口 | `OpenBackpackAction` 只接受已确认主界面；随后等待背包页身份。 |
+| `OpenCharacterProfile` | 主界面固定头像入口 | `OpenCharacterProfileAction` 只接受已确认主界面；随后等待人物属性页身份。 |
+| `CloseStandardPanel` | 背包、人物属性等标准关闭区 | `CloseStandardPanelAction` 只接受已确认标准面板；等待主界面，不接受孤立 X。 |
+| `CloseFixedOverlay` | 已登记的临时包裹、队伍快捷栏、聊天栏等 | `CloseKnownOverlayAction` 仅接收分类器同时给出的页面身份与目标；同一关闭动作每轮最多一次。 |
 
 ### 动态活动与任务导航
 
@@ -79,8 +79,8 @@
 
 | 操作 | 目标 | 页面身份与结果 |
 | --- | --- | --- |
-| `CaptureWallet` | 背包的固定金币/银币槽 | 通过 `OpenBackpack` 进入；只读取稳定数值。 |
-| `CaptureExperience` | 人物属性的等级/经验槽 | 通过 `OpenCharacterProfile` 进入；只读取稳定数值。 |
+| `CaptureWallet` | 背包的固定金币/银币槽 | `CaptureWallet` 通过 `OpenBackpack` 进入后只读取稳定数值。 |
+| `CaptureExperience` | 人物属性的等级/经验槽 | `CaptureExperience` 通过 `OpenCharacterProfile` 进入后只读取稳定数值。 |
 | `CaptureResourceSnapshot` | 一组声明字段 | 编排 `Open* -> Capture* -> CloseStandardPanel -> ConfirmMainScreen`。 |
 | `ReturnToMain` | 任务终态到主界面 | 编排已登记的 `CloseFixedOverlay` 与页面关闭步骤，最终双帧确认。 |
 
@@ -100,11 +100,11 @@
 
 `*` 表示受任务声明次数、同一目标去重和共享输入预算约束的重复步骤。宝图不建立任务前后资源快照或收益记录，因为当前流程没有可归因的角色资源变化。
 
-## 迁移顺序与验收
+## 实施状态与验收
 
-1. 先实现固定主界面/标准面板操作：`OpenBackpack`、`OpenCharacterProfile`、`CloseStandardPanel`、`CloseFixedOverlay`，并迁移资源采集与考古。
-2. 再抽取动态活动导航：页签、滚动、任务卡片、任务栏和对话；迁移宝图、师门、运镖、秘境和趣闻鉴赏。
-3. 最后拆分答题、队伍、考古资产和副本等领域操作；高风险资产操作维持独立购买锁和更严格预算。
-4. 每个原子操作须有成功路径、页面身份不足零输入、取消后零输入、重复/预算耗尽、多尺寸标定五类离线测试；迁移任务后补一条完整序列回归。
+1. 固定主界面、标准面板和资源读取已完成：`main_screen_actions.py` 与 `resource_panel_actions.py` 分别承载恢复确认/关闭和固定控件/资源读取；资源采集已适配。
+2. 动态活动导航已完成：`DailyActivityActions` 和 `game_atomic_actions.py` 已被宝图、师门、运镖、秘境、趣闻及答题入口复用。
+3. 答题、队伍、考古资产、副本及任务专属导航已完成：每项保留自己的输入预算、去重与购买保护；考古菜单、三界快捷入口、师门领取和帮派入口不再在工作流内构造通用点击。
+4. 待验收：为每个原子操作补齐成功、页面身份不足零输入、取消后零输入、重复/预算耗尽和多尺寸标定离线测试；随后执行 11 个任务的完整序列回归和 macOS 实机矩阵。
 
-完成标准：任务 Workflow 不再直接调用 `runtime.click`、`click_box` 或原生输入；同一语义操作只有一个实现、一个日志名和一组跨任务测试。
+迁移完成标准已满足：任务 Workflow 不再直接调用 `runtime.click`、`click_box` 或原生输入，也不直接构造通用 `EvidenceClickAction`、`EvidenceDoubleClickAction`、`RelativeClickAction`、`RelativeDragAction` 或 `EvidenceThenRelativeClickAction`。命名原子动作统一承载输入日志与保护规则；测试完成标准待下一阶段验证。
