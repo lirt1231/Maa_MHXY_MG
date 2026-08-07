@@ -9,7 +9,6 @@ try:
     from .automation_actions import (
         ActionBudget,
         ActionMetrics,
-        EvidenceClickAction,
     )
     from .automation_workflows import (
         WorkflowContext,
@@ -20,8 +19,9 @@ try:
     from .quiz_actions import AnswerOptionClickAction
     from .quiz_workflows import QuizObservationSource
     from .daily_activity_actions import DailyActivityActions
+    from .sanjieqiyuan_atomic_actions import SanjieNavigationAction
 except ImportError:  # Direct execution through tools/run_*.py.
-    from automation_actions import ActionBudget, ActionMetrics, EvidenceClickAction
+    from automation_actions import ActionBudget, ActionMetrics
     from automation_workflows import (
         WorkflowContext,
         WorkflowInspection,
@@ -31,6 +31,7 @@ except ImportError:  # Direct execution through tools/run_*.py.
     from quiz_actions import AnswerOptionClickAction
     from quiz_workflows import QuizObservationSource
     from daily_activity_actions import DailyActivityActions
+    from sanjieqiyuan_atomic_actions import SanjieNavigationAction
 
 
 CompletionVerifier = Callable[[], str | None]
@@ -65,21 +66,12 @@ class SanjieNavigationWorkflow:
         )
         daily_actions = DailyActivityActions("三界奇缘", budget=budget)
         special_actions = {
-            status: EvidenceClickAction(
-                name=status,
-                statuses=(status,),
-                reason=reason,
-                wait_seconds=1.2,
+            status: SanjieNavigationAction(
+                status,
                 budget=budget,
                 repeat_limit=self.max_repeated_actions,
-                repeat_error=f"检测到重复导航动作 {status}，已停止以避免死循环",
             )
-            for status, reason in {
-                "open_battle_menu": "打开战斗快捷菜单",
-                "click_activity_side_menu": "从战斗快捷菜单打开活动",
-                "dismiss_known_popup": "关闭已识别弹窗",
-                "close_bag_overlay": "关闭包裹遮挡",
-            }.items()
+            for status in SanjieNavigationAction._CONFIG
         }
         metrics = ActionMetrics()
         action_counts = {}
