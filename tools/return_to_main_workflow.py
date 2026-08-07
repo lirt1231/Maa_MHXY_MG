@@ -9,8 +9,12 @@ from typing import Any, Callable, Mapping
 
 try:
     from .automation_geometry import in_region, valid_box
+    from .automation_actions import ActionContext
+    from .main_screen_actions import CloseKnownOverlayAction, MainScreenConfirmation
 except ImportError:  # Direct execution through tools/run_return_to_main_macos.py.
     from automation_geometry import in_region, valid_box
+    from automation_actions import ActionContext
+    from main_screen_actions import CloseKnownOverlayAction, MainScreenConfirmation
 
 
 RETURN_TO_MAIN_TEMPLATES = {
@@ -563,7 +567,8 @@ class ReturnToMainWorkflow:
 
     def execute(self, runtime, guard) -> ReturnToMainResult:
         used_actions: set[str] = set()
-        first_main = None
+        main_confirmation = MainScreenConfirmation()
+        close_overlay = CloseKnownOverlayAction()
         observations = 0
         clicks = 0
         for _ in range(self.max_observations):
@@ -573,21 +578,17 @@ class ReturnToMainWorkflow:
             decision = dict(self.classifier(self.task_id, scene))
             status = decision.get("status")
             if status == "main_screen":
-                frame = scene.frame
-                if frame is None:
-                    return ReturnToMainResult("failed", reason="主界面证据缺少 frameId", actions=observations, clicks=clicks)
-                if first_main is None:
-                    first_main = (frame.frame_id, scene.capture_signature, decision.get("anchors", []))
+                confirmation_status, main_confirmation, evidence = main_confirmation.observe(
+                    scene, decision
+                )
+                if confirmation_status == "pending":
                     guard.wait(0.25)
                     continue
-                first_frame_id, first_signature, first_anchors = first_main
-                if frame.frame_id == first_frame_id:
-                    return ReturnToMainResult("failed", reason="主界面确认重复使用旧帧", actions=observations, clicks=clicks)
-                if first_signature is None or scene.capture_signature is None or not first_signature.is_compatible_with(scene.capture_signature):
-                    return ReturnToMainResult("failed", reason="两次主界面截图标定不一致", actions=observations, clicks=clicks)
-                anchors = sorted(set(first_anchors) & set(decision.get("anchors", [])))
-                if len(anchors) < 3:
-                    return ReturnToMainResult("failed", reason="两帧主界面锚点不一致", actions=observations, clicks=clicks)
+                if confirmation_status == "failed":
+                    return ReturnToMainResult(
+                        "failed", reason=str(evidence), actions=observations, clicks=clicks
+                    )
+                assert isinstance(evidence, dict)
                 return ReturnToMainResult(
                     "confirmed",
                     outcome="already_main" if clicks == 0 else "recovered",
@@ -596,14 +597,10 @@ class ReturnToMainWorkflow:
                     clicks=clicks,
                     evidence={
                         "targetId": runtime.target_id,
-                        "firstFrameId": first_frame_id,
-                        "lastFrameId": frame.frame_id,
-                        "anchors": anchors,
-                        "imageSize": list(scene.image_size),
-                        "captureMethod": frame.capture_method,
+                        **evidence,
                     },
                 )
-            first_main = None
+            main_confirmation = MainScreenConfirmation()
             if status == "wait":
                 guard.wait(self.wait_seconds)
                 continue
@@ -613,7 +610,15 @@ class ReturnToMainWorkflow:
                     return ReturnToMainResult("failed", reason="同一关闭动作不得重复", actions=observations, clicks=clicks)
                 if clicks >= self.max_clicks:
                     return ReturnToMainResult("failed", reason="返回主界面点击预算已耗尽", actions=observations, clicks=clicks)
-                runtime.click_box(decision.get("box"), scene, f"关闭已确认的{decision.get('scene', '任务')}页面")
+                close_overlay.execute(
+                    ActionContext(
+                        input=runtime,
+                        waiter=guard,
+                        scene=scene,
+                        decision=decision,
+                        task_label=self.task_id,
+                    )
+                )
                 used_actions.add(action_id)
                 clicks += 1
                 guard.wait(self.wait_seconds)
