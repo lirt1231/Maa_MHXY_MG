@@ -524,6 +524,36 @@ class ReturnToMainWorkflowTests(unittest.TestCase):
         self.assertEqual(result.clicks, 1)
         self.assertEqual(runtime.clicks[0][0], [905, 439, 39, 40])
 
+    def test_shimen_temporary_bag_uses_fixed_scaled_close_without_title_ocr(self):
+        temporary_bag = scene(
+            [],
+            {
+                "menu_plus": [960, 670, 30, 30],
+                "close_generic": [677, 152, 31, 42],
+            },
+        )
+        runtime = Runtime([temporary_bag, main_scene(), main_scene()])
+
+        result = ReturnToMainWorkflow("shimen", wait_seconds=0).execute(
+            runtime, Guard()
+        )
+
+        self.assertEqual(result.status, "confirmed")
+        self.assertEqual(result.outcome, "recovered")
+        self.assertEqual(result.clicks, 1)
+        self.assertEqual(runtime.clicks[0][0], [668, 147, 46, 50])
+
+    def test_temporary_bag_fixed_close_needs_menu_and_fixed_close_region(self):
+        incomplete = scene([], {"close_generic": [677, 152, 31, 42]})
+        runtime = Runtime([incomplete])
+
+        result = ReturnToMainWorkflow("shimen", wait_seconds=0).execute(
+            runtime, Guard()
+        )
+
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(runtime.clicks, [])
+
     def test_live_red_luo_soup_reward_popup_has_a_distinct_close_path(self):
         reward = scene(
             [

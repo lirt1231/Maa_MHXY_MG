@@ -14,6 +14,8 @@ from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 OCR_SIZE = (1020, 718)
+BACKPACK_ENTRY_POINT = (985, 630)
+PROFILE_ENTRY_POINT = (978, 55)
 RESOURCE_CAPTURE_FIELDS = frozenset(
     {"level", "experience", "experience_required", "gold", "silver"}
 )
@@ -209,16 +211,6 @@ def _is_profile(results: list[dict]) -> bool:
     return title and anchors >= 2
 
 
-def _click_text(native_input, results: list[dict], text: str, *, min_y: int = 0) -> bool:
-    matches = [item for item in results if text in re.sub(r"\s+", "", item["text"]) and item["box"][1] >= min_y]
-    if not matches:
-        return False
-    item = max(matches, key=lambda value: value["box"][0])
-    x, y, width, height = item["box"]
-    native_input.click(x + width / 2, y + height / 2, OCR_SIZE)
-    return True
-
-
 def _close_panel(native_input) -> None:
     # Standard bag/profile panels share this close-button position at the normalized macOS layout.
     native_input.click(890, 112, OCR_SIZE)
@@ -370,9 +362,11 @@ def capture_visible_metrics(
         currencies = {"gold": None, "silver": None, "goldItem": None, "silverItem": None}
         bag_results, bag_image = [], None
         if captured_fields & {"gold", "silver"}:
-            if not _click_text(native_input, main_results, "包裹", min_y=500):
-                # The fixed bag icon is used only after cross-region main-screen OCR.
-                native_input.click(985, 630, OCR_SIZE)
+            # The backpack icon is fixed in the verified main canvas.  Its
+            # location is mapped from OCR_SIZE by NativeMacOSInput, so OCR is
+            # reserved for the changing currency values rather than click
+            # placement.
+            native_input.click(*BACKPACK_ENTRY_POINT, OCR_SIZE)
             _, bag_results = _wait_for(
                 tasker,
                 window_id,
@@ -399,7 +393,7 @@ def capture_visible_metrics(
         profile = {"level": None, "experience": None, "experienceRequired": None, "levelItem": None, "experienceItem": None}
         profile_results, profile_image = [], None
         if captured_fields & {"level", "experience", "experience_required"}:
-            native_input.click(978, 55, OCR_SIZE)
+            native_input.click(*PROFILE_ENTRY_POINT, OCR_SIZE)
             _, profile_results = _wait_for(
                 tasker,
                 window_id,

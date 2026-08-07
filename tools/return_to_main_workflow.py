@@ -66,6 +66,12 @@ OVERLAY_PATTERN = re.compile(
     r"运镖|宝图|师门|秘境|关卡|辅助技能|技能生产|工坊考古|洛阳铲"
 )
 
+# These controls belong to a stable, fixed game-canvas layout.  The boxes are
+# ratios so MacOS task runtime maps them through the current window calibration
+# before input.  Visual matching may establish page identity, but never moves
+# the click target for these controls.
+_TEMPORARY_BAG_CLOSE_BOX = (0.655, 0.205, 0.045, 0.070)
+
 
 def _has_overlay_identity(scene) -> bool:
     """Ignore task-tracker/sidebar labels while rejecting an open center panel."""
@@ -119,6 +125,29 @@ def _relative_box(image_size, left, top, width, height) -> list[int]:
         max(1, round(image_width * width)),
         max(1, round(image_height * height)),
     ]
+
+
+def _fixed_temporary_bag(scene) -> bool:
+    """Recognize the stable temporary-bag layout without reading its title.
+
+    The temporary bag displayed after a completed Shimen task preserves the
+    main canvas' bottom-right menu toggle and has its close badge in a fixed
+    upper-center region.  The generic close template is identity evidence
+    only; input always targets the calibrated fixed close box below.
+    """
+    close_box = valid_box({"box": scene.templates.get("close_generic")})
+    return bool(
+        scene.templates.get("menu_plus")
+        and close_box is not None
+        and in_region(
+            {"box": close_box},
+            scene.image_size,
+            min_x=0.62,
+            max_x=0.73,
+            min_y=0.16,
+            max_y=0.30,
+        )
+    )
 
 
 def _expanded_chat_panel(scene) -> bool:
@@ -327,6 +356,16 @@ def classify_return_scene(task_id: str, scene) -> dict[str, Any]:
         return {"status": "wait", "reason": "transient_completion"}
     if main_screen_evidence:
         return {"status": "main_screen", "anchors": anchors}
+
+    if task_id == "shimen" and _fixed_temporary_bag(scene):
+        return {
+            "status": "close_known_page",
+            "scene": "temporary_bag",
+            "action_id": "close:temporary_bag",
+            # Do not OCR-match the title or click an inferred X box.  This
+            # stable control is fixed relative to the game content rectangle.
+            "box": _relative_box(scene.image_size, *_TEMPORARY_BAG_CLOSE_BOX),
+        }
 
     if _expanded_chat_panel(scene):
         return {

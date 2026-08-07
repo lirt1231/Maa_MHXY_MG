@@ -1,11 +1,22 @@
 import unittest
 from unittest.mock import patch
 
-from dashboard.metrics import _is_backpack, parse_backpack_resources
+from dashboard.metrics import (
+    BACKPACK_ENTRY_POINT,
+    OCR_SIZE,
+    PROFILE_ENTRY_POINT,
+    _is_backpack,
+    parse_backpack_resources,
+)
 from tools.run_resource_snapshot_macos import build_snapshot
 
 
 class ResourceSnapshotCaptureTests(unittest.TestCase):
+    def test_fixed_resource_icons_are_normalized_to_the_game_canvas(self):
+        self.assertEqual(BACKPACK_ENTRY_POINT, (985, 630))
+        self.assertEqual(PROFILE_ENTRY_POINT, (978, 55))
+        self.assertEqual(OCR_SIZE, (1020, 718))
+
     def test_fixed_bag_currency_slots_distinguish_gold_and_silver(self):
         results = [
             {"text": "795.565", "box": [175, 587, 69, 23]},
