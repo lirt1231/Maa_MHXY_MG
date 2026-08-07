@@ -136,7 +136,10 @@ int focus_target_window(pid_t owner_pid, CGRect target_bounds)
             frontmost_confirmed = true;
             break;
         }
-        usleep(50000);
+        // The iOS-wrapped client occasionally drops very short synthetic
+        // taps on purchase controls. Keep a single balanced click, but hold
+        // it long enough for the client to register the touch.
+        usleep(180000);
     }
     if (!frontmost_confirmed) {
         return -7;
@@ -425,7 +428,9 @@ extern "C" int MaaMHXYClickWindow(
             CGEventSetIntegerValueField(mouse_up, kCGMouseEventClickState, 1);
             CGEventPost(kCGHIDEventTap, mouse_move);
             CGEventPost(kCGHIDEventTap, mouse_down);
-            usleep(50000);
+            // See MaaMHXYClickScreenPoint: retain a single click while using
+            // a touch-like press duration for the wrapped client.
+            usleep(180000);
             CGEventPost(kCGHIDEventTap, mouse_up);
             CFRelease(mouse_move);
             CFRelease(mouse_down);
