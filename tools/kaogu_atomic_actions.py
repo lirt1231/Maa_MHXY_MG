@@ -5,9 +5,36 @@ from __future__ import annotations
 from typing import Mapping
 
 try:
-    from .automation_actions import EvidenceClickAction, EvidenceDoubleClickAction, RelativeDragAction
+    from .automation_actions import (
+        EvidenceClickAction,
+        EvidenceDoubleClickAction,
+        EvidenceThenRelativeClickAction,
+        RelativeDragAction,
+    )
 except ImportError:
-    from automation_actions import EvidenceClickAction, EvidenceDoubleClickAction, RelativeDragAction
+    from automation_actions import (
+        EvidenceClickAction,
+        EvidenceDoubleClickAction,
+        EvidenceThenRelativeClickAction,
+        RelativeDragAction,
+    )
+
+
+class OpenSkillsFromMainMenuAction(EvidenceThenRelativeClickAction):
+    """Expand the confirmed main menu and select its fixed Skills slot."""
+
+    def __init__(self, *, repeat_limit: int):
+        super().__init__(
+            name="open_skills_from_main_menu",
+            statuses=("expand_menu",),
+            point_ratio=(0.849, 0.94),
+            first_reason="展开主界面快捷菜单",
+            second_reason="打开技能页面",
+            between_seconds=1.2,
+            wait_seconds=1.0,
+            repeat_limit=repeat_limit,
+            repeat_error="主界面快捷菜单打开失败，已安全停止",
+        )
 
 
 def archaeology_actions(action_limits: Mapping[str, int], *, normalize_drags: int, scan_drags: int):
@@ -29,4 +56,9 @@ def dig_archaeology_site_action(max_attempts: int, next_dig):
     return EvidenceClickAction(name="dig_archaeology_site", statuses=("dig",), reason=lambda _context: f"进行第 {next_dig()} 次挖掘", wait_seconds=0.0, repeat_limit=max_attempts, repeat_error="本次挖掘按钮连续点击仍未进入结算，已安全停止", signature_factory=lambda context: context.decision_status)
 
 
-__all__ = ["archaeology_actions", "dig_archaeology_site_action", "purchase_shovel_action"]
+__all__ = [
+    "OpenSkillsFromMainMenuAction",
+    "archaeology_actions",
+    "dig_archaeology_site_action",
+    "purchase_shovel_action",
+]

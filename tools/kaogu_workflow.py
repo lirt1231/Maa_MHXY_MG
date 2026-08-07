@@ -8,10 +8,6 @@ from typing import Any, Callable, Mapping, Protocol
 try:
     from .automation_actions import (
         ActionMetrics,
-        EvidenceClickAction,
-        EvidenceDoubleClickAction,
-        EvidenceThenRelativeClickAction,
-        RelativeDragAction,
     )
     from .automation_workflows import (
         WorkflowContext,
@@ -20,14 +16,15 @@ try:
         WorkflowResult,
     )
     from .kaogu_recognition import classify_kaogu_scene
-    from .kaogu_atomic_actions import archaeology_actions, dig_archaeology_site_action, purchase_shovel_action
+    from .kaogu_atomic_actions import (
+        OpenSkillsFromMainMenuAction,
+        archaeology_actions,
+        dig_archaeology_site_action,
+        purchase_shovel_action,
+    )
 except ImportError:  # Direct execution through a platform runner.
     from automation_actions import (
         ActionMetrics,
-        EvidenceClickAction,
-        EvidenceDoubleClickAction,
-        EvidenceThenRelativeClickAction,
-        RelativeDragAction,
     )
     from automation_workflows import (
         WorkflowContext,
@@ -36,7 +33,12 @@ except ImportError:  # Direct execution through a platform runner.
         WorkflowResult,
     )
     from kaogu_recognition import classify_kaogu_scene
-    from kaogu_atomic_actions import archaeology_actions, dig_archaeology_site_action, purchase_shovel_action
+    from kaogu_atomic_actions import (
+        OpenSkillsFromMainMenuAction,
+        archaeology_actions,
+        dig_archaeology_site_action,
+        purchase_shovel_action,
+    )
 
 
 KAOGU_TEMPLATES = {
@@ -272,16 +274,8 @@ class KaoguWorkflow:
         purchase_verify_polls = 0
 
         actions = archaeology_actions(self.action_limits, normalize_drags=self.inventory_normalize_drags, scan_drags=self.max_inventory_scan_drags)
-        actions["expand_menu"] = EvidenceThenRelativeClickAction(
-            name="open_skills_from_main_menu",
-            statuses=("expand_menu",),
-            point_ratio=(0.849, 0.94),
-            first_reason="展开主界面快捷菜单",
-            second_reason="打开技能页面",
-            between_seconds=1.2,
-            wait_seconds=1.0,
-            repeat_limit=self.action_limits["expand_menu"],
-            repeat_error="主界面快捷菜单打开失败，已安全停止",
+        actions["expand_menu"] = OpenSkillsFromMainMenuAction(
+            repeat_limit=self.action_limits["expand_menu"]
         )
         buy_shovel = purchase_shovel_action(self.max_purchases)
         dig = dig_archaeology_site_action(self.max_dig_attempts_per_round, lambda: digs + 1)
