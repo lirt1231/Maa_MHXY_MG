@@ -64,6 +64,46 @@ class ContinueTrackedTaskAction(EvidenceClickAction):
         )
 
 
+class StartShimenTaskAction(EvidenceClickAction):
+    def __init__(self, *, budget: ActionBudget):
+        super().__init__(
+            name="start_shimen_task",
+            statuses=("start_task",),
+            reason="前往师父领取师门任务",
+            wait_seconds=3.0,
+            budget=budget,
+            repeat_limit=2,
+            repeat_error="师门领取入口点击后页面仍未变化，已安全停止",
+        )
+
+
+class StartShimenFinalAssessmentAction(EvidenceClickAction):
+    def __init__(self, *, budget: ActionBudget):
+        super().__init__(
+            name="start_shimen_final_assessment",
+            statuses=("final_assessment",),
+            reason="前往师父接受师门最终考核",
+            wait_seconds=3.0,
+            budget=budget,
+            repeat_limit=1,
+            repeat_error="师门最终考核入口点击后页面仍未变化，已安全停止",
+        )
+
+
+class ProgressShimenTaskAction(EvidenceClickAction):
+    def __init__(self, *, budget: ActionBudget):
+        super().__init__(
+            name="progress_shimen_task",
+            statuses=("accept_task_dialogue", "progress_task"),
+            reason=lambda context: {
+                "accept_task_dialogue": "接取师门 NPC 对话任务",
+                "progress_task": "执行师门去完成按钮",
+            }[context.decision_status],
+            wait_seconds=2.0,
+            budget=budget,
+        )
+
+
 class AcceptIdentifiedDialogueAction(EvidenceClickAction):
     def __init__(
         self,
@@ -242,8 +282,11 @@ __all__ = [
     "OpenActivityCenterAction",
     "OpenScratchCardAction",
     "OpenWelfareAction",
+    "ProgressShimenTaskAction",
     "RefreshFeedAction",
     "SelectActivityTabAction",
     "SelectEscortModeAction",
     "StartDungeonChallengeAction",
+    "StartShimenFinalAssessmentAction",
+    "StartShimenTaskAction",
 ]

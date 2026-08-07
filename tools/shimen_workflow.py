@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
 try:
-    from .automation_actions import ActionBudget, ActionMetrics, EvidenceClickAction
+    from .automation_actions import ActionBudget, ActionMetrics
     from .automation_workflows import (
         WorkflowContext,
         WorkflowInspection,
@@ -20,9 +20,14 @@ try:
         GameDrivenTaskMonitor,
         StableMainCompletionTracker,
     )
-    from .game_atomic_actions import ContinueTrackedTaskAction
+    from .game_atomic_actions import (
+        ContinueTrackedTaskAction,
+        ProgressShimenTaskAction,
+        StartShimenFinalAssessmentAction,
+        StartShimenTaskAction,
+    )
 except ImportError:  # Direct execution through a platform runner.
-    from automation_actions import ActionBudget, ActionMetrics, EvidenceClickAction
+    from automation_actions import ActionBudget, ActionMetrics
     from automation_workflows import (
         WorkflowContext,
         WorkflowInspection,
@@ -36,7 +41,12 @@ except ImportError:  # Direct execution through a platform runner.
         GameDrivenTaskMonitor,
         StableMainCompletionTracker,
     )
-    from game_atomic_actions import ContinueTrackedTaskAction
+    from game_atomic_actions import (
+        ContinueTrackedTaskAction,
+        ProgressShimenTaskAction,
+        StartShimenFinalAssessmentAction,
+        StartShimenTaskAction,
+    )
 
 
 @dataclass(frozen=True)
@@ -78,40 +88,15 @@ class ShimenWorkflow:
             self.max_task_clicks,
             "师门推进点击达到上限，已停止以避免循环",
         )
-        start_task = EvidenceClickAction(
-            name="start_shimen_task",
-            statuses=("start_task",),
-            reason="前往师父领取师门任务",
-            wait_seconds=3.0,
-            budget=task_budget,
-            repeat_limit=2,
-            repeat_error="师门领取入口点击后页面仍未变化，已安全停止",
-        )
+        start_task = StartShimenTaskAction(budget=task_budget)
         continue_task = ContinueTrackedTaskAction(
             "右侧师门任务",
             wait_seconds=7.0,
             budget=task_budget,
             repeat_limit=self.max_task_clicks,
         )
-        final_assessment = EvidenceClickAction(
-            name="start_shimen_final_assessment",
-            statuses=("final_assessment",),
-            reason="前往师父接受师门最终考核",
-            wait_seconds=3.0,
-            budget=task_budget,
-            repeat_limit=1,
-            repeat_error="师门最终考核入口点击后页面仍未变化，已安全停止",
-        )
-        progress_task = EvidenceClickAction(
-            name="progress_shimen_task",
-            statuses=("accept_task_dialogue", "progress_task"),
-            reason=lambda action_context: {
-                "accept_task_dialogue": "接取师门 NPC 对话任务",
-                "progress_task": "执行师门去完成按钮",
-            }[action_context.decision_status],
-            wait_seconds=2.0,
-            budget=task_budget,
-        )
+        final_assessment = StartShimenFinalAssessmentAction(budget=task_budget)
+        progress_task = ProgressShimenTaskAction(budget=task_budget)
         recent_statuses = []
 
         for step in range(1, self.max_steps + 1):
