@@ -150,6 +150,36 @@ class FunNewsRecognitionTests(unittest.TestCase):
             {"status": "completed"},
         )
 
+    def test_completed_activity_card_requires_task_progress_and_card_action(self):
+        decision = classify_fun_news_scene(
+            [
+                text("日常活动", (130, 161, 88, 27)),
+                text("趣闻鉴赏", (669, 314, 85, 25)),
+                text("次数5/5", (670, 348, 62, 19)),
+                text("活跃5/5", (743, 348, 62, 19)),
+                text("完成", (827, 333, 66, 31)),
+            ],
+            {},
+            (1020, 718),
+        )
+
+        self.assertEqual(decision, {"status": "completed"})
+
+    def test_unrelated_completed_card_does_not_complete_fun_news(self):
+        decision = classify_fun_news_scene(
+            [
+                text("日常活动", (130, 161, 88, 27)),
+                text("趣闻鉴赏", (669, 314, 85, 25)),
+                text("次数5/5", (670, 348, 62, 19)),
+                text("活跃5/5", (743, 348, 62, 19)),
+                text("完成", (501, 333, 66, 31)),
+            ],
+            {},
+            (1020, 718),
+        )
+
+        self.assertNotEqual(decision, {"status": "completed"})
+
 
 class FunNewsWorkflowTests(unittest.TestCase):
     @staticmethod

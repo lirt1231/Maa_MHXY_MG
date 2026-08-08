@@ -7,6 +7,7 @@ try:
         classify_daily_navigation,
         find_items,
         in_region,
+        same_activity_card,
         valid_box,
     )
     from .daily_schedule_macos_core import normalize_text
@@ -16,6 +17,7 @@ except ImportError:  # Direct execution through a platform runner.
         classify_daily_navigation,
         find_items,
         in_region,
+        same_activity_card,
         valid_box,
     )
     from daily_schedule_macos_core import normalize_text
@@ -156,6 +158,53 @@ def fun_news_feed_signature(texts, image_size):
     return tuple(entries) or None
 
 
+def _completed_activity_card(texts, image_size) -> bool:
+    """Recognize the completed 趣闻鉴赏 card without relying on one OCR line.
+
+    The live activity list renders the task name, progress and action in
+    separate OCR items.  Require all of them to align to one card before
+    treating a newly opened activity page as already complete.
+    """
+    targets = find_items(texts, r"趣(?:闻|味)鉴赏")
+    completions = find_items(texts, r"完成|已完成|全部完成")
+    progress = find_items(texts, r"次数\s*5\s*/\s*5")
+    activity = find_items(texts, r"活跃\s*5\s*/\s*5")
+    image_width, image_height = image_size
+
+    for target in targets:
+        target_box = valid_box(target)
+        if target_box is None or not in_region(
+            target,
+            image_size,
+            min_x=0.30,
+            max_x=0.80,
+            min_y=0.14,
+            max_y=0.82,
+        ):
+            continue
+        target_x = target_box[0] + target_box[2] / 2
+        target_y = target_box[1] + target_box[3] / 2
+
+        def belongs_to_card(item):
+            box = valid_box(item)
+            if box is None:
+                return False
+            candidate_x = box[0] + box[2] / 2
+            candidate_y = box[1] + box[3] / 2
+            return (
+                target_x - image_width * 0.06 <= candidate_x <= target_x + image_width * 0.31
+                and target_y - image_height * 0.04 <= candidate_y <= target_y + image_height * 0.15
+            )
+
+        if (
+            any(belongs_to_card(item) for item in progress)
+            and any(belongs_to_card(item) for item in activity)
+            and any(same_activity_card(target, item, image_size) for item in completions)
+        ):
+            return True
+    return False
+
+
 def classify_fun_news_scene(
     texts, templates, image_size, *, daily_tab_confirmed=False,
     completion_verification=False,
@@ -163,7 +212,7 @@ def classify_fun_news_scene(
     """Classify only the daily-card navigation or verified feed controls."""
     if templates.get("fun_news_complete") or find_items(
         texts, r"(?:今日)?趣(?:闻|味)鉴赏(?:已)?完成|趣(?:闻|味)鉴赏全部完成"
-    ):
+    ) or _completed_activity_card(texts, image_size):
         return {"status": "completed"}
 
     if is_fun_news_feed(texts, image_size):
