@@ -289,6 +289,7 @@ class KejuMacOSObservationSource:
                 {
                     "step": self.step,
                     "status": status,
+                    "questionNumber": decision["question_number"],
                     "question": question,
                     "options": decision["options"],
                     "answer": decision["answer"],

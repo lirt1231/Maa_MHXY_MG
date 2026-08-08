@@ -175,10 +175,10 @@ def _structured_message(task_id: str, data: dict) -> str | None:
     status = data.get("status")
     if task_id in {"keju", "keju_huishi"}:
         if status == "ready":
-            step = data.get("step")
+            question_number = data.get("questionNumber")
             return (
-                f"已识别第 {step} 题，正在选择答案"
-                if isinstance(step, int)
+                f"已识别第 {question_number} 题，正在选择答案"
+                if isinstance(question_number, int) and question_number > 0
                 else "已识别题目，正在选择答案"
             )
         if status == "waiting":

@@ -40,14 +40,14 @@ class UserProgressTranslationTests(unittest.TestCase):
     def test_translates_exam_progress_and_hides_protocol_lines(self):
         ready = user_progress(
             "keju",
-            '{"step":3,"status":"ready","question":"内部题目",'
+            '{"step":3,"questionNumber":7,"status":"ready","question":"内部题目",'
             '"options":{"A":"甲"},"answer":"A"}',
         )
         sanjie = user_progress(
             "sanjieqiyuan", "click=4 completed=3 status=ready question=内部题目"
         )
 
-        self.assertEqual(ready["message"], "已识别第 3 题，正在选择答案")
+        self.assertEqual(ready["message"], "已识别第 7 题，正在选择答案")
         self.assertEqual(sanjie["message"], "正在回答第 4 题")
         retry = user_progress("keju", "recognition_retry=1 status=unreliable")
         self.assertEqual(retry["message"], "题面识别不稳定，正在重新获取游戏画面")
@@ -58,6 +58,15 @@ class UserProgressTranslationTests(unittest.TestCase):
             "unrecognized_debug_field=123",
         ):
             self.assertIsNone(user_progress("keju", line))
+
+    def test_exam_progress_never_labels_an_observation_as_a_question_number(self):
+        progress = user_progress(
+            "keju_huishi",
+            '{"step":40,"status":"ready","question":"内部题目",'
+            '"options":{"A":"甲"},"answer":"A"}',
+        )
+
+        self.assertEqual(progress["message"], "已识别题目，正在选择答案")
 
     def test_game_driven_monitor_reports_read_only_auto_completion(self):
         started = user_progress(
