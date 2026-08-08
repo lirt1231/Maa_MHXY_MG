@@ -27,7 +27,8 @@ from keju_workflow import (  # noqa: E402
 )
 from macos_quiz_adapter import MacOSQuizInputAdapter, MacOSQuizScene  # noqa: E402
 from quiz_workflows import QuizObservation  # noqa: E402
-from maa.pipeline import JCustomRecognition  # noqa: E402
+from maa.pipeline import JCustomRecognition, JOCR  # noqa: E402
+from keju_reward import parse_huishi_settlement_reward  # noqa: E402
 
 
 RESULT_PREFIX = "result_json="
@@ -52,6 +53,8 @@ EXAM_FINAL_QUESTION_NUMBERS = {
 }
 MAX_WAITING_POLLS = 180
 MAX_SAME_QUESTION_POLLS = 8
+HUI_SHI_REWARD_POLLS = 8
+HUI_SHI_REWARD_POLL_SECONDS = 1.0
 
 
 def task_result(status: str, *, exam_type: str = "xiangshi", **payload) -> dict:
@@ -228,6 +231,43 @@ def recognize_keju_frame(tasker, capture, recognizer, guard):
         recognizer.last_status = "recognition_failed"
         raise RuntimeError("科举识别失败：识别器未返回明确状态")
     return detail.nodes[-1].recognition
+
+
+def capture_huishi_settlement_reward(tasker, capture, guard) -> dict:
+    """Wait briefly for a post-answer settlement page without any input."""
+    last_reason = "settlement_not_observed"
+    for poll in range(1, HUI_SHI_REWARD_POLLS + 1):
+        guard.checkpoint()
+        image = capture.capture(guard)
+        height, width = image.shape[:2]
+        task = tasker.post_recognition(
+            "OCR", JOCR(expected=[".*"], roi=(0, 0, width, height), threshold=0.2), image,
+        ).wait()
+        guard.checkpoint()
+        if not task.succeeded:
+            last_reason = "settlement_ocr_failed"
+        else:
+            detail = task.get()
+            texts = [] if detail is None or not detail.nodes else [
+                {"text": item.text, "box": list(item.box)}
+                for item in detail.nodes[-1].recognition.filtered_results
+            ]
+            result = parse_huishi_settlement_reward(texts, (width, height))
+            if result["status"] == "confirmed":
+                result["evidence"].update({
+                    "frameId": capture.last_signature.frame_id,
+                    "captureMethod": capture.last_signature.capture_method,
+                    "imageSize": [width, height],
+                    "poll": poll,
+                })
+                print("huishi_settlement_reward=" + json.dumps(result, ensure_ascii=False), flush=True)
+                return result
+            last_reason = result["reason"]
+        if poll < HUI_SHI_REWARD_POLLS:
+            time.sleep(HUI_SHI_REWARD_POLL_SECONDS)
+    result = {"status": "unavailable", "reason": last_reason}
+    print("huishi_settlement_reward=" + json.dumps(result, ensure_ascii=False), flush=True)
+    return result
 
 
 class KejuMacOSObservationSource:
@@ -495,10 +535,17 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
         print("final_question_answered=true", flush=True)
     else:
         print(f"达到本次最大答题数：{args.max_steps}", flush=True)
+    result_payload = {
+        **outcome.payload,
+    }
+    if outcome.status == "completed" and args.exam_type == "huishi":
+        result_payload["settlement_reward"] = capture_huishi_settlement_reward(
+            tasker, capture, guard
+        )
     return task_result(
         outcome.status,
         exam_type=args.exam_type,
-        **outcome.payload,
+        **result_payload,
     )
 
 
