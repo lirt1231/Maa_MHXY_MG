@@ -521,6 +521,28 @@ describe("TaskPanel run outcomes", () => {
     expect(view.getByText("20,000 → 19,950")).toBeTruthy();
   });
 
+  it("shows a huishi settlement reward without inventing a before snapshot", () => {
+    const resourceYield: NonNullable<Run["resourceYield"]> = {
+      taskStatus: "completed", attributionStatus: "reliable",
+      measurementSource: "settlement_reward",
+      beforeSnapshotId: null, afterSnapshotId: 2,
+      experienceDelta: null, goldDelta: 12500, silverDelta: null,
+      reasons: [], calculationVersion: 1, createdAt: "2026-08-05T02:10:01Z",
+      before: null,
+      after: {
+        id: 2, targetId: "local-primary", phase: "reward", capturedAt: "2026-08-05T02:10:00Z",
+        status: "success", values: { level: null, experience: null, experienceRequired: null, gold: 12500, silver: null }, evidence: {},
+      },
+    };
+    const view = render(<TaskPanel system={system} tasks={[]} runs={[run({ resourceYield })]}
+      summary={{ total: 1, succeeded: 1, failed: 0, successRate: 100, averageDurationMs: 1000 }}
+      logs={[]} busy={false} progress="等待任务" startingGame={false}
+      onStartGame={vi.fn()} onStop={vi.fn()} onSelectTask={vi.fn()} />);
+
+    expect(view.getByText("结算奖励：金币 +12,500")).toBeTruthy();
+    expect(view.queryByText("未记录 → 12,500")).toBeNull();
+  });
+
   it("does not present missing or not-run resource data as zero", () => {
     const unavailable = run({
       id: "unavailable",

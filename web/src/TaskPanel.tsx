@@ -91,6 +91,16 @@ function ResourceYieldDetail({ run }: { run: Run }) {
   if (resource.attributionStatus === "unavailable") {
     return <small className="resource-yield-status unavailable">资源变化未完整记录</small>;
   }
+  if (resource.measurementSource === "settlement_reward") {
+    return <details className={`resource-yield-detail ${resource.attributionStatus}`}>
+      <summary>结算奖励：金币 {formatResourceDelta(resource.goldDelta)}</summary>
+      <dl><div>
+        <dt>金币</dt>
+        <dd>会试结算页</dd>
+        <strong>{formatResourceDelta(resource.goldDelta)}</strong>
+      </div></dl>
+    </details>;
+  }
   const statusLabel = {
     reliable: "净变化",
     partial: "部分变化",
@@ -104,7 +114,7 @@ function ResourceYieldDetail({ run }: { run: Run }) {
     <summary>{statusLabel}：{deltaSummary}</summary>
     <dl>{RESOURCE_FIELDS.map((field) => <div key={field.key}>
       <dt>{field.label}</dt>
-      <dd>{formatResourceValue(resource.before.values[field.key])} → {formatResourceValue(resource.after?.values[field.key])}</dd>
+      <dd>{formatResourceValue(resource.before?.values[field.key])} → {formatResourceValue(resource.after?.values[field.key])}</dd>
       <strong>{formatResourceDelta(resource[field.deltaKey])}</strong>
     </div>)}</dl>
     {resource.attributionStatus !== "reliable" && <small>该记录未计入可靠收益统计。</small>}
