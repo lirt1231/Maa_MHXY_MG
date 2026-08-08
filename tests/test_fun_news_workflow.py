@@ -238,7 +238,7 @@ class FunNewsWorkflowTests(unittest.TestCase):
         self.assertEqual(result.payload, {"likes": 1, "scrolls": 0, "actions": 2, "clicks": 2})
         self.assertEqual(
             [entry[1] for entry in runtime.trace if entry[0] == "click"],
-            [(180, 400, 36, 24), (470, 290, 32, 76)],
+            [(180, 400, 36, 24), (454, 294, 41, 101)],
         )
 
     def test_stops_when_final_likes_cannot_be_confirmed_in_the_activity_page(self):

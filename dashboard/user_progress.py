@@ -17,6 +17,7 @@ SCENE_MESSAGES = {
     "join_task": "已找到任务入口，正在参加任务",
     "like": "已找到趣闻动态，正在点赞",
     "refresh_feed": "正在下滑加载趣闻动态",
+    "return_to_activity": "已完成 5 次点赞，正在返回活动页面确认任务完成",
     "continue_task": "正在点击右侧任务栏启动当前任务",
     "accept_dialogue": "正在领取宝图任务",
     "accept_task_dialogue": "正在领取师门任务",
@@ -154,6 +155,8 @@ def _structured_message(task_id: str, data: dict) -> str | None:
         return "正在等待新的趣闻动态加载，请勿操作游戏窗口"
     if event == "feed_loading_wait" and task_id == "fun_news":
         return "正在等待趣闻动态加载，请勿操作游戏窗口"
+    if event == "completion_verification_wait" and task_id == "fun_news":
+        return "正在等待活动页面确认趣闻鉴赏已完成，请勿操作游戏窗口"
     if event in {"click", "drag"}:
         reason = str(data.get("reason", "")).strip()
         if not reason:

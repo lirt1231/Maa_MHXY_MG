@@ -106,6 +106,17 @@ def _heart_box_from_template(template_box):
     return [x, y, heart_width, height]
 
 
+def _feed_return_box(image_size):
+    """Stable return-arrow control within a fully identified feed canvas."""
+    width, height = image_size
+    return [
+        round(width * 0.445),
+        round(height * 0.41),
+        max(1, round(width * 0.04)),
+        max(1, round(height * 0.14)),
+    ]
+
+
 def _template_like_decision(templates):
     """Prefer the dedicated heart template over the older composite samples."""
     heart_box = templates.get("fun_news_heart")
@@ -157,14 +168,11 @@ def classify_fun_news_scene(
 
     if is_fun_news_feed(texts, image_size):
         if completion_verification:
-            close_box = templates.get("fun_news_feed_close")
-            if close_box:
-                return {
-                    "status": "return_to_activity",
-                    "box": list(close_box),
-                    "source": "template",
-                }
-            return {"status": "wait", "reason": "feed_return_control_missing"}
+            return {
+                "status": "return_to_activity",
+                "box": _feed_return_box(image_size),
+                "source": "feed_identity",
+            }
         like = _template_like_decision(templates)
         if like is not None:
             return like

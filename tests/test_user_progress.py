@@ -145,6 +145,21 @@ class UserProgressTranslationTests(unittest.TestCase):
         loading = user_progress("fun_news", '{"event":"feed_loading_wait","poll":1}')
         self.assertEqual(loading["message"], "正在等待趣闻动态加载，请勿操作游戏窗口")
 
+    def test_fun_news_reports_activity_page_completion_verification(self):
+        returning = user_progress(
+            "fun_news", '{"event":"scene","status":"return_to_activity","likes":5}'
+        )
+        waiting = user_progress(
+            "fun_news", '{"event":"completion_verification_wait","poll":1}'
+        )
+
+        self.assertEqual(
+            returning["message"], "已完成 5 次点赞，正在返回活动页面确认任务完成"
+        )
+        self.assertEqual(
+            waiting["message"], "正在等待活动页面确认趣闻鉴赏已完成，请勿操作游戏窗口"
+        )
+
 
 class _FinishedProcess:
     def __init__(self, lines):
