@@ -281,6 +281,18 @@ class LikeVisibleFeedItemAction(EvidenceClickAction):
         )
 
 
+class ReturnFromFunNewsFeedAction(EvidenceClickAction):
+    def __init__(self):
+        super().__init__(
+            name="return_from_fun_news_feed",
+            statuses=("return_to_activity",),
+            reason="返回活动页面确认趣闻鉴赏完成",
+            wait_seconds=1.2,
+            repeat_limit=1,
+            repeat_error="趣闻鉴赏返回活动页控件重复出现，已停止以避免重复点击",
+        )
+
+
 class RefreshFeedAction(RelativeDragAction):
     def __init__(self, *, repeat_limit: int):
         super().__init__(
@@ -306,6 +318,7 @@ __all__ = [
     "CloseKnownWelfareOverlayAction",
     "ConfirmFreeRewardAction",
     "LikeVisibleFeedItemAction",
+    "ReturnFromFunNewsFeedAction",
     "JoinIdentifiedActivityAction",
     "OpenActivityCenterAction",
     "OpenScratchCardAction",

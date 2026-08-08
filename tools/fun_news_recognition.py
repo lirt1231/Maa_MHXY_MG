@@ -126,7 +126,8 @@ def fun_news_feed_signature(texts, image_size):
 
 
 def classify_fun_news_scene(
-    texts, templates, image_size, *, daily_tab_confirmed=False
+    texts, templates, image_size, *, daily_tab_confirmed=False,
+    completion_verification=False,
 ):
     """Classify only the daily-card navigation or verified feed controls."""
     if templates.get("fun_news_complete") or find_items(
@@ -135,6 +136,15 @@ def classify_fun_news_scene(
         return {"status": "completed"}
 
     if is_fun_news_feed(texts, image_size):
+        if completion_verification:
+            close_box = templates.get("fun_news_feed_close")
+            if close_box:
+                return {
+                    "status": "return_to_activity",
+                    "box": list(close_box),
+                    "source": "template",
+                }
+            return {"status": "wait", "reason": "feed_return_control_missing"}
         like_box = templates.get("fun_news_like")
         if like_box:
             return {

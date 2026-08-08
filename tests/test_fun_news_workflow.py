@@ -18,6 +18,18 @@ def scene(*, texts=None, templates=None):
     )
 
 
+def verified_feed_texts():
+    return [
+        *[text(channel, (20, 110 + index * 40, 48, 25)) for index, channel in enumerate(
+            ("系统", "世界", "当前", "门派", "帮派", "队伍", "空间")
+        )],
+        text("打开空间", (15, 75, 58, 16)),
+        text("关注", (95, 66, 39, 19)), text("图文", (136, 65, 50, 21)),
+        text("视频", (259, 68, 36, 15)), text("论坛", (302, 66, 39, 19)),
+        text("+关注", (359, 118, 52, 20)),
+    ]
+
+
 class Runtime:
     def __init__(self, scenes):
         self.scenes = iter(scenes)
@@ -170,10 +182,10 @@ class FunNewsWorkflowTests(unittest.TestCase):
         )
         runtime = Runtime([
             feed(1), feed(1), feed(2), feed(2), feed(3), feed(3),
-            feed(4), feed(4), feed(5),
+            feed(4), feed(4), feed(5), scene(templates={"fun_news_complete": (320, 120, 300, 80)}),
         ])
 
-        result = FunNewsWorkflow(max_steps=9).execute(self.context(runtime))
+        result = FunNewsWorkflow(max_steps=10).execute(self.context(runtime))
 
         self.assertEqual(result.status, "completed")
         self.assertEqual(
@@ -184,6 +196,7 @@ class FunNewsWorkflowTests(unittest.TestCase):
     def test_clicks_the_heart_portion_not_the_template_center(self):
         runtime = Runtime([
             scene(templates={"fun_news_like": (180, 400, 76, 24)}),
+            scene(templates={"fun_news_complete": (320, 120, 300, 80)}),
         ])
 
         result = FunNewsWorkflow(target_likes=1).execute(self.context(runtime))
@@ -193,6 +206,36 @@ class FunNewsWorkflowTests(unittest.TestCase):
             [entry for entry in runtime.trace if entry[0] == "click"],
             [("click", (180, 400, 36, 24), "点赞当前趣闻动态")],
         )
+
+    def test_requires_activity_page_completion_after_the_final_like(self):
+        runtime = Runtime([
+            scene(templates={"fun_news_like": (180, 400, 76, 24)}),
+            scene(
+                texts=[*verified_feed_texts(), text("第 1 条趣闻动态", (160, 240, 160, 24))],
+                templates={"fun_news_feed_close": (470, 290, 32, 76)},
+            ),
+            scene(templates={"fun_news_complete": (320, 120, 300, 80)}),
+        ])
+
+        result = FunNewsWorkflow(target_likes=1).execute(self.context(runtime))
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.payload, {"likes": 1, "scrolls": 0, "actions": 2, "clicks": 2})
+        self.assertEqual(
+            [entry[1] for entry in runtime.trace if entry[0] == "click"],
+            [(180, 400, 36, 24), (470, 290, 32, 76)],
+        )
+
+    def test_stops_when_final_likes_cannot_be_confirmed_in_the_activity_page(self):
+        runtime = Runtime([
+            scene(templates={"fun_news_like": (180, 400, 76, 24)}),
+            *[scene(texts=[text("动态仍在加载", (160, 240, 160, 24))]) for _ in range(3)],
+        ])
+
+        with self.assertRaisesRegex(RuntimeError, "未能在活动页面确认趣闻鉴赏已完成"):
+            FunNewsWorkflow(
+                target_likes=1, max_completion_verification_polls=3,
+            ).execute(self.context(runtime))
 
     def test_unchanged_feed_after_scroll_never_receives_a_second_like(self):
         like = {"fun_news_like": (180, 400, 76, 24)}

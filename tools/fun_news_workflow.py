@@ -19,7 +19,11 @@ try:
         classify_fun_news_scene,
         fun_news_feed_signature,
     )
-    from .game_atomic_actions import LikeVisibleFeedItemAction, RefreshFeedAction
+    from .game_atomic_actions import (
+        LikeVisibleFeedItemAction,
+        RefreshFeedAction,
+        ReturnFromFunNewsFeedAction,
+    )
 except ImportError:  # Direct execution through a platform runner.
     from automation_actions import ActionMetrics
     from automation_workflows import (
@@ -34,7 +38,11 @@ except ImportError:  # Direct execution through a platform runner.
         classify_fun_news_scene,
         fun_news_feed_signature,
     )
-    from game_atomic_actions import LikeVisibleFeedItemAction, RefreshFeedAction
+    from game_atomic_actions import (
+        LikeVisibleFeedItemAction,
+        RefreshFeedAction,
+        ReturnFromFunNewsFeedAction,
+    )
 
 
 TARGET_LIKES = 5
@@ -46,6 +54,7 @@ class FunNewsWorkflow:
     target_likes: int = TARGET_LIKES
     max_feed_scrolls: int = 8
     max_feed_loading_polls: int = 4
+    max_completion_verification_polls: int = 8
     classifier: Callable[..., Mapping[str, Any]] = field(
         default=classify_fun_news_scene,
         repr=False,
@@ -60,6 +69,7 @@ class FunNewsWorkflow:
                 self.target_likes,
                 self.max_feed_scrolls,
                 self.max_feed_loading_polls,
+                self.max_completion_verification_polls,
             )
         ):
             raise ValueError("趣闻鉴赏 Workflow 上限必须是正整数")
@@ -69,6 +79,7 @@ class FunNewsWorkflow:
         daily_actions = DailyActivityActions("趣闻鉴赏")
         like_action = LikeVisibleFeedItemAction()
         scroll_feed = RefreshFeedAction(repeat_limit=self.max_feed_scrolls)
+        return_to_activity = ReturnFromFunNewsFeedAction()
         unknown_polls = 0
         likes = 0
         feed_scrolls = 0
@@ -78,6 +89,9 @@ class FunNewsWorkflow:
         last_like_box = None
         last_feed_signature = None
         feed_loading_polls = 0
+        completion_verification = False
+        completion_return_sent = False
+        completion_verification_polls = 0
 
         for step in range(1, self.max_steps + 1):
             scene = context.runtime.read_scene(FUN_NEWS_TEMPLATES)
@@ -86,6 +100,7 @@ class FunNewsWorkflow:
                 scene.templates,
                 scene.image_size,
                 daily_tab_confirmed=daily_actions.daily_tab_confirmed,
+                completion_verification=completion_verification,
             )
             status = str(decision.get("status", "unknown"))
             context.emit(
@@ -104,7 +119,7 @@ class FunNewsWorkflow:
 
             if status in {"completed", "already_completed"}:
                 return WorkflowResult(
-                    status,
+                    "completed" if completion_verification else status,
                     {
                         "likes": likes,
                         "scrolls": feed_scrolls,
@@ -114,6 +129,26 @@ class FunNewsWorkflow:
                 )
 
             action_context = context.action_context(scene, decision, "趣闻鉴赏")
+            if completion_verification:
+                if status == "return_to_activity" and not completion_return_sent:
+                    metrics.record(return_to_activity.execute(action_context))
+                    completion_return_sent = True
+                    completion_verification_polls = 0
+                    continue
+                completion_verification_polls += 1
+                if completion_verification_polls >= self.max_completion_verification_polls:
+                    raise RuntimeError(
+                        "已完成 5 次点赞，但未能在活动页面确认趣闻鉴赏已完成"
+                    )
+                context.emit(
+                    "completion_verification_wait",
+                    task="趣闻鉴赏",
+                    poll=completion_verification_polls,
+                    returnSent=completion_return_sent,
+                )
+                context.waiter.wait(1.0)
+                continue
+
             if needs_scroll:
                 if status not in {"like", "refresh_feed"}:
                     unknown_polls += 1
@@ -173,15 +208,8 @@ class FunNewsWorkflow:
                     targetLikes=self.target_likes,
                 )
                 if likes >= self.target_likes:
-                    return WorkflowResult(
-                        "completed",
-                        {
-                            "likes": likes,
-                            "scrolls": feed_scrolls,
-                            "actions": metrics.actions,
-                            "clicks": metrics.clicks,
-                        },
-                    )
+                    completion_verification = True
+                    completion_verification_polls = 0
                 continue
 
             if status == "refresh_feed":
