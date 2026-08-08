@@ -44,6 +44,8 @@ RESOURCE_YIELD_FIELDS_BY_TASK = {
 # 宝图领取后、趣闻点赞时均没有可归因的角色资源变化；会试单独从结算页读取金币。
 # 跳过边界快照与收益记录，而不是将未发生的变化写成 0。
 RESOURCE_TRACKING_DISABLED_TASKS = frozenset({"baotu", "fun_news", "keju_huishi"})
+# 会试的最终结算页是金币收益的唯一可信来源，必须保留给结算识别与用户复核。
+TASKS_RETAIN_RESULT_SCREEN = frozenset({"keju_huishi"})
 TASK_SUCCESS_RESULTS = {"completed", "already_completed"}
 TASK_RESULT_STATUSES = TASK_SUCCESS_RESULTS | {"safe_stopped", "cancelled"}
 TASK_RESULT_NUMERIC_FIELDS = {
@@ -1394,6 +1396,32 @@ class RunnerManager:
                         if self._stop_requested:
                             status = "cancelled"
                             task_result = None
+                        elif run["taskId"] in TASKS_RETAIN_RESULT_SCREEN:
+                            status = "succeeded"
+                            failure_phase = None
+                            home_recovery = {
+                                "status": "not_requested",
+                                "outcome": None,
+                                "scene": "huishi_settlement",
+                                "reason": "会试结算页已保留",
+                                "actions": 0,
+                                "clicks": 0,
+                            }
+                            run["status"] = status
+                            run["stage"] = "会试答题完成，结算页已保留"
+                            run["result"] = task_result
+                            run["homeRecovery"] = home_recovery
+                            self.database.update_run_stage(
+                                run["id"], status, run["stage"],
+                                result=task_result,
+                                home_recovery=home_recovery,
+                                failure_phase=None,
+                            )
+                            self._emit(
+                                "info", "status", "会试答题完成，结算页已保留",
+                                {"status": status, "result": task_result,
+                                 "homeRecovery": home_recovery},
+                            )
                         else:
                             recovery_started = True
                             failure_phase = None
@@ -1432,7 +1460,10 @@ class RunnerManager:
                                 start_new_session=True,
                             )
                             process = self._process
-                    if status != "cancelled":
+                    if (
+                        status != "cancelled"
+                        and run["taskId"] not in TASKS_RETAIN_RESULT_SCREEN
+                    ):
                         recovery_lines = []
                         assert process.stdout is not None
                         for line in process.stdout:
@@ -1549,7 +1580,12 @@ class RunnerManager:
                     if self._current and self._current["id"] == run["id"]:
                         self._current["status"] = status
                         self._current["stage"] = {
-                            "succeeded": "已确认回到主界面",
+                            "succeeded": (
+                                "会试答题完成，结算页已保留"
+                                if run["taskId"] in TASKS_RETAIN_RESULT_SCREEN
+                                and not recovery_started
+                                else "已确认回到主界面"
+                            ),
                             "failed": (
                                 "任务完成但返回主界面失败"
                                 if failure_phase == "recovery" else "运行失败"

@@ -242,13 +242,12 @@ class TaskResourceRunnerTests(unittest.TestCase):
         }
         processes = [
             task_process(task_id="keju_huishi", settlement_reward=settlement_reward),
-            recovery_process(),
         ]
         with patch("dashboard.runner.subprocess.Popen", side_effect=processes) as popen:
             self.start_huishi()
             current = self.wait_for(lambda run: run["status"] == "succeeded")
 
-        self.assertEqual(popen.call_count, 2)
+        self.assertEqual(popen.call_count, 1)
         self.assertTrue(all(
             not any("run_resource_snapshot_macos.py" in part for part in call.args[0])
             for call in popen.call_args_list
@@ -258,6 +257,7 @@ class TaskResourceRunnerTests(unittest.TestCase):
             current["resourceYield"]["measurementSource"], "settlement_reward"
         )
         self.assertIsNone(current["resourceYield"]["before"])
+        self.assertEqual(current["homeRecovery"]["status"], "not_requested")
 
     def test_safe_stop_never_captures_after(self):
         processes = [

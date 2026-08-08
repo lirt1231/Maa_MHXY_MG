@@ -471,6 +471,21 @@ class RunnerTaskContractTests(unittest.TestCase):
         self.assertEqual(final_event["message"], "三界奇缘答题完成")
         self.assertEqual(final_event["payload"]["result"]["questions"], 10)
 
+    def test_huishi_completion_keeps_the_settlement_page(self):
+        process = _FinishedProcess([
+            'result_json={"task_id":"keju_huishi","status":"completed",'
+            '"answers":15,"clicks":15,"limit":20}'
+        ])
+        with patch("dashboard.runner.subprocess.Popen", return_value=process) as popen:
+            self.manager.start("keju_huishi", {}, checklist_confirmed=True)
+            current = self._wait_for_terminal()
+
+        self.assertEqual(current["status"], "succeeded")
+        self.assertEqual(current["stage"], "会试答题完成，结算页已保留")
+        self.assertEqual(current["homeRecovery"]["status"], "not_requested")
+        self.assertEqual(current["homeRecovery"]["scene"], "huishi_settlement")
+        self.assertEqual(popen.call_count, 1)
+
     def test_sanjie_safe_stop_is_a_failed_run_with_exact_reason(self):
         process = _FinishedProcess([
             'result_json={"task_id":"sanjieqiyuan","status":"safe_stopped","reason":"未识别到完成状态"}'
