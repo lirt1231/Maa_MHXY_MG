@@ -41,6 +41,11 @@ FUN_NEWS_TEMPLATES = {
         "green_mask": True,
         "roi_ratio": (0.10, 0.13, 0.50, 0.83),
     },
+    "fun_news_heart": {
+        "templates": ["qiandao/kongjian_like_live.png"],
+        "threshold": 0.88,
+        "roi_ratio": (0.10, 0.13, 0.50, 0.83),
+    },
     "fun_news_feed_close": {
         "templates": ["qiandao/liaotian_guanbi.png"],
         "threshold": 0.90,
@@ -101,6 +106,21 @@ def _heart_box_from_template(template_box):
     return [x, y, heart_width, height]
 
 
+def _template_like_decision(templates):
+    """Prefer the dedicated heart template over the older composite samples."""
+    heart_box = templates.get("fun_news_heart")
+    if heart_box:
+        return {"status": "like", "box": list(heart_box), "source": "heart_template"}
+    composite_box = templates.get("fun_news_like")
+    if composite_box:
+        return {
+            "status": "like",
+            "box": _heart_box_from_template(composite_box),
+            "source": "template",
+        }
+    return None
+
+
 def fun_news_feed_signature(texts, image_size):
     """Return visible feed text used to prove a scroll reached a new entry."""
     entries = []
@@ -145,22 +165,14 @@ def classify_fun_news_scene(
                     "source": "template",
                 }
             return {"status": "wait", "reason": "feed_return_control_missing"}
-        like_box = templates.get("fun_news_like")
-        if like_box:
-            return {
-                "status": "like",
-                "box": _heart_box_from_template(like_box),
-                "source": "template",
-            }
+        like = _template_like_decision(templates)
+        if like is not None:
+            return like
         return {"status": "refresh_feed"}
 
-    like_box = templates.get("fun_news_like")
-    if like_box:
-        return {
-            "status": "like",
-            "box": _heart_box_from_template(like_box),
-            "source": "template",
-        }
+    like = _template_like_decision(templates)
+    if like is not None:
+        return like
     if templates.get("fun_news_feed_close"):
         return {"status": "refresh_feed"}
 

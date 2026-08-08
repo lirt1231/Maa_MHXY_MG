@@ -122,6 +122,21 @@ class FunNewsRecognitionTests(unittest.TestCase):
             {"status": "like", "box": [180, 400, 36, 24], "source": "template"},
         )
 
+    def test_dedicated_heart_template_uses_its_exact_click_box(self):
+        decision = classify_fun_news_scene(
+            [],
+            {
+                "fun_news_like": (180, 400, 76, 24),
+                "fun_news_heart": (146, 220, 50, 50),
+            },
+            (1020, 718),
+        )
+
+        self.assertEqual(
+            decision,
+            {"status": "like", "box": [146, 220, 50, 50], "source": "heart_template"},
+        )
+
     def test_completed_template_wins_over_visible_like(self):
         self.assertEqual(
             classify_fun_news_scene(
