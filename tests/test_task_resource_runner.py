@@ -82,10 +82,19 @@ def snapshot_process(
     ])
 
 
-def task_process(status="completed", *, task_id="sanjieqiyuan"):
+def task_process(status="completed", *, task_id="sanjieqiyuan", settlement_reward=None):
     payload = (
         {"task_id": task_id, "status": status, "actions": 2, "clicks": 2}
         if task_id == "baotu"
+        else {
+            "task_id": task_id,
+            "status": status,
+            "answers": 15,
+            "clicks": 15,
+            "limit": 20,
+            **({"settlement_reward": settlement_reward} if settlement_reward is not None else {}),
+        }
+        if task_id == "keju_huishi"
         else {
             "task_id": task_id,
             "status": status,
@@ -157,6 +166,11 @@ class TaskResourceRunnerTests(unittest.TestCase):
     def start_baotu(self):
         return self.manager.start("baotu", {}, checklist_confirmed=True)
 
+    def start_huishi(self):
+        return self.manager.start(
+            "keju_huishi", {"waitForRoundOne": True}, checklist_confirmed=True
+        )
+
     def test_completed_task_records_before_after_and_net_changes(self):
         processes = [
             snapshot_process("before", captured_at="2026-08-05T02:00:00+00:00"),
@@ -213,6 +227,34 @@ class TaskResourceRunnerTests(unittest.TestCase):
         ))
         self.assertIsNone(current["resourceYield"])
         self.assertIsNone(self.database.recent_runs(1)[0]["resourceYield"])
+
+    def test_huishi_records_only_confirmed_settlement_gold_without_snapshots(self):
+        settlement_reward = {
+            "status": "confirmed",
+            "gold": 12500,
+            "evidence": {
+                "sourcePage": "huishi_settlement",
+                "amount": {"text": "12,500", "box": [470, 400, 76, 28]},
+            },
+        }
+        processes = [
+            task_process(task_id="keju_huishi", settlement_reward=settlement_reward),
+            recovery_process(),
+        ]
+        with patch("dashboard.runner.subprocess.Popen", side_effect=processes) as popen:
+            self.start_huishi()
+            current = self.wait_for(lambda run: run["status"] == "succeeded")
+
+        self.assertEqual(popen.call_count, 2)
+        self.assertTrue(all(
+            not any("run_resource_snapshot_macos.py" in part for part in call.args[0])
+            for call in popen.call_args_list
+        ))
+        self.assertEqual(current["resourceYield"]["goldDelta"], 12500)
+        self.assertEqual(
+            current["resourceYield"]["measurementSource"], "settlement_reward"
+        )
+        self.assertIsNone(current["resourceYield"]["before"])
 
     def test_safe_stop_never_captures_after(self):
         processes = [

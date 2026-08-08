@@ -15,6 +15,7 @@ from tools.resource_snapshots import (
     ResourceFieldEvidence,
     ResourceSnapshot,
     ResourceValues,
+    ResourceYield,
     YIELD_FIELDS,
     calculate_resource_yield,
 )
@@ -42,7 +43,7 @@ RESOURCE_YIELD_FIELDS_BY_TASK = {
 }
 # 宝图任务领取后由游戏自动推进，当前没有可归因的角色资源变化。
 # 跳过边界快照与收益记录，而不是将未发生的变化写成 0。
-RESOURCE_TRACKING_DISABLED_TASKS = frozenset({"baotu"})
+RESOURCE_TRACKING_DISABLED_TASKS = frozenset({"baotu", "keju_huishi"})
 TASK_SUCCESS_RESULTS = {"completed", "already_completed"}
 TASK_RESULT_STATUSES = TASK_SUCCESS_RESULTS | {"safe_stopped", "cancelled"}
 TASK_RESULT_NUMERIC_FIELDS = {
@@ -73,7 +74,10 @@ TASK_RESULT_SCHEMAS = {
             "completed", "already_completed", "limit_reached", "safe_stopped",
             "cancelled",
         },
-        "fields": {"task_id", "status", "reason", "answers", "clicks", "limit"},
+        "fields": {
+            "task_id", "status", "reason", "answers", "clicks", "limit",
+            "settlement_reward",
+        },
         "required": {
             status: {"answers", "clicks", "limit"}
             for status in TASK_RESULT_STATUSES
@@ -830,6 +834,57 @@ class RunnerManager:
         )
         return stored
 
+    def _store_huishi_settlement_reward(self, run: dict, result: dict) -> dict | None:
+        reward = result.get("settlement_reward")
+        if not isinstance(reward, dict) or reward.get("status") != "confirmed":
+            reason = reward.get("reason") if isinstance(reward, dict) else "missing"
+            self._emit(
+                "warning", "resource", "会试结算页未识别到金币，本次不记录收益",
+                {"reason": reason},
+            )
+            return None
+        evidence_payload = reward["evidence"]
+        amount = evidence_payload["amount"]
+        captured = ResourceSnapshot(
+            target_id="local-primary",
+            phase="reward",
+            captured_at=utc_now(),
+            values=ResourceValues(gold=reward["gold"]),
+            evidence={
+                "gold": ResourceFieldEvidence(
+                    status="captured",
+                    source_page="huishi_settlement",
+                    raw_text=amount["text"],
+                    box=tuple(amount["box"]),
+                    frame_id=evidence_payload.get("frameId"),
+                ),
+            },
+            captured_fields=frozenset({"gold"}),
+        )
+        stored_snapshot = self.database.add_resource_snapshot(run["id"], captured)
+        direct_reward = ResourceYield(
+            task_status="completed",
+            attribution_status="reliable",
+            gold_delta=reward["gold"],
+            after_snapshot_id=stored_snapshot.snapshot_id,
+            tracked_fields=frozenset({"gold"}),
+            measurement_source="settlement_reward",
+        )
+        stored = self.database.add_resource_yield(
+            run["id"], run["taskId"], direct_reward
+        )
+        with self._lock:
+            run["resourceYield"] = stored
+            run["benefitStatus"] = stored["attributionStatus"]
+            if self._current and self._current["id"] == run["id"]:
+                self._current["resourceYield"] = stored
+                self._current["benefitStatus"] = stored["attributionStatus"]
+        self._emit(
+            "info", "resource", "会试结算金币已记录",
+            {"resourceYield": stored},
+        )
+        return stored
+
     @staticmethod
     def _parse_home_recovery(output_lines: list[str]) -> dict:
         protocol = [
@@ -1168,6 +1223,26 @@ class RunnerManager:
             raise RuntimeError("任务最终结果包含无效的停止原因")
         if status == "safe_stopped" and reason is None:
             raise RuntimeError("任务安全停止结果缺少原因")
+        if task_id == "keju_huishi" and "settlement_reward" in result:
+            reward = result["settlement_reward"]
+            if not isinstance(reward, dict) or reward.get("status") not in {
+                "confirmed", "unavailable",
+            }:
+                raise RuntimeError("会试结算奖励结果无效")
+            if reward["status"] == "confirmed":
+                gold = reward.get("gold")
+                evidence = reward.get("evidence")
+                if (
+                    isinstance(gold, bool) or not isinstance(gold, int) or gold < 0
+                    or not isinstance(evidence, dict)
+                    or not isinstance(evidence.get("amount"), dict)
+                    or not isinstance(evidence["amount"].get("text"), str)
+                    or not isinstance(evidence["amount"].get("box"), list)
+                    or len(evidence["amount"]["box"]) != 4
+                ):
+                    raise RuntimeError("会试结算金币证据无效")
+            elif not isinstance(reward.get("reason"), str) or not reward["reason"]:
+                raise RuntimeError("会试结算奖励缺少未采集原因")
         if (
             task_id == "zhuogui"
             and status == "completed"
@@ -1310,6 +1385,11 @@ class RunnerManager:
                 task_result = self._parse_task_result(run["taskId"], output_lines)
                 result_status = task_result["status"]
                 if result_status in TASK_SUCCESS_RESULTS and return_code == 0:
+                    if (
+                        run["taskId"] == "keju_huishi"
+                        and task_result["status"] == "completed"
+                    ):
+                        self._store_huishi_settlement_reward(run, task_result)
                     with self._lock:
                         if self._stop_requested:
                             status = "cancelled"

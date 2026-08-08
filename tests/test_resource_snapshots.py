@@ -223,6 +223,31 @@ class ResourceYieldCalculationTests(unittest.TestCase):
         self.assertIsNone(result.gold_delta)
         self.assertIsNone(result.silver_delta)
 
+    def test_settlement_reward_is_a_gold_only_direct_measurement(self):
+        reward = ResourceYield(
+            task_status="completed",
+            attribution_status="reliable",
+            gold_delta=12500,
+            after_snapshot_id=2,
+            tracked_fields=frozenset({"gold"}),
+            measurement_source="settlement_reward",
+        )
+
+        self.assertIsNone(reward.before_snapshot_id)
+        self.assertEqual(reward.to_payload()["measurementSource"], "settlement_reward")
+
+    def test_settlement_reward_rejects_non_gold_or_synthetic_before_snapshot(self):
+        with self.assertRaisesRegex(ValueError, "结算奖励"):
+            ResourceYield(
+                task_status="completed",
+                attribution_status="reliable",
+                gold_delta=12500,
+                before_snapshot_id=1,
+                after_snapshot_id=2,
+                tracked_fields=frozenset({"gold"}),
+                measurement_source="settlement_reward",
+            )
+
     def test_missing_after_snapshot_is_unavailable(self):
         result = calculate_resource_yield(snapshot(), None, task_status="cancelled")
 

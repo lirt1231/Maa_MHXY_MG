@@ -109,7 +109,7 @@ export type ResourceSnapshot = {
   id: number;
   targetId: string;
   characterId?: string | null;
-  phase: "before" | "after";
+  phase: "before" | "after" | "reward";
   capturedAt: string;
   status: "success" | "partial" | "failed";
   values: {
@@ -127,16 +127,17 @@ export type ResourceSnapshot = {
 export type TaskResourceYield = {
   taskStatus: string;
   attributionStatus: "reliable" | "interrupted" | "cross_level_unknown" | "partial" | "unavailable" | "not_run";
-  beforeSnapshotId: number;
+  beforeSnapshotId: number | null;
   afterSnapshotId: number | null;
   experienceDelta: number | null;
   goldDelta: number | null;
   silverDelta: number | null;
   reasons: string[];
   trackedFields?: TaskYieldMetric[];
+  measurementSource?: "resource_delta" | "settlement_reward";
   calculationVersion: number;
   createdAt: string;
-  before: ResourceSnapshot;
+  before: ResourceSnapshot | null;
   after: ResourceSnapshot | null;
 };
 

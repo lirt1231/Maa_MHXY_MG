@@ -130,7 +130,7 @@ class Database:
                 CREATE TABLE IF NOT EXISTS task_resource_yields (
                     run_id TEXT PRIMARY KEY,
                     task_id TEXT NOT NULL,
-                    before_snapshot_id INTEGER NOT NULL,
+                    before_snapshot_id INTEGER,
                     after_snapshot_id INTEGER,
                     task_status TEXT NOT NULL,
                     attribution_status TEXT NOT NULL,
@@ -139,6 +139,7 @@ class Database:
                     silver_delta INTEGER,
                     tracked_fields_json TEXT NOT NULL DEFAULT '["experience","gold","silver"]',
                     reasons_json TEXT NOT NULL DEFAULT '[]',
+                    measurement_source TEXT NOT NULL DEFAULT 'resource_delta',
                     calculation_version INTEGER NOT NULL DEFAULT 1,
                     created_at TEXT NOT NULL,
                     FOREIGN KEY(run_id) REFERENCES task_runs(id),
@@ -169,6 +170,54 @@ class Database:
             resource_yield_columns = {
                 row["name"] for row in db.execute("PRAGMA table_info(task_resource_yields)")
             }
+            before_snapshot_required = next(
+                (
+                    bool(row["notnull"])
+                    for row in db.execute("PRAGMA table_info(task_resource_yields)")
+                    if row["name"] == "before_snapshot_id"
+                ),
+                False,
+            )
+            if "measurement_source" not in resource_yield_columns or before_snapshot_required:
+                db.executescript(
+                    """
+                    CREATE TABLE task_resource_yields_v2 (
+                        run_id TEXT PRIMARY KEY,
+                        task_id TEXT NOT NULL,
+                        before_snapshot_id INTEGER,
+                        after_snapshot_id INTEGER,
+                        task_status TEXT NOT NULL,
+                        attribution_status TEXT NOT NULL,
+                        experience_delta INTEGER,
+                        gold_delta INTEGER,
+                        silver_delta INTEGER,
+                        tracked_fields_json TEXT NOT NULL DEFAULT '["experience","gold","silver"]',
+                        reasons_json TEXT NOT NULL DEFAULT '[]',
+                        measurement_source TEXT NOT NULL DEFAULT 'resource_delta',
+                        calculation_version INTEGER NOT NULL DEFAULT 1,
+                        created_at TEXT NOT NULL,
+                        FOREIGN KEY(run_id) REFERENCES task_runs(id),
+                        FOREIGN KEY(before_snapshot_id) REFERENCES resource_snapshots(id),
+                        FOREIGN KEY(after_snapshot_id) REFERENCES resource_snapshots(id)
+                    );
+                    INSERT INTO task_resource_yields_v2(
+                        run_id, task_id, before_snapshot_id, after_snapshot_id,
+                        task_status, attribution_status, experience_delta, gold_delta,
+                        silver_delta, tracked_fields_json, reasons_json,
+                        measurement_source, calculation_version, created_at
+                    ) SELECT
+                        run_id, task_id, before_snapshot_id, after_snapshot_id,
+                        task_status, attribution_status, experience_delta, gold_delta,
+                        silver_delta, tracked_fields_json, reasons_json,
+                        'resource_delta', calculation_version, created_at
+                    FROM task_resource_yields;
+                    DROP TABLE task_resource_yields;
+                    ALTER TABLE task_resource_yields_v2 RENAME TO task_resource_yields;
+                    """
+                )
+                resource_yield_columns = {
+                    row["name"] for row in db.execute("PRAGMA table_info(task_resource_yields)")
+                }
             if "tracked_fields_json" not in resource_yield_columns:
                 db.execute(
                     "ALTER TABLE task_resource_yields ADD COLUMN tracked_fields_json "
@@ -358,8 +407,6 @@ class Database:
     ) -> dict:
         if not isinstance(resource_yield, ResourceYield):
             raise ValueError("任务资源收益契约无效")
-        if resource_yield.before_snapshot_id is None:
-            raise ValueError("任务资源收益缺少执行前快照编号")
         reasons_json = json.dumps(
             list(resource_yield.reasons), ensure_ascii=False, allow_nan=False
         )
@@ -368,8 +415,9 @@ class Database:
                 """INSERT INTO task_resource_yields(
                 run_id, task_id, before_snapshot_id, after_snapshot_id,
                 task_status, attribution_status, experience_delta, gold_delta,
-                silver_delta, tracked_fields_json, reasons_json, calculation_version, created_at
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,1,?)
+                silver_delta, tracked_fields_json, reasons_json, measurement_source,
+                calculation_version, created_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1,?)
                 ON CONFLICT(run_id) DO UPDATE SET
                     task_id=excluded.task_id,
                     before_snapshot_id=excluded.before_snapshot_id,
@@ -381,6 +429,7 @@ class Database:
                     silver_delta=excluded.silver_delta,
                     tracked_fields_json=excluded.tracked_fields_json,
                     reasons_json=excluded.reasons_json,
+                    measurement_source=excluded.measurement_source,
                     calculation_version=excluded.calculation_version,
                     created_at=excluded.created_at""",
                 (
@@ -395,6 +444,7 @@ class Database:
                     resource_yield.silver_delta,
                     json.dumps(sorted(resource_yield.tracked_fields), ensure_ascii=False),
                     reasons_json,
+                    resource_yield.measurement_source,
                     utc_now(),
                 ),
             )
@@ -1044,10 +1094,11 @@ class Database:
             "goldDelta": row["gold_delta"],
             "silverDelta": row["silver_delta"],
             "trackedFields": json.loads(row["tracked_fields_json"]),
+            "measurementSource": row["measurement_source"],
             "reasons": json.loads(row["reasons_json"]),
             "calculationVersion": row["calculation_version"],
             "createdAt": row["created_at"],
-            "before": cls._resource_snapshot_row(before),
+            "before": cls._resource_snapshot_row(before) if before is not None else None,
             "after": cls._resource_snapshot_row(after) if after is not None else None,
         }
 

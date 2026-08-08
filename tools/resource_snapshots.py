@@ -13,7 +13,7 @@ RESOURCE_FIELDS = frozenset(
     {"level", "experience", "experience_required", "gold", "silver"}
 )
 YIELD_FIELDS = frozenset({"experience", "gold", "silver"})
-SNAPSHOT_PHASES = frozenset({"before", "after", "standalone"})
+SNAPSHOT_PHASES = frozenset({"before", "after", "reward", "standalone"})
 SNAPSHOT_STATUSES = frozenset({"success", "partial", "failed"})
 FIELD_STATUSES = frozenset({"captured", "missing", "invalid", "corrected"})
 ATTRIBUTION_STATUSES = frozenset(
@@ -36,6 +36,7 @@ TASK_STATUSES = frozenset(
         "failed",
     }
 )
+YIELD_SOURCES = frozenset({"resource_delta", "settlement_reward"})
 TARGET_ID_RE = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
 
 
@@ -233,12 +234,15 @@ class ResourceYield:
     before_snapshot_id: int | None = None
     after_snapshot_id: int | None = None
     tracked_fields: frozenset[str] = YIELD_FIELDS
+    measurement_source: str = "resource_delta"
 
     def __post_init__(self) -> None:
         if self.task_status not in TASK_STATUSES:
             raise ValueError("任务资源收益的任务状态无效")
         if self.attribution_status not in ATTRIBUTION_STATUSES:
             raise ValueError("任务资源收益归因状态无效")
+        if self.measurement_source not in YIELD_SOURCES:
+            raise ValueError("任务资源收益来源无效")
         if not isinstance(self.tracked_fields, frozenset) or not self.tracked_fields or (
             self.tracked_fields - YIELD_FIELDS
         ):
@@ -277,6 +281,15 @@ class ResourceYield:
             value is not None for value in deltas.values()
         ):
             raise ValueError("未采集或未执行的任务不能携带资源差值")
+        if self.measurement_source == "settlement_reward":
+            if self.before_snapshot_id is not None or self.after_snapshot_id is None:
+                raise ValueError("结算奖励必须只关联结算快照")
+            if self.tracked_fields != frozenset({"gold"}):
+                raise ValueError("结算奖励只能记录金币")
+            if self.experience_delta is not None or self.silver_delta is not None:
+                raise ValueError("结算奖励不能记录经验或银币")
+            if self.attribution_status == "reliable" and self.gold_delta is None:
+                raise ValueError("可靠的结算奖励必须包含金币")
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -289,6 +302,7 @@ class ResourceYield:
             "silverDelta": self.silver_delta,
             "reasons": list(self.reasons),
             "trackedFields": sorted(self.tracked_fields),
+            "measurementSource": self.measurement_source,
         }
 
 
@@ -463,6 +477,7 @@ __all__ = [
     "FIELD_STATUSES",
     "RESOURCE_FIELDS",
     "YIELD_FIELDS",
+    "YIELD_SOURCES",
     "ResourceFieldEvidence",
     "ResourceSnapshot",
     "ResourceValues",
