@@ -27,6 +27,19 @@ class HuishiSettlementRewardTests(unittest.TestCase):
         self.assertEqual(reward["status"], "confirmed")
         self.assertEqual(reward["gold"], 30000)
 
+    def test_reads_live_current_bonus_without_using_weekly_total(self):
+        reward = parse_huishi_settlement_reward([
+            {"text": "科举会试", "box": [451, 137, 120, 33]},
+            {"text": "恭喜通关", "box": [522, 223, 245, 55]},
+            {"text": "本次会获得奖金", "box": [372, 315, 152, 24]},
+            {"text": "1635", "box": [426, 357, 78, 32]},
+            {"text": "本周累计获得奖金 4,560", "box": [581, 360, 245, 31]},
+        ], IMAGE_SIZE)
+
+        self.assertEqual(reward["status"], "confirmed")
+        self.assertEqual(reward["gold"], 1635)
+        self.assertEqual(reward["evidence"]["goldLabel"]["text"], "本次会获得奖金")
+
     def test_rejects_wallet_gold_without_the_huishi_settlement_identity(self):
         reward = parse_huishi_settlement_reward([
             {"text": "金币", "box": [180, 610, 48, 22]},

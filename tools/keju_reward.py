@@ -10,6 +10,7 @@ from typing import Any
 _NUMBER_RE = re.compile(r"(?<!\d)(\d[\d,，.]*)(?!\d)")
 _HUI_SHI_TITLE_RE = re.compile(r"(?:科举)?会试(?:成绩|完成|结束|奖励)?")
 _GOLD_RE = re.compile(r"(?:获得|奖励|本次)?金币")
+_CURRENT_REWARD_RE = re.compile(r"(?:本次|本场)(?:会)?(?:获得)?奖金")
 
 
 def _normalize(value: object) -> str:
@@ -80,9 +81,20 @@ def parse_huishi_settlement_reward(
     if title is None:
         return {"status": "unavailable", "reason": "huishi_settlement_identity_missing"}
 
-    for label, label_text, label_box in normalized:
+    # The live completion page calls the reward "本次会获得奖金" rather than
+    # "金币". Prefer that label so weekly/monthly accumulated bonuses cannot
+    # be attributed to this run.
+    current_reward_labels = [
+        entry for entry in normalized if _CURRENT_REWARD_RE.search(entry[1])
+    ]
+    gold_labels = [
+        entry
+        for entry in normalized
+        if _GOLD_RE.search(entry[1]) and entry not in current_reward_labels
+    ]
+    for label, label_text, label_box in [*current_reward_labels, *gold_labels]:
         label_center_y = label_box[1] + label_box[3] / 2
-        if not _GOLD_RE.search(label_text) or not (
+        if not (_CURRENT_REWARD_RE.search(label_text) or _GOLD_RE.search(label_text)) or not (
             height * 0.08 <= label_center_y <= height * 0.80
         ):
             continue
