@@ -41,9 +41,9 @@ RESOURCE_CAPTURE_FIELDS_BY_TASK = {
 RESOURCE_YIELD_FIELDS_BY_TASK = {
     "kaogu": frozenset({"silver"}),
 }
-# 宝图任务领取后由游戏自动推进，当前没有可归因的角色资源变化。
+# 宝图领取后、趣闻点赞时均没有可归因的角色资源变化；会试单独从结算页读取金币。
 # 跳过边界快照与收益记录，而不是将未发生的变化写成 0。
-RESOURCE_TRACKING_DISABLED_TASKS = frozenset({"baotu", "keju_huishi"})
+RESOURCE_TRACKING_DISABLED_TASKS = frozenset({"baotu", "fun_news", "keju_huishi"})
 TASK_SUCCESS_RESULTS = {"completed", "already_completed"}
 TASK_RESULT_STATUSES = TASK_SUCCESS_RESULTS | {"safe_stopped", "cancelled"}
 TASK_RESULT_NUMERIC_FIELDS = {

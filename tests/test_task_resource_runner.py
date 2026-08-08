@@ -228,6 +228,9 @@ class TaskResourceRunnerTests(unittest.TestCase):
         self.assertIsNone(current["resourceYield"])
         self.assertIsNone(self.database.recent_runs(1)[0]["resourceYield"])
 
+    def test_fun_news_skips_character_resource_tracking(self):
+        self.assertFalse(self.manager._tracks_task_resources("fun_news"))
+
     def test_huishi_records_only_confirmed_settlement_gold_without_snapshots(self):
         settlement_reward = {
             "status": "confirmed",
