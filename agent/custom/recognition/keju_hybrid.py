@@ -385,6 +385,7 @@ class KejuHybridAnswer(CustomRecognition):
         with timings.track("screenshot"):
             image = _recognition_image(context, argv)
         expected_exam_type = os.environ.get("MAA_KEJU_EXAM_TYPE", "xiangshi")
+        wait_for_entry = os.environ.get("MAA_KEJU_WAIT_FOR_ENTRY") == "1"
         observed_exam_type = None
         for title_roi in keju_exam_title_rois(image):
             with timings.track("ocr"):
@@ -399,11 +400,23 @@ class KejuHybridAnswer(CustomRecognition):
                 break
         self.last_exam_type = observed_exam_type
         if observed_exam_type is None:
+            if wait_for_entry:
+                self.last_status = "waiting"
+                self.last_reason = "等待手动进入科举正式答题页面"
+                return CustomRecognition.AnalyzeResult(
+                    box=(0, 0, 0, 0), detail=self.last_reason
+                )
             self.last_status = "unverified_exam_type"
             return CustomRecognition.AnalyzeResult(
                 box=(0, 0, 0, 0), detail="未能从标题确认科举考试类型"
             )
         if observed_exam_type != expected_exam_type:
+            if wait_for_entry:
+                self.last_status = "waiting"
+                self.last_reason = "等待进入与本任务匹配的科举页面"
+                return CustomRecognition.AnalyzeResult(
+                    box=(0, 0, 0, 0), detail=self.last_reason
+                )
             self.last_status = "wrong_exam_type"
             return CustomRecognition.AnalyzeResult(
                 box=(0, 0, 0, 0), detail="当前科举考试类型与启动任务不匹配"
@@ -414,6 +427,12 @@ class KejuHybridAnswer(CustomRecognition):
                 context, image, "科举乡试题目-混合", question_roi
             )
         if not raw_question:
+            if wait_for_entry:
+                self.last_status = "waiting"
+                self.last_reason = "等待科举正式题目出现"
+                return CustomRecognition.AnalyzeResult(
+                    box=(0, 0, 0, 0), detail=self.last_reason
+                )
             self.last_status = "no_question"
             return CustomRecognition.AnalyzeResult(
                 box=(0, 0, 0, 0), detail="未识别到科举题目"
@@ -438,6 +457,12 @@ class KejuHybridAnswer(CustomRecognition):
         )
         question = _clean_question_text(raw_question)
         if not question:
+            if wait_for_entry:
+                self.last_status = "waiting"
+                self.last_reason = "等待科举题目正文出现"
+                return CustomRecognition.AnalyzeResult(
+                    box=(0, 0, 0, 0), detail=self.last_reason
+                )
             self.last_status = "no_question"
             return CustomRecognition.AnalyzeResult(
                 box=(0, 0, 0, 0), detail="未识别到科举题目正文"

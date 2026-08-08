@@ -90,6 +90,11 @@ def parse_args():
         help="忽略赛前课堂复习，直到检测到第1题才开始答题",
     )
     parser.add_argument(
+        "--wait-for-entry",
+        action="store_true",
+        help="从主界面启动后，仅等待手动进入正确的科举页面，不执行输入",
+    )
+    parser.add_argument(
         "--use-codex",
         action="store_true",
         help="未配置 OpenAI 兼容 API 时，使用临时只读 Codex 子进程复核答案",
@@ -381,6 +386,8 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
         os.environ["MAA_KEJU_USE_CODEX"] = "1"
     if args.wait_for_round_one:
         os.environ["MAA_KEJU_REQUIRE_ROUND_ONE"] = "1"
+    if args.wait_for_entry:
+        os.environ["MAA_KEJU_WAIT_FOR_ENTRY"] = "1"
 
     Toolkit.init_option(str(ROOT))
     windows = [

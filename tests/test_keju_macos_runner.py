@@ -50,6 +50,13 @@ class KejuArgumentTests(unittest.TestCase):
         ):
             self.assertEqual(parse_args().max_steps, 20)
 
+    def test_wait_for_entry_is_opt_in_and_parseable(self):
+        with patch(
+            "tools.run_keju_macos.sys.argv",
+            ["run_keju_macos.py", "--wait-for-entry"],
+        ):
+            self.assertTrue(parse_args().wait_for_entry)
+
 
 class KejuExplicitFrameTests(unittest.TestCase):
     def setUp(self):

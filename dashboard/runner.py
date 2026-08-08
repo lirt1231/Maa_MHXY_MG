@@ -554,6 +554,7 @@ class RunnerManager:
             ]
             if options.get("waitForRoundOne", False):
                 command.append("--wait-for-round-one")
+            command.append("--wait-for-entry")
             return command
         if task_id == "zhuogui":
             return [

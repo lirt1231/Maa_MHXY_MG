@@ -841,6 +841,29 @@ class HybridAnswerTests(unittest.TestCase):
         self.assertEqual(recognizer.last_status, "unverified_exam_type")
         search.assert_not_called()
 
+    def test_wait_for_entry_keeps_main_screen_read_only_until_exam_page_appears(self):
+        recognizer = object.__new__(keju_hybrid.KejuHybridAnswer)
+        image = np.ones((720, 923, 3), dtype=np.uint8)
+
+        with (
+            patch.dict("os.environ", {
+                "MAA_KEJU_EXAM_TYPE": "huishi",
+                "MAA_KEJU_WAIT_FOR_ENTRY": "1",
+            }),
+            patch.object(keju_hybrid, "_ocr_region", return_value=""),
+            patch.object(keju_hybrid, "search_candidates") as search,
+        ):
+            result = recognizer._analyze(
+                SimpleNamespace(),
+                SimpleNamespace(image=image),
+                keju_hybrid._StageTimings(),
+            )
+
+        self.assertEqual(recognizer.last_status, "waiting")
+        self.assertEqual(recognizer.last_reason, "等待手动进入科举正式答题页面")
+        self.assertEqual(tuple(result.box), (0, 0, 0, 0))
+        search.assert_not_called()
+
 
 class KnowledgeStoreTests(unittest.TestCase):
     def test_paraphrase_retrieves_sourced_game_fact(self):
