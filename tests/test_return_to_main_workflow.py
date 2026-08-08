@@ -132,6 +132,30 @@ class ReturnToMainWorkflowTests(unittest.TestCase):
         self.assertEqual(result.outcome, "recovered")
         self.assertEqual(runtime.clicks[0][0], [454, 294, 41, 101])
 
+    def test_completed_fun_news_activity_card_returns_to_main_screen(self):
+        activity_page = scene(
+            [
+                ("活动", [472, 97, 75, 30]),
+                ("日常活动", [130, 161, 88, 27]),
+                ("趣闻鉴赏", [669, 314, 85, 25]),
+                ("次数5/5", [670, 348, 62, 19]),
+                ("活跃5/5", [743, 348, 62, 19]),
+                ("完成", [827, 333, 66, 31]),
+            ],
+            {"close_generic": [892, 96, 39, 40]},
+        )
+        runtime = Runtime([activity_page, main_scene(), main_scene()])
+
+        result = ReturnToMainWorkflow("fun_news", wait_seconds=0).execute(
+            runtime, Guard()
+        )
+
+        self.assertEqual(result.status, "confirmed")
+        self.assertEqual(result.outcome, "recovered")
+        self.assertEqual(result.scene, "main_screen")
+        self.assertEqual(result.clicks, 1)
+        self.assertEqual(runtime.clicks[0][0], [892, 96, 39, 40])
+
     def test_live_welfare_scratch_page_is_an_allowed_close_path(self):
         current = scene(
             [
