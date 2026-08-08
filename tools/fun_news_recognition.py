@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import re
-
 try:
     from .daily_activity_navigation_core import (
         classify_daily_navigation,
@@ -91,50 +89,16 @@ def is_fun_news_feed(texts, image_size) -> bool:
     )
 
 
-def _fun_news_like_counter_box(texts, image_size):
-    """Find the like count that shares a row with a post's comment count."""
-    counters = []
-    for item in texts or []:
-        box = valid_box(item)
-        value = normalize_text(item.get("text", ""))
-        if (
-            box is None
-            or not re.fullmatch(r"\d+(?:\.\d+)?万?", value)
-            or not in_region(
-                item,
-                image_size,
-                min_x=0.14,
-                max_x=0.34,
-                min_y=0.15,
-                max_y=0.94,
-            )
-        ):
-            continue
-        counters.append(box)
-    for likes in counters:
-        like_y = likes[1] + likes[3] / 2
-        for comments in counters:
-            comment_y = comments[1] + comments[3] / 2
-            if (
-                comments[0] > likes[0]
-                and image_size[0] * 0.06 <= comments[0] - likes[0] <= image_size[0] * 0.16
-                and abs(comment_y - like_y) <= image_size[1] * 0.04
-            ):
-                return likes
-    return None
+def _heart_box_from_template(template_box):
+    """Restrict a composite template hit to its left-hand heart icon.
 
-
-def _heart_box_from_like_counter(counter_box, image_size):
-    """The heart is fixed just left of the verified like-count row."""
-    width, height = image_size
-    heart_width = max(24, round(width * 0.034))
-    heart_height = max(22, round(height * 0.042))
-    return [
-        max(0, counter_box[0] - heart_width - round(width * 0.008)),
-        max(0, round(counter_box[1] + counter_box[3] / 2 - heart_height / 2)),
-        heart_width,
-        heart_height,
-    ]
+    The recorded templates include the heart and its adjacent count/control.
+    Clicking the match center therefore targets the wrong control.  The heart
+    occupies the left portion for both supported template variants.
+    """
+    x, y, width, height = template_box
+    heart_width = max(1, round(width * 0.48))
+    return [x, y, heart_width, height]
 
 
 def fun_news_feed_signature(texts, image_size):
@@ -171,26 +135,22 @@ def classify_fun_news_scene(
         return {"status": "completed"}
 
     if is_fun_news_feed(texts, image_size):
-        hearts = find_items(
-            texts,
-            r"心|❤|♥",
-            image_size,
-            {"min_x": 0.12, "max_x": 0.32, "min_y": 0.15, "max_y": 0.94},
-        )
-        if hearts:
-            return {"status": "like", "box": valid_box(hearts[0]), "source": "ocr"}
-        counter_box = _fun_news_like_counter_box(texts, image_size)
-        if counter_box is not None:
+        like_box = templates.get("fun_news_like")
+        if like_box:
             return {
                 "status": "like",
-                "box": _heart_box_from_like_counter(counter_box, image_size),
-                "source": "like_counter_row",
+                "box": _heart_box_from_template(like_box),
+                "source": "template",
             }
         return {"status": "refresh_feed"}
 
     like_box = templates.get("fun_news_like")
     if like_box:
-        return {"status": "like", "box": list(like_box)}
+        return {
+            "status": "like",
+            "box": _heart_box_from_template(like_box),
+            "source": "template",
+        }
     if templates.get("fun_news_feed_close"):
         return {"status": "refresh_feed"}
 

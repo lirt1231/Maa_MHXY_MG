@@ -50,16 +50,19 @@ class FunNewsRecognitionTests(unittest.TestCase):
 
         self.assertEqual(decision, {"status": "join_task", "box": join["box"]})
 
-    def test_like_requires_the_dedicated_heart_template(self):
+    def test_like_uses_only_the_heart_region_of_the_dedicated_template(self):
         decision = classify_fun_news_scene(
             [],
             {"fun_news_like": (180, 400, 76, 24)},
             (1020, 718),
         )
 
-        self.assertEqual(decision, {"status": "like", "box": [180, 400, 76, 24]})
+        self.assertEqual(
+            decision,
+            {"status": "like", "box": [180, 400, 36, 24], "source": "template"},
+        )
 
-    def test_live_space_page_uses_heart_ocr_after_independent_page_identity(self):
+    def test_live_space_page_never_clicks_an_ocr_heart_without_template_evidence(self):
         decision = classify_fun_news_scene(
             [
                 *[text(channel, (20, 110 + index * 40, 48, 25)) for index, channel in enumerate(("系统", "世界", "当前", "门派", "帮派", "队伍", "空间"))],
@@ -72,12 +75,9 @@ class FunNewsRecognitionTests(unittest.TestCase):
             (923, 720),
         )
 
-        self.assertEqual(
-            decision,
-            {"status": "like", "box": [178, 495, 32, 7], "source": "ocr"},
-        )
+        self.assertEqual(decision, {"status": "refresh_feed"})
 
-    def test_live_space_page_derives_heart_from_verified_like_and_comment_row(self):
+    def test_live_space_page_never_derives_a_heart_from_counter_coordinates(self):
         decision = classify_fun_news_scene(
             [
                 *[text(channel, (20, 110 + index * 40, 48, 25)) for index, channel in enumerate(("系统", "世界", "当前", "门派", "帮派", "队伍", "空间"))],
@@ -90,9 +90,24 @@ class FunNewsRecognitionTests(unittest.TestCase):
             (923, 720),
         )
 
+        self.assertEqual(decision, {"status": "refresh_feed"})
+
+    def test_template_evidence_wins_over_misleading_feed_ocr(self):
+        decision = classify_fun_news_scene(
+            [
+                *[text(channel, (20, 110 + index * 40, 48, 25)) for index, channel in enumerate(("系统", "世界", "当前", "门派", "帮派", "队伍", "空间"))],
+                text("打开空间", (15, 75, 58, 16)),
+                text("关注", (95, 66, 39, 19)), text("图文", (136, 65, 50, 21)),
+                text("视频", (259, 68, 36, 15)), text("论坛", (302, 66, 39, 19)),
+                text("心", (178, 495, 32, 7)),
+            ],
+            {"fun_news_like": (180, 400, 76, 24)},
+            (923, 720),
+        )
+
         self.assertEqual(
             decision,
-            {"status": "like", "box": [122, 302, 31, 30], "source": "like_counter_row"},
+            {"status": "like", "box": [180, 400, 36, 24], "source": "template"},
         )
 
     def test_completed_template_wins_over_visible_like(self):
@@ -164,6 +179,19 @@ class FunNewsWorkflowTests(unittest.TestCase):
         self.assertEqual(
             len([entry for entry in runtime.trace if entry[0] == "click"]),
             5,
+        )
+
+    def test_clicks_the_heart_portion_not_the_template_center(self):
+        runtime = Runtime([
+            scene(templates={"fun_news_like": (180, 400, 76, 24)}),
+        ])
+
+        result = FunNewsWorkflow(target_likes=1).execute(self.context(runtime))
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(
+            [entry for entry in runtime.trace if entry[0] == "click"],
+            [("click", (180, 400, 36, 24), "点赞当前趣闻动态")],
         )
 
     def test_unchanged_feed_after_scroll_never_receives_a_second_like(self):
