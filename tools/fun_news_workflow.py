@@ -128,6 +128,11 @@ class FunNewsWorkflow:
                     },
                 )
 
+            if status == "post_detail":
+                raise RuntimeError(
+                    "检测到趣闻动态详情页，已停止以避免继续影响错误动态"
+                )
+
             action_context = context.action_context(scene, decision, "趣闻鉴赏")
             if completion_verification:
                 if status == "return_to_activity" and not completion_return_sent:

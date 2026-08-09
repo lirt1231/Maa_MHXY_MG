@@ -266,6 +266,7 @@ class FunNewsWorkflowTests(unittest.TestCase):
     def test_requires_activity_page_completion_after_the_final_like(self):
         runtime = Runtime([
             self.feed_scene(1, {"fun_news_like": (180, 400, 76, 24)}),
+            self.feed_scene(1, {}),
             scene(
                 texts=[*verified_feed_texts(), text("第 1 条趣闻动态", (160, 240, 160, 24))],
                 templates={"fun_news_feed_close": (470, 290, 32, 76)},
@@ -304,6 +305,31 @@ class FunNewsWorkflowTests(unittest.TestCase):
         self.assertEqual(
             len([entry for entry in runtime.trace if entry[0] == "click"]),
             1,
+        )
+
+    def test_post_detail_after_a_refresh_stops_before_another_like(self):
+        runtime = Runtime([
+            self.feed_scene(1, {"fun_news_like": (180, 400, 76, 24)}),
+            self.feed_scene(1, {}),
+            scene(
+                texts=[
+                    text("友善评论，文明发言", (586, 545, 166, 23)),
+                    text("发送", (856, 584, 58, 31)),
+                ],
+                templates={"fun_news_heart": (521, 182, 50, 50)},
+            ),
+        ])
+
+        with self.assertRaisesRegex(RuntimeError, "趣闻动态详情页"):
+            FunNewsWorkflow(max_steps=3).execute(self.context(runtime))
+
+        self.assertEqual(
+            [entry[0] for entry in runtime.trace if entry[0] in {"click", "drag"}],
+            ["click", "drag"],
+        )
+        self.assertEqual(
+            next(entry for entry in runtime.trace if entry[0] == "drag")[1:3],
+            ((454, 560), (454, 201)),
         )
 
 

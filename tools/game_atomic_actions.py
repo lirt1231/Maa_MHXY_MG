@@ -299,8 +299,11 @@ class RefreshFeedAction(RelativeDragAction):
             name="refresh_fun_news_feed",
             statuses=("like", "refresh_feed"),
             # Finger moves upward so the feed advances to older unseen posts.
-            start_ratio=(0.37, 0.68),
-            end_ratio=(0.37, 0.40),
+            # The post cards occupy the feed center. Drag along the fixed
+            # right gutter so macOS never begins the gesture on a tappable
+            # post body, which opens its detail page.
+            start_ratio=(0.445, 0.78),
+            end_ratio=(0.445, 0.28),
             reason="下滑趣闻动态以加载下一条",
             wait_seconds=1.5,
             repeat_limit=repeat_limit,
