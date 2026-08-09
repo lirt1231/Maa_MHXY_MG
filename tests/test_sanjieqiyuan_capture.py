@@ -462,6 +462,43 @@ class SanjieAnswerRecognitionTests(unittest.TestCase):
 
     @patch(
         "custom.recognition.searchAnswer.SearchQuestions",
+        return_value=(
+            '["凤凰仙子","蛟龙","啸天虎","芙蓉仙子","雾中仙","猴小仙","蟠桃童子","天兵"]',
+            100,
+            "精确匹配",
+        ),
+    )
+    @patch("tools.run_sanjieqiyuan_macos.recognition_detail")
+    def test_falls_back_to_raw_yaochi_option_after_unusable_best_hit(
+        self, recognition_detail, _search
+    ):
+        question_detail = SimpleNamespace(
+            hit=True,
+            filtered_results=[
+                self.ocr_result("第4题：找出3只瑶池珍兽（1/3）", (380, 162, 306, 21))
+            ],
+        )
+        exact_answer = self.ocr_result("蛟龙", (417, 354, 73, 21))
+        answer_detail = SimpleNamespace(
+            hit=True,
+            best_result=self.ocr_result("答案区域", (417, 354, 73, 21)),
+            all_results=[
+                self.ocr_result("答案区域", (417, 354, 73, 21)),
+                exact_answer,
+            ],
+        )
+        recognition_detail.side_effect = [question_detail, answer_detail]
+
+        result = recognize_answer(
+            Mock(), np.ones((718, 1020, 3), dtype=np.uint8), Mock()
+        )
+
+        self.assertEqual(result["status"], "ready")
+        self.assertEqual(result["answer"], "蛟龙")
+        self.assertEqual(result["click"], (453, 364))
+
+    @patch(
+        "custom.recognition.searchAnswer.SearchQuestions",
         return_value=(' ["千年僵尸，孤魂野鬼，吸血鬼"] ', 100, "精确匹配"),
     )
     @patch("tools.run_sanjieqiyuan_macos.recognition_detail")

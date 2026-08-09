@@ -463,7 +463,7 @@ def recognize_answer(
             remaining_candidates,
             answer_roi,
         )
-    elif answer_detail is not None:
+    if answer_match is None and answer_detail is not None:
         answer_match = find_unique_answer_match(
             getattr(answer_detail, "all_results", ()),
             remaining_candidates,
