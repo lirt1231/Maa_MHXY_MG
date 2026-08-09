@@ -62,17 +62,14 @@ class FunNewsRecognitionTests(unittest.TestCase):
 
         self.assertEqual(decision, {"status": "join_task", "box": join["box"]})
 
-    def test_like_uses_only_the_heart_region_of_the_dedicated_template(self):
+    def test_non_feed_template_hit_cannot_trigger_a_like(self):
         decision = classify_fun_news_scene(
             [],
             {"fun_news_like": (180, 400, 76, 24)},
             (1020, 718),
         )
 
-        self.assertEqual(
-            decision,
-            {"status": "like", "box": [180, 400, 36, 24], "source": "template"},
-        )
+        self.assertEqual(decision, {"status": "unknown"})
 
     def test_live_space_page_never_clicks_an_ocr_heart_without_template_evidence(self):
         decision = classify_fun_news_scene(
@@ -111,7 +108,7 @@ class FunNewsRecognitionTests(unittest.TestCase):
                 text("打开空间", (15, 75, 58, 16)),
                 text("关注", (95, 66, 39, 19)), text("图文", (136, 65, 50, 21)),
                 text("视频", (259, 68, 36, 15)), text("论坛", (302, 66, 39, 19)),
-                text("心", (178, 495, 32, 7)),
+                text("+关注", (359, 118, 52, 20)), text("心", (178, 495, 32, 7)),
             ],
             {"fun_news_like": (180, 400, 76, 24)},
             (923, 720),
@@ -122,9 +119,22 @@ class FunNewsRecognitionTests(unittest.TestCase):
             {"status": "like", "box": [180, 400, 36, 24], "source": "template"},
         )
 
+    def test_post_detail_never_clicks_a_matched_heart_template(self):
+        decision = classify_fun_news_scene(
+            [
+                *verified_feed_texts(),
+                text("友善评论，文明发言", (586, 545, 166, 23)),
+                text("发送", (856, 584, 58, 31)),
+            ],
+            {"fun_news_heart": (521, 182, 50, 50)},
+            (1020, 718),
+        )
+
+        self.assertEqual(decision, {"status": "post_detail"})
+
     def test_dedicated_heart_template_uses_its_exact_click_box(self):
         decision = classify_fun_news_scene(
-            [],
+            verified_feed_texts(),
             {
                 "fun_news_like": (180, 400, 76, 24),
                 "fun_news_heart": (146, 220, 50, 50),
@@ -186,13 +196,17 @@ class FunNewsWorkflowTests(unittest.TestCase):
     def context(runtime):
         return WorkflowContext(runtime, runtime)
 
+    @staticmethod
+    def feed_scene(number, templates):
+        return scene(
+            texts=[*verified_feed_texts(), text(f"第 {number} 条趣闻动态", (160, 240, 160, 24))],
+            templates=templates,
+        )
+
     def test_likes_five_distinct_feed_entries_with_scrolls_between_them(self):
         like = {"fun_news_like": (180, 400, 76, 24)}
         completed = {"fun_news_complete": (320, 120, 300, 80)}
-        feed = lambda number: scene(
-            texts=[text(f"第 {number} 条趣闻动态", (160, 240, 160, 24))],
-            templates=like,
-        )
+        feed = lambda number: self.feed_scene(number, like)
         runtime = Runtime([
             feed(1), feed(1), feed(2), feed(2), feed(3), feed(3),
             feed(4), feed(4), feed(5), scene(templates=completed),
@@ -221,10 +235,7 @@ class FunNewsWorkflowTests(unittest.TestCase):
 
     def test_five_verified_likes_are_the_completion_evidence(self):
         like = {"fun_news_like": (180, 400, 76, 24)}
-        feed = lambda number: scene(
-            texts=[text(f"第 {number} 条趣闻动态", (160, 240, 160, 24))],
-            templates=like,
-        )
+        feed = lambda number: self.feed_scene(number, like)
         runtime = Runtime([
             feed(1), feed(1), feed(2), feed(2), feed(3), feed(3),
             feed(4), feed(4), feed(5), scene(templates={"fun_news_complete": (320, 120, 300, 80)}),
@@ -240,7 +251,7 @@ class FunNewsWorkflowTests(unittest.TestCase):
 
     def test_clicks_the_heart_portion_not_the_template_center(self):
         runtime = Runtime([
-            scene(templates={"fun_news_like": (180, 400, 76, 24)}),
+            self.feed_scene(1, {"fun_news_like": (180, 400, 76, 24)}),
             scene(templates={"fun_news_complete": (320, 120, 300, 80)}),
         ])
 
@@ -254,7 +265,7 @@ class FunNewsWorkflowTests(unittest.TestCase):
 
     def test_requires_activity_page_completion_after_the_final_like(self):
         runtime = Runtime([
-            scene(templates={"fun_news_like": (180, 400, 76, 24)}),
+            self.feed_scene(1, {"fun_news_like": (180, 400, 76, 24)}),
             scene(
                 texts=[*verified_feed_texts(), text("第 1 条趣闻动态", (160, 240, 160, 24))],
                 templates={"fun_news_feed_close": (470, 290, 32, 76)},
@@ -273,7 +284,7 @@ class FunNewsWorkflowTests(unittest.TestCase):
 
     def test_stops_when_final_likes_cannot_be_confirmed_in_the_activity_page(self):
         runtime = Runtime([
-            scene(templates={"fun_news_like": (180, 400, 76, 24)}),
+            self.feed_scene(1, {"fun_news_like": (180, 400, 76, 24)}),
             *[scene(texts=[text("动态仍在加载", (160, 240, 160, 24))]) for _ in range(3)],
         ])
 
@@ -284,10 +295,7 @@ class FunNewsWorkflowTests(unittest.TestCase):
 
     def test_unchanged_feed_after_scroll_never_receives_a_second_like(self):
         like = {"fun_news_like": (180, 400, 76, 24)}
-        current = scene(
-            texts=[text("同一条趣闻动态", (160, 240, 160, 24))],
-            templates=like,
-        )
+        current = self.feed_scene("同一", like)
         runtime = Runtime([current, current, current, current, current])
 
         with self.assertRaisesRegex(RuntimeError, "同一条趣闻动态"):

@@ -85,15 +85,38 @@ def is_fun_news_feed(texts, image_size) -> bool:
             texts,
             r"\+?关注|十关注",
             image_size,
-            {"min_x": 0.32, "max_x": 0.50, "min_y": 0.10, "max_y": 0.94},
+            {"min_x": 0.32, "max_x": 0.96, "min_y": 0.10, "max_y": 0.94},
         )
     )
     return (
         len(channels) >= 5
-        and all(label in top_text for label in ("关注", "图文", "视频", "论坛"))
+        and all(label in top_text for label in ("图文", "视频", "论坛"))
         and has_open_space
         and has_follow
     )
+
+
+def is_fun_news_detail(texts, image_size) -> bool:
+    """Recognize an opened post by its comment composer, never as a feed.
+
+    Both the list and a post detail view expose heart-shaped controls. The
+    detail view additionally shows a comment placeholder and submit command;
+    treating it as a feed would make a valid heart template affect the wrong
+    interaction.
+    """
+    composer = find_items(
+        texts,
+        r".*(?:友善评论|文明发言|发表评论|写评论).*",
+        image_size,
+        {"min_x": 0.40, "max_x": 0.88, "min_y": 0.62, "max_y": 0.94},
+    )
+    submit = find_items(
+        texts,
+        r".*(?:发送|发表).*",
+        image_size,
+        {"min_x": 0.72, "max_x": 0.98, "min_y": 0.62, "max_y": 0.94},
+    )
+    return bool(composer and submit)
 
 
 def _heart_box_from_template(template_box):
@@ -215,6 +238,9 @@ def classify_fun_news_scene(
     ) or _completed_activity_card(texts, image_size):
         return {"status": "completed"}
 
+    if is_fun_news_detail(texts, image_size):
+        return {"status": "post_detail"}
+
     if is_fun_news_feed(texts, image_size):
         if completion_verification:
             return {
@@ -227,9 +253,6 @@ def classify_fun_news_scene(
             return like
         return {"status": "refresh_feed"}
 
-    like = _template_like_decision(templates)
-    if like is not None:
-        return like
     if templates.get("fun_news_feed_close"):
         return {"status": "refresh_feed"}
 
@@ -246,5 +269,6 @@ __all__ = [
     "FUN_NEWS_TEMPLATES",
     "classify_fun_news_scene",
     "fun_news_feed_signature",
+    "is_fun_news_detail",
     "is_fun_news_feed",
 ]
