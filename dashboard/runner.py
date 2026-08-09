@@ -52,6 +52,7 @@ TASK_RESULT_NUMERIC_FIELDS = {
     "questions", "answers", "clicks", "limit", "rounds", "target_rounds",
     "actions", "steps", "ghost_progress", "max_steps", "battles", "max_battles",
     "digs", "target_digs", "purchases", "sale_clicks", "likes", "scrolls",
+    "confirmationPolls",
 }
 TASK_RESULT_SCHEMAS = {
     "sanjieqiyuan": {
@@ -114,7 +115,10 @@ TASK_RESULT_SCHEMAS = {
     },
     "baotu": {
         "statuses": {"completed", "already_completed", "safe_stopped", "cancelled"},
-        "fields": {"task_id", "status", "reason", "actions", "clicks"},
+        "fields": {
+            "task_id", "status", "reason", "actions", "clicks",
+            "completionEvidence", "confirmationPolls",
+        },
         "required": {
             "completed": {"actions", "clicks"},
             "already_completed": {"actions", "clicks"},
@@ -140,7 +144,10 @@ TASK_RESULT_SCHEMAS = {
     },
     "shimen": {
         "statuses": {"completed", "already_completed", "safe_stopped", "cancelled"},
-        "fields": {"task_id", "status", "reason", "actions", "clicks"},
+        "fields": {
+            "task_id", "status", "reason", "actions", "clicks",
+            "completionEvidence", "confirmationPolls",
+        },
         "required": {
             "completed": {"actions", "clicks"},
             "already_completed": {"actions", "clicks"},
@@ -1225,6 +1232,14 @@ class RunnerManager:
             raise RuntimeError("任务最终结果包含无效的停止原因")
         if status == "safe_stopped" and reason is None:
             raise RuntimeError("任务安全停止结果缺少原因")
+        if "completionEvidence" in result:
+            if (
+                result["completionEvidence"] != "stable_main_after_task_disappeared"
+                or result.get("confirmationPolls", 0) < 2
+            ):
+                raise RuntimeError("任务最终结果包含无效的自动完成证据")
+        elif "confirmationPolls" in result:
+            raise RuntimeError("任务最终结果缺少自动完成证据")
         if task_id == "keju_huishi" and "settlement_reward" in result:
             reward = result["settlement_reward"]
             if not isinstance(reward, dict) or reward.get("status") not in {

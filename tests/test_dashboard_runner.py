@@ -544,6 +544,38 @@ class RunnerTaskContractTests(unittest.TestCase):
                 result = self.manager._parse_task_result(task_id, [line])
                 self.assertEqual(result["status"], payload["status"])
 
+    def test_result_parser_accepts_stable_main_completion_for_auto_tasks(self):
+        for task_id in ("baotu", "shimen"):
+            with self.subTest(task_id=task_id):
+                result = self.manager._parse_task_result(
+                    task_id,
+                    [
+                        "result_json=" + json.dumps({
+                            "task_id": task_id,
+                            "status": "completed",
+                            "actions": 2,
+                            "clicks": 2,
+                            "completionEvidence": "stable_main_after_task_disappeared",
+                            "confirmationPolls": 2,
+                        }, ensure_ascii=False)
+                    ],
+                )
+                self.assertEqual(
+                    result["completionEvidence"],
+                    "stable_main_after_task_disappeared",
+                )
+
+    def test_result_parser_rejects_invalid_stable_main_completion_evidence(self):
+        with self.assertRaisesRegex(RuntimeError, "自动完成证据"):
+            self.manager._parse_task_result(
+                "baotu",
+                [
+                    'result_json={"task_id":"baotu","status":"completed",'
+                    '"actions":2,"clicks":2,"completionEvidence":"guessed",'
+                    '"confirmationPolls":1}'
+                ],
+            )
+
     def test_result_parser_rejects_mismatched_task_and_non_string_reason(self):
         with self.assertRaisesRegex(RuntimeError, "任务标识"):
             self.manager._parse_task_result(
