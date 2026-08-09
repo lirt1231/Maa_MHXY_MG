@@ -180,7 +180,11 @@ class KaoguSceneTests(unittest.TestCase):
 
         self.assertEqual(
             decision,
-            {"status": "wait_for_purchase", "reason": "awaiting_tool_delivery"},
+            {
+                "status": "wait_for_purchase",
+                "reason": "awaiting_tool_delivery",
+                "close_box": [906, 199, 33, 28],
+            },
         )
 
     def test_sale_completion_uses_only_explicit_no_goods_template(self):
@@ -1418,6 +1422,67 @@ class KaoguRunnerTests(unittest.TestCase):
         reasons = [reason for _, reason in FakeRuntime.instances[0].clicks]
         self.assertNotIn("购买一个洛阳铲", reasons)
         self.assertIn("考古流程：close_shop", reasons)
+        self.assertEqual(purchase_guard.releases, 1)
+
+    @patch("tools.run_kaogu_macos.MacOSTaskRuntime", FakeRuntime)
+    def test_successful_purchase_closes_static_shop_then_verifies_tool(self):
+        shop = scene(
+            [
+                text("洛阳杂货铺", (415, 104, 166, 38)),
+                text("洛阳铲", (712, 190, 67, 26)),
+                text("购买", (735, 540, 66, 29)),
+                text("×", (1106, 199, 33, 28)),
+            ]
+        )
+        tool_selection = scene(
+            [
+                text("选择工具", (467, 184, 89, 27)),
+                text("1", (320, 266, 9, 9)),
+                text("使用", (608, 488, 51, 24)),
+            ]
+        )
+        selected_tool = scene(
+            [
+                text("选择工具", (467, 184, 89, 27)),
+                text("洛阳铲", (320, 266, 52, 21)),
+                text("使用", (608, 488, 51, 24)),
+            ]
+        )
+        start = scene(
+            [
+                text("工坊·考古", (436, 98, 148, 33)),
+                text("考古", (564, 560, 59, 29)),
+                text("消耗活力：54", (500, 490, 96, 23)),
+            ]
+        )
+        FakeRuntime.scenes = [
+            shop,
+            shop,
+            shop,
+            tool_selection,
+            selected_tool,
+            start,
+            scene(
+                [
+                    text("洛阳铲", (1040, 510, 58, 23)),
+                    text("挖掘", (1044, 550, 52, 29)),
+                ]
+            ),
+            dig_settlement(),
+            *sale_flow_scenes(),
+        ]
+        guard = CancellationGuard()
+        guard.wait = lambda _seconds: None
+        purchase_guard = FakePurchaseGuard()
+
+        with redirect_stdout(io.StringIO()):
+            return_code = run(self._args(target_digs=1), guard, purchase_guard)
+
+        self.assertEqual(return_code, 0)
+        reasons = [reason for _, reason in FakeRuntime.instances[0].clicks]
+        self.assertEqual(reasons.count("购买一个洛阳铲"), 1)
+        self.assertEqual(reasons.count("考古流程：close_shop"), 1)
+        self.assertEqual(purchase_guard.reservations, 1)
         self.assertEqual(purchase_guard.releases, 1)
 
     @patch("tools.run_kaogu_macos.MacOSTaskRuntime", FakeRuntime)

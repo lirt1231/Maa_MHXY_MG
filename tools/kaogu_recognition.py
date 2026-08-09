@@ -562,10 +562,15 @@ def classify_kaogu_scene(
     if phase == "shop_closing" and shop_close:
         return {"status": "close_shop", "box": shop_close}
     if phase == "shop_purchase_verify" and shop_titles and shovel_products:
-        # Do not close the shop based only on the click. The tool must become
-        # visible in the selection dialog or a separate success signal must be
-        # recognized before the workflow proceeds.
-        return {"status": "wait_for_purchase", "reason": "awaiting_tool_delivery"}
+        # The current client keeps the shop open after a successful purchase.
+        # Preserve the recognized close box so the workflow can leave this
+        # stable shop only under its one-purchase reservation, then verify the
+        # shovel from the tool-selection dialog.
+        return {
+            "status": "wait_for_purchase",
+            "reason": "awaiting_tool_delivery",
+            "close_box": shop_close,
+        }
     if shovel_products and buy_buttons and shop_close:
         return {
             "status": "buy_shovel",

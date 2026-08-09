@@ -272,6 +272,7 @@ class KaoguWorkflow:
         start_recoveries = 0
         start_pathing_polls = 0
         purchase_verify_polls = 0
+        purchase_shop_close_confirmations = 2
 
         actions = archaeology_actions(self.action_limits, normalize_drags=self.inventory_normalize_drags, scan_drags=self.max_inventory_scan_drags)
         actions["expand_menu"] = OpenSkillsFromMainMenuAction(
@@ -449,6 +450,26 @@ class KaoguWorkflow:
                 continue
             if status == "wait_for_purchase":
                 purchase_verify_polls += 1
+                close_box = decision.get("close_box")
+                if (
+                    purchase_verify_polls >= purchase_shop_close_confirmations
+                    and self.purchase_guard is not None
+                    and self.purchase_guard.is_reserved()
+                    and close_box
+                ):
+                    # A successful purchase can leave the product page static.
+                    # The reservation proves this run has already consumed its
+                    # single purchase attempt; close only the recognized shop,
+                    # then require the tool dialog to prove availability.
+                    close_context = context.action_context(
+                        scene,
+                        {"status": "close_shop", "box": close_box},
+                        "工坊考古",
+                    )
+                    metrics.record(actions["close_shop"].execute(close_context))
+                    phase = "tool_select"
+                    purchase_verify_polls = 0
+                    continue
                 if purchase_verify_polls >= self.max_wait_polls:
                     raise RuntimeError(
                         "购买洛阳铲后未确认工具到账，已安全停止并保留商店现场"
