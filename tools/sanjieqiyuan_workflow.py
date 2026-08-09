@@ -188,7 +188,7 @@ class SanjieqiyuanWorkflow:
     answer_wait_seconds: float = 1.2
     initial_wait_seconds: float = 1.5
     max_transition_polls: int = 6
-    max_answer_not_found_polls: int = 3
+    max_answer_not_found_polls: int = 4
 
     def __post_init__(self):
         if self.max_questions <= 0:

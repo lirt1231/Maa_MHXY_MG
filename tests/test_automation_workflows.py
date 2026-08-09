@@ -661,12 +661,12 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "题库答案未在当前选项中找到"):
             SanjieqiyuanWorkflow(
-                _QuizSource([missed, missed, missed]),
+                _QuizSource([missed, missed, missed, missed]),
                 lambda: "completed",
                 initial_wait_seconds=0,
             ).execute(WorkflowContext(adapter, adapter))
 
-        self.assertEqual([entry[0] for entry in adapter.trace], ["wait", "wait"])
+        self.assertEqual([entry[0] for entry in adapter.trace], ["wait", "wait", "wait"])
 
     def test_sanjie_navigation_is_identical_on_independent_adapters(self):
         outcomes = []
