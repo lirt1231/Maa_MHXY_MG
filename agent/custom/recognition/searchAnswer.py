@@ -10,6 +10,8 @@ log_file_path = (Path("agent") / "custom" / "recognition" / "search_log.txt").re
 
 _question_bank_cache = None
 _question_bank_cache_path = None
+_question_answer_groups_cache = None
+_question_answer_groups_cache_path = None
 
 
 def normalize_text(value):
@@ -59,6 +61,28 @@ def load_question_bank(path):
     return question_bank
 
 
+def load_question_answer_groups(path):
+    """Keep repeated question-bank entries as distinct dynamic answer groups."""
+    try:
+        content = Path(path).read_text(encoding="utf-8")
+    except Exception as exc:
+        print(f"加载题库时出错: {exc}")
+        return {}
+
+    pattern = r'"\s*([^"]+)\s*"\s*:\s*\[\s*([^\]]*?)\s*\]'
+    groups = {}
+    for question, answers in re.findall(pattern, content):
+        parsed = []
+        for answer in re.findall(r'"([^"]+)"', answers):
+            parsed.extend(item.strip() for item in answer.split("，") if item.strip())
+        if parsed:
+            group = tuple(parsed)
+            question_groups = groups.setdefault(question.strip(), [])
+            if group not in question_groups:
+                question_groups.append(group)
+    return groups
+
+
 def get_question_bank(path=file_path, force_reload=False):
     """Return a process-wide cached question bank."""
     global _question_bank_cache, _question_bank_cache_path
@@ -71,6 +95,20 @@ def get_question_bank(path=file_path, force_reload=False):
         _question_bank_cache = load_question_bank(resolved_path)
         _question_bank_cache_path = resolved_path
     return _question_bank_cache
+
+
+def get_question_answer_groups(path=file_path, force_reload=False):
+    """Return preserved answer groups for questions with dynamic option sets."""
+    global _question_answer_groups_cache, _question_answer_groups_cache_path
+    resolved_path = Path(path).resolve()
+    if (
+        force_reload
+        or _question_answer_groups_cache is None
+        or _question_answer_groups_cache_path != resolved_path
+    ):
+        _question_answer_groups_cache = load_question_answer_groups(resolved_path)
+        _question_answer_groups_cache_path = resolved_path
+    return _question_answer_groups_cache
 
 
 def search_candidates(query, limit=3, question_bank=None):
@@ -152,7 +190,9 @@ def SearchQuestions(query):
 __all__ = [
     "SearchQuestions",
     "get_question_bank",
+    "get_question_answer_groups",
     "load_question_bank",
+    "load_question_answer_groups",
     "normalize_text",
     "search_answer",
     "search_candidates",

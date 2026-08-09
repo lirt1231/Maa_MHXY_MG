@@ -29,7 +29,11 @@ from custom.recognition.reco_sjqy import (
     sjqy_rois,
     stable_question_key,
 )
-from custom.recognition.searchAnswer import get_question_bank, search_answer
+from custom.recognition.searchAnswer import (
+    get_question_answer_groups,
+    get_question_bank,
+    search_answer,
+)
 from tools.sanjieqiyuan_recognition import find_unique_answer_match
 
 
@@ -306,6 +310,16 @@ class SanjieRoiTests(unittest.TestCase):
         )
         self.assertEqual(confidence, 100)
 
+    def test_duplicate_yaochi_questions_preserve_each_answer_group(self):
+        self.assertEqual(
+            get_question_answer_groups(force_reload=True)["找出3只瑶池珍兽"],
+            [
+                ("凤凰仙子", "蛟龙", "啸天虎"),
+                ("芙蓉仙子", "雾中仙", "猴小仙"),
+                ("蟠桃童子", "天兵", "凤凰仙子"),
+            ],
+        )
+
 
 class SanjieAnswerRecognitionTests(unittest.TestCase):
     @staticmethod
@@ -448,7 +462,7 @@ class SanjieAnswerRecognitionTests(unittest.TestCase):
                 self.ocr_result("蟹将", (757, 352, 42, 23)),
             ],
         )
-        recognition_detail.side_effect = [question_detail, answer_detail]
+        recognition_detail.side_effect = [question_detail, answer_detail, answer_detail]
 
         result = recognize_answer(
             Mock(),
@@ -487,7 +501,7 @@ class SanjieAnswerRecognitionTests(unittest.TestCase):
                 exact_answer,
             ],
         )
-        recognition_detail.side_effect = [question_detail, answer_detail]
+        recognition_detail.side_effect = [question_detail, answer_detail, answer_detail]
 
         result = recognize_answer(
             Mock(), np.ones((718, 1020, 3), dtype=np.uint8), Mock()
@@ -496,6 +510,47 @@ class SanjieAnswerRecognitionTests(unittest.TestCase):
         self.assertEqual(result["status"], "ready")
         self.assertEqual(result["answer"], "蛟龙")
         self.assertEqual(result["click"], (453, 364))
+
+    @patch(
+        "custom.recognition.searchAnswer.SearchQuestions",
+        return_value=(
+            '["凤凰仙子","蛟龙","啸天虎","芙蓉仙子","雾中仙","猴小仙","蟠桃童子","天兵"]',
+            100,
+            "精确匹配",
+        ),
+    )
+    @patch("tools.run_sanjieqiyuan_macos.recognition_detail")
+    def test_yaochi_uses_the_only_complete_visible_answer_group(
+        self, recognition_detail, _search
+    ):
+        question_detail = SimpleNamespace(
+            hit=True,
+            filtered_results=[
+                self.ocr_result("第4题：找出3只瑶池珍兽（1/3）", (380, 162, 306, 21))
+            ],
+        )
+        visible = [
+            self.ocr_result("芙蓉仙子", (417, 254, 80, 25)),
+            self.ocr_result("雾中仙", (589, 254, 58, 25)),
+            self.ocr_result("猴小仙", (757, 254, 58, 25)),
+            self.ocr_result("天兵", (417, 354, 42, 25)),
+        ]
+        visible_detail = SimpleNamespace(hit=True, all_results=visible)
+        selected = self.ocr_result("雾中仙", (589, 254, 58, 25))
+        answer_detail = SimpleNamespace(hit=True, best_result=selected)
+        recognition_detail.side_effect = [
+            question_detail,
+            visible_detail,
+            answer_detail,
+        ]
+
+        result = recognize_answer(
+            Mock(), np.ones((718, 1020, 3), dtype=np.uint8), Mock()
+        )
+
+        self.assertEqual(result["status"], "ready")
+        self.assertEqual(result["candidates"], ["芙蓉仙子", "雾中仙", "猴小仙"])
+        self.assertEqual(result["answer"], "雾中仙")
 
     @patch(
         "custom.recognition.searchAnswer.SearchQuestions",

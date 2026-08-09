@@ -378,7 +378,7 @@ def recognize_answer(
         sjqy_rois,
         stable_question_key,
     )
-    from custom.recognition.searchAnswer import SearchQuestions
+    from custom.recognition.searchAnswer import SearchQuestions, get_question_answer_groups
 
     question_roi, answer_roi = sjqy_rois(image)
     question_detail = recognition_detail(
@@ -428,6 +428,29 @@ def recognize_answer(
         }
 
     already_selected = selected_answers if selected_question_key == question_key else ()
+    answer_groups = get_question_answer_groups().get(question, ())
+    if question == "找出3只瑶池珍兽" and len(answer_groups) > 1:
+        visible_detail = recognition_detail(
+            tasker,
+            "OCR",
+            JOCR(expected=[".*"], roi=tuple(answer_roi), threshold=0.5),
+            image,
+            guard,
+        )
+        visible_results = getattr(visible_detail, "all_results", ())
+        if not visible_results and visible_detail is not None and visible_detail.hit:
+            visible_results = (visible_detail.best_result,)
+        visible_groups = []
+        for group in answer_groups:
+            if all(
+                find_unique_answer_match(visible_results, [answer], answer_roi)
+                is not None
+                for answer in group
+            ):
+                visible_groups.append(group)
+        if len(visible_groups) == 1:
+            candidates = list(visible_groups[0])
+
     remaining_candidates = remaining_answer_candidates(candidates, already_selected)
     if not remaining_candidates:
         return {
