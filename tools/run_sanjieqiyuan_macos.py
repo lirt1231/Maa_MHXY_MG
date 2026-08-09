@@ -429,17 +429,35 @@ def recognize_answer(
 
     already_selected = selected_answers if selected_question_key == question_key else ()
     answer_groups = get_question_answer_groups().get(question, ())
+    visible_results = ()
     if question == "找出3只瑶池珍兽" and len(answer_groups) > 1:
         visible_detail = recognition_detail(
             tasker,
             "OCR",
-            JOCR(expected=[".*"], roi=tuple(answer_roi), threshold=0.5),
+            JOCR(expected=[".*"], roi=tuple(answer_roi), threshold=0.2),
             image,
             guard,
         )
         visible_results = getattr(visible_detail, "all_results", ())
+        if not visible_results and visible_detail is not None:
+            visible_results = getattr(visible_detail, "filtered_results", ())
         if not visible_results and visible_detail is not None and visible_detail.hit:
             visible_results = (visible_detail.best_result,)
+        if os.environ.get("MAA_SJQY_DIAGNOSTIC") == "1":
+            print(
+                "answer_ocr_diagnostic="
+                + json.dumps(
+                    [
+                        {
+                            "text": str(getattr(result, "text", "")),
+                            "box": list(getattr(result, "box", ()) or ()),
+                        }
+                        for result in visible_results
+                    ],
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
         visible_groups = []
         for group in answer_groups:
             if all(
@@ -489,6 +507,15 @@ def recognize_answer(
     if answer_match is None and answer_detail is not None:
         answer_match = find_unique_answer_match(
             getattr(answer_detail, "all_results", ()),
+            remaining_candidates,
+            answer_roi,
+        )
+    if answer_match is None and visible_results:
+        # Dynamic-option questions can fail expected-word OCR even when the
+        # raw answer card text is legible. Reuse the same frame's generic OCR
+        # only when it yields one unambiguous known candidate.
+        answer_match = find_unique_answer_match(
+            visible_results,
             remaining_candidates,
             answer_roi,
         )

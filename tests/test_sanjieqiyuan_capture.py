@@ -396,6 +396,17 @@ class SanjieAnswerRecognitionTests(unittest.TestCase):
         self.assertEqual(misrecognized.candidate, "千年僵尸")
         self.assertEqual(misrecognized.edit_distance, 1)
 
+    def test_matches_the_macos_yaochi_tiger_ocr_variant(self):
+        match = find_unique_answer_match(
+            [self.ocr_result("噬天虎", (764, 360, 64, 25))],
+            ["啸天虎"],
+            (330, 205, 480, 220),
+        )
+
+        self.assertIsNotNone(match)
+        self.assertEqual(match.candidate, "啸天虎")
+        self.assertEqual(match.edit_distance, 0)
+
     def test_recovers_unique_four_character_answer_truncated_by_ocr(self):
         match = find_unique_answer_match(
             [self.ocr_result("万剑归", (753, 359, 68, 24))],

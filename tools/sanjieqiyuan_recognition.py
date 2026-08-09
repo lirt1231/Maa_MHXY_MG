@@ -13,6 +13,11 @@ _CHAR_NORMALIZATION = str.maketrans(
         "屍": "尸",
         "殭": "僵",
         "戶": "户",
+        # PaddleOCR consistently reads the first character of 啸天虎 as 噬
+        # on the macOS answer card. This normalization is still followed by
+        # the unique-candidate check below, so it cannot select an unrelated
+        # option on its own.
+        "噬": "啸",
     }
 )
 
