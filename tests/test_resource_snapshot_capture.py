@@ -7,6 +7,7 @@ from dashboard.metrics import (
     PROFILE_ENTRY_POINT,
     _is_backpack,
     _is_huishi_settlement,
+    _is_social_messages,
     metric_capture_status,
     parse_backpack_resources,
 )
@@ -62,6 +63,19 @@ class ResourceSnapshotCaptureTests(unittest.TestCase):
 
         self.assertTrue(_is_huishi_settlement(settlement))
         self.assertFalse(_is_huishi_settlement(settlement[:-1]))
+
+    def test_social_messages_requires_title_navigation_and_message_content(self):
+        social_messages = [
+            {"text": "我的好友", "box": [449, 94, 98, 28]},
+            {"text": "最近", "box": [130, 152, 51, 29]},
+            {"text": "群组", "box": [212, 151, 53, 33]},
+            {"text": "联系人", "box": [286, 150, 75, 35]},
+            {"text": "邮件", "box": [382, 152, 51, 30]},
+            {"text": "系统消息", "box": [180, 210, 79, 26]},
+        ]
+
+        self.assertTrue(_is_social_messages(social_messages))
+        self.assertFalse(_is_social_messages(social_messages[:2]))
 
     def test_capture_failure_becomes_a_failed_snapshot(self):
         with patch(

@@ -158,6 +158,18 @@ def _is_profile(results: list[dict]) -> bool:
     return title and anchors >= 2
 
 
+def _is_social_messages(results: list[dict]) -> bool:
+    """Identify the full-screen friends/system-message panel before closing it."""
+    normalized = [re.sub(r"\s+", "", item["text"]) for item in results]
+    has_title = any("我的好友" in text for text in normalized)
+    navigation_anchors = sum(
+        any(marker in text for text in normalized)
+        for marker in ("最近", "群组", "联系人", "邮件")
+    )
+    has_system_messages = any("系统消息" in text for text in normalized)
+    return has_title and navigation_anchors >= 3 and has_system_messages
+
+
 def _is_huishi_settlement(results: list[dict]) -> bool:
     """Identify the completed 会试 panel before using its fixed close control."""
     normalized = [re.sub(r"\s+", "", item["text"]) for item in results]
@@ -236,7 +248,7 @@ def _ensure_main(tasker, native_input, window_id: int) -> list[dict]:
         )
         if _is_main(results):
             return results
-        if _is_profile(results) or _is_backpack(results):
+        if _is_profile(results) or _is_backpack(results) or _is_social_messages(results):
             _close_panel(native_input)
             continue
         if _is_huishi_settlement(results):
