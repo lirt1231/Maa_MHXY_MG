@@ -9,6 +9,7 @@ from typing import Protocol, Sequence
 try:
     from .fixed_game_controls import (
         CLOSE_STANDARD_PANEL,
+        CLOSE_HUISHI_SETTLEMENT,
         OPEN_BACKPACK,
         OPEN_CHARACTER_PROFILE,
         FixedGameControl,
@@ -17,6 +18,7 @@ try:
 except ImportError:  # Direct execution through tools/run_resource_snapshot_macos.py.
     from fixed_game_controls import (
         CLOSE_STANDARD_PANEL,
+        CLOSE_HUISHI_SETTLEMENT,
         OPEN_BACKPACK,
         OPEN_CHARACTER_PROFILE,
         FixedGameControl,
@@ -56,6 +58,11 @@ class OpenCharacterProfileAction(FixedPanelControlAction):
 class CloseStandardPanelAction(FixedPanelControlAction):
     def __init__(self):
         super().__init__(CLOSE_STANDARD_PANEL)
+
+
+class CloseHuishiSettlementAction(FixedPanelControlAction):
+    def __init__(self):
+        super().__init__(CLOSE_HUISHI_SETTLEMENT)
 
 
 def parse_number(value: str) -> int | None:
@@ -153,6 +160,7 @@ class CaptureExperience:
 
 __all__ = [
     "CloseStandardPanelAction",
+    "CloseHuishiSettlementAction",
     "CaptureExperience",
     "CaptureWallet",
     "FixedPanelControlAction",

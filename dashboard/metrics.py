@@ -17,6 +17,7 @@ from tools.fixed_game_controls import (
 from tools.resource_panel_actions import (
     CaptureExperience,
     CaptureWallet,
+    CloseHuishiSettlementAction,
     CloseStandardPanelAction,
     OpenBackpackAction,
     OpenCharacterProfileAction,
@@ -157,6 +158,16 @@ def _is_profile(results: list[dict]) -> bool:
     return title and anchors >= 2
 
 
+def _is_huishi_settlement(results: list[dict]) -> bool:
+    """Identify the completed 会试 panel before using its fixed close control."""
+    normalized = [re.sub(r"\s+", "", item["text"]) for item in results]
+    return (
+        any("科举会试" in text for text in normalized)
+        and any("恭喜通关" in text for text in normalized)
+        and any("本次会获得奖金" in text for text in normalized)
+    )
+
+
 def _close_panel(native_input) -> None:
     CloseStandardPanelAction().execute(native_input, confirmed_scene="standard_panel")
     time.sleep(1)
@@ -227,6 +238,12 @@ def _ensure_main(tasker, native_input, window_id: int) -> list[dict]:
             return results
         if _is_profile(results) or _is_backpack(results):
             _close_panel(native_input)
+            continue
+        if _is_huishi_settlement(results):
+            CloseHuishiSettlementAction().execute(
+                native_input, confirmed_scene="huishi_settlement"
+            )
+            time.sleep(1)
             continue
         raise RuntimeError("当前页面无法安全返回主界面，请先结束战斗或关闭特殊活动页面")
     raise RuntimeError("自动返回游戏主界面失败")

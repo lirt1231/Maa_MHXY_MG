@@ -6,6 +6,7 @@ from dashboard.metrics import (
     OCR_SIZE,
     PROFILE_ENTRY_POINT,
     _is_backpack,
+    _is_huishi_settlement,
     metric_capture_status,
     parse_backpack_resources,
 )
@@ -51,6 +52,16 @@ class ResourceSnapshotCaptureTests(unittest.TestCase):
             {"text": "661.363", "box": [175, 571, 68, 19]},
             {"text": "6.091.849", "box": [353, 571, 87, 19]},
         ]))
+
+    def test_huishi_settlement_requires_completion_and_current_reward_evidence(self):
+        settlement = [
+            {"text": "科举会试", "box": [451, 137, 120, 33]},
+            {"text": "恭喜通关", "box": [522, 223, 245, 55]},
+            {"text": "本次会获得奖金", "box": [372, 315, 152, 24]},
+        ]
+
+        self.assertTrue(_is_huishi_settlement(settlement))
+        self.assertFalse(_is_huishi_settlement(settlement[:-1]))
 
     def test_capture_failure_becomes_a_failed_snapshot(self):
         with patch(

@@ -25,6 +25,9 @@ OPEN_CHARACTER_PROFILE = FixedGameControl(
 CLOSE_STANDARD_PANEL = FixedGameControl(
     "close_standard_panel", (890, 112), "standard_panel", "关闭已确认的标准面板"
 )
+CLOSE_HUISHI_SETTLEMENT = FixedGameControl(
+    "close_huishi_settlement", (909, 204), "huishi_settlement", "关闭已确认的会试结算页"
+)
 CLOSE_TEMPORARY_BAG = FixedGameControl(
     "close_temporary_bag", (691, 172), "temporary_bag", "关闭已确认的临时包裹"
 )
@@ -32,6 +35,7 @@ CLOSE_TEMPORARY_BAG = FixedGameControl(
 
 __all__ = [
     "CLOSE_STANDARD_PANEL",
+    "CLOSE_HUISHI_SETTLEMENT",
     "CLOSE_TEMPORARY_BAG",
     "FixedGameControl",
     "OPEN_BACKPACK",
