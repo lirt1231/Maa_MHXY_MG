@@ -51,7 +51,8 @@ TASK_RESULT_STATUSES = TASK_SUCCESS_RESULTS | {"safe_stopped", "cancelled"}
 TASK_RESULT_NUMERIC_FIELDS = {
     "questions", "answers", "clicks", "limit", "rounds", "target_rounds",
     "actions", "steps", "ghost_progress", "max_steps", "battles", "max_battles",
-    "digs", "target_digs", "purchases", "sale_clicks", "likes", "scrolls",
+    "digs", "target_digs", "purchases", "sale_clicks", "sale_batches", "likes",
+    "scrolls", "drags",
     "confirmationPolls",
 }
 TASK_RESULT_SCHEMAS = {
@@ -172,7 +173,8 @@ TASK_RESULT_SCHEMAS = {
         "statuses": {"completed", "already_completed", "safe_stopped", "cancelled"},
         "fields": {
             "task_id", "status", "reason", "digs", "target_digs", "purchases",
-            "sale_clicks", "sale_outcome", "genuine_protected", "actions", "clicks",
+            "sale_clicks", "sale_batches", "sale_outcome", "genuine_protected",
+            "actions", "clicks", "drags",
         },
         "required": {
             status: {

@@ -58,6 +58,7 @@ class KaoguDashboardTests(unittest.TestCase):
         base = {
             "task_id": "kaogu", "status": "completed", "digs": 10,
             "target_digs": 10, "purchases": 1, "sale_clicks": 7,
+            "sale_batches": 3, "drags": 29,
             "sale_outcome": "all_non_genuine_sold_genuine_retained",
             "genuine_protected": True, "actions": 24, "clicks": 25,
         }
