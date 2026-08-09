@@ -152,7 +152,11 @@ DEFAULT_ACTION_LIMITS = {
 class PurchaseGuard(Protocol):
     def is_reserved(self) -> bool: ...
 
-    def reserve(self) -> None: ...
+    def purchase_count(self) -> int: ...
+
+    def can_reserve(self, max_purchases: int) -> bool: ...
+
+    def reserve(self, max_purchases: int = 1) -> None: ...
 
     def release(self) -> None: ...
 
@@ -194,7 +198,7 @@ class KaoguWorkflow:
     initial_digs: int = 0
     tool_mode: str = "luoyang_shovel"
     max_steps: int = 80
-    max_purchases: int = 1
+    max_purchases: int = 2
     max_unknown_polls: int = 3
     max_wait_polls: int = 18
     max_dig_attempts_per_round: int = 3
@@ -253,7 +257,11 @@ class KaoguWorkflow:
         phase = "sale_wait_main" if self.initial_digs >= self.target_digs else "enter"
         metrics = ActionMetrics()
         digs = self.initial_digs
-        purchases = 0
+        purchases = (
+            self.purchase_guard.purchase_count()
+            if self.purchase_guard is not None
+            else 0
+        )
         unknown_polls = 0
         wait_polls = 0
         final_observations = 0
@@ -270,6 +278,12 @@ class KaoguWorkflow:
         pending_dig_polls = 0
         start_main_polls = 0
         start_recoveries = 0
+        # A persisted reservation alone does not prove that another shovel is
+        # needed. Replenishment is allowed only after this workflow has seen
+        # the explicit empty-tool dialog and opened the recognized shop.
+        replenishment_authorized = (
+            self.purchase_guard is None or not self.purchase_guard.is_reserved()
+        )
         start_pathing_polls = 0
         purchase_verify_polls = 0
         purchase_shop_close_confirmations = 2
@@ -351,7 +365,10 @@ class KaoguWorkflow:
             if (
                 status == "buy_shovel"
                 and self.purchase_guard is not None
-                and self.purchase_guard.is_reserved()
+                and (
+                    not replenishment_authorized
+                    or not self.purchase_guard.can_reserve(self.max_purchases)
+                )
             ):
                 close_box = decision.get("close_box")
                 if close_box:
@@ -362,7 +379,7 @@ class KaoguWorkflow:
                     decision = {
                         "status": "close_shop",
                         "box": close_box,
-                        "reason": "已有购买保护，关闭商店后验证背包工具",
+                    "reason": "洛阳铲购买次数已达上限，关闭商店后验证工具",
                     }
                 else:
                     decision = {
@@ -638,15 +655,24 @@ class KaoguWorkflow:
                     "open_tool_selection",
                 ):
                     actions[navigation_status].reset_repetition()
+            if (
+                status == "open_shovel_shop"
+                and self.purchase_guard is not None
+                and self.purchase_guard.is_reserved()
+            ):
+                # `open_shovel_shop` is emitted only after the tool dialog
+                # positively reports that the bag has no LuoYang shovel.
+                replenishment_authorized = True
             action_context = context.action_context(scene, decision, "工坊考古")
             if status == "buy_shovel":
                 if purchases >= self.max_purchases:
                     raise RuntimeError("洛阳铲购买已达到一次上限，已停止以避免重复购买")
                 if self.purchase_guard is not None:
-                    self.purchase_guard.reserve()
+                    self.purchase_guard.reserve(self.max_purchases)
                 metrics.record(buy_shovel.execute(action_context))
                 purchases += 1
                 purchase_verify_polls = 0
+                replenishment_authorized = False
             elif status == "dig":
                 if digs >= self.target_digs:
                     return result("completed")

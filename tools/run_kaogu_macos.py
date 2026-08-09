@@ -28,7 +28,7 @@ RESULT_PREFIX = "result_json="
 RESULT_STATUSES = {"completed", "already_completed", "safe_stopped", "cancelled"}
 TARGET_DIGS = 10
 MAX_STEPS = 80
-MAX_PURCHASES = 1
+MAX_PURCHASES = 2
 MAX_UNKNOWN_POLLS = 3
 MAX_WAIT_POLLS = 18
 ACTION_LIMITS = DEFAULT_ACTION_LIMITS

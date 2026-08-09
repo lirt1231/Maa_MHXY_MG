@@ -69,7 +69,7 @@ class KaoguDashboardTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "购买次数超过上限"):
             self.manager._parse_task_result(
-                "kaogu", ["result_json=" + json.dumps({**base, "purchases": 2})]
+                "kaogu", ["result_json=" + json.dumps({**base, "purchases": 3})]
             )
         with self.assertRaisesRegex(RuntimeError, "完成次数与目标次数不一致"):
             self.manager._parse_task_result(

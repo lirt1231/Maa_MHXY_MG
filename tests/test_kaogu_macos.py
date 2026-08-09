@@ -1250,16 +1250,22 @@ class FailingClickRuntime(FakeRuntime):
 
 
 class FakePurchaseGuard:
-    def __init__(self, reserved=False):
+    def __init__(self, reserved=False, purchases=0):
         self.reserved = reserved
-        self.reservations = 0
+        self.reservations = purchases or int(reserved)
         self.releases = 0
 
     def is_reserved(self):
         return self.reserved
 
-    def reserve(self):
-        if self.reserved:
+    def purchase_count(self):
+        return self.reservations
+
+    def can_reserve(self, max_purchases):
+        return self.reservations < max_purchases
+
+    def reserve(self, max_purchases=1):
+        if not self.can_reserve(max_purchases):
             raise RuntimeError("重复购买保护已生效")
         self.reserved = True
         self.reservations += 1
@@ -2042,6 +2048,23 @@ class FilePurchaseGuardTests(unittest.TestCase):
 
             self.assertFalse(marker.reset_if_owner_exited())
             self.assertTrue(marker.is_reserved())
+
+    def test_exited_owner_can_make_only_one_bounded_replenishment_purchase(self):
+        with tempfile.TemporaryDirectory() as directory:
+            marker = FilePurchaseGuard(Path(directory) / "purchase.json")
+            marker.path.write_text(
+                json.dumps({
+                    "task_id": "kaogu", "pid": 999_999_999,
+                    "reserved_at": datetime.now(timezone.utc).isoformat(),
+                    "purchases": 1,
+                }),
+                encoding="utf-8",
+            )
+
+            self.assertTrue(marker.can_reserve(2))
+            marker.reserve(2)
+            self.assertEqual(marker.purchase_count(), 2)
+            self.assertFalse(marker.can_reserve(2))
 
     def test_recent_exited_owner_reservation_remains_protected(self):
         with tempfile.TemporaryDirectory() as directory:

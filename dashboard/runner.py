@@ -1274,7 +1274,7 @@ class RunnerManager:
             and result["digs"] != result["target_digs"]
         ):
             raise RuntimeError("考古完成次数与目标次数不一致")
-        if task_id == "kaogu" and result.get("purchases", 0) > 1:
+        if task_id == "kaogu" and result.get("purchases", 0) > 2:
             raise RuntimeError("考古结果中的洛阳铲购买次数超过上限")
         if task_id == "kaogu" and result.get("sale_clicks", 0) > 12:
             raise RuntimeError("考古结果中的古董出售次数超过上限")
