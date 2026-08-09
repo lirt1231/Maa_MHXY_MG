@@ -476,7 +476,9 @@ class RunnerTaskContractTests(unittest.TestCase):
             'result_json={"task_id":"keju_huishi","status":"completed",'
             '"answers":15,"clicks":15,"limit":20}'
         ])
-        with patch("dashboard.runner.subprocess.Popen", return_value=process) as popen:
+        with patch("dashboard.runner.ensure_task_available"), patch(
+            "dashboard.runner.subprocess.Popen", return_value=process
+        ) as popen:
             self.manager.start("keju_huishi", {}, checklist_confirmed=True)
             current = self._wait_for_terminal()
 

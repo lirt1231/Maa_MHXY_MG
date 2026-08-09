@@ -167,9 +167,10 @@ class TaskResourceRunnerTests(unittest.TestCase):
         return self.manager.start("baotu", {}, checklist_confirmed=True)
 
     def start_huishi(self):
-        return self.manager.start(
-            "keju_huishi", {"waitForRoundOne": True}, checklist_confirmed=True
-        )
+        with patch("dashboard.runner.ensure_task_available"):
+            return self.manager.start(
+                "keju_huishi", {"waitForRoundOne": True}, checklist_confirmed=True
+            )
 
     def test_completed_task_records_before_after_and_net_changes(self):
         processes = [
