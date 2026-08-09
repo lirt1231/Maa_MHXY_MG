@@ -330,6 +330,9 @@ class KaoguWorkflow:
                     "wait_for_busy_task",
                     "wait_for_dig",
                     "dig_confirmed",
+                    "dig_confirmed_on_main",
+                    "start_transition_main",
+                    "wait_for_start_pathing",
                     "start_archaeology",
                     "dig",
                     "close_temporary_bag",
@@ -503,9 +506,17 @@ class KaoguWorkflow:
                 continue
             if status == "dig_confirmed_on_main":
                 if not pending_dig:
-                    raise RuntimeError(
-                        "主界面收获消息未关联本次挖掘，已安全停止并保留现场"
+                    # The settlement panel can confirm a dig before its
+                    # personal-channel receipt reaches the main screen. Once
+                    # that first signal has already cleared pending_dig, the
+                    # delayed receipt is duplicate evidence, not a new dig.
+                    context.emit(
+                        "dig_receipt_ignored",
+                        reason="duplicate_after_settlement_confirmation",
+                        digs=digs,
                     )
+                    context.waiter.wait(0.8)
+                    continue
                 digs += 1
                 pending_dig = False
                 pending_dig_attempts = 0

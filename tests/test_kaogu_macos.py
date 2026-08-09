@@ -1948,6 +1948,49 @@ class KaoguRunnerTests(unittest.TestCase):
             run(self._args(), guard, FakePurchaseGuard())
         self.assertEqual(FakeRuntime.instances[0].clicks, [])
 
+    @patch("tools.run_kaogu_macos.MacOSTaskRuntime", FakeRuntime)
+    def test_duplicate_main_receipt_after_settlement_does_not_stop_or_double_count(self):
+        start = scene([
+            text("工坊·考古", (436, 98, 148, 33)),
+            text("考古", (564, 560, 59, 29)),
+        ])
+        dig = scene([
+            text("洛阳铲", (1040, 510, 58, 23)),
+            text("挖掘", (1044, 550, 52, 29)),
+        ])
+        duplicate_receipt = scene(
+            [
+                text("福利", (15, 129, 33, 16)),
+                text("任务", (1100, 80, 45, 25)),
+                text("队伍", (1190, 95, 45, 25)),
+                text("个人你获得了1个战国山字镜", (8, 676, 235, 20)),
+            ],
+            {"menu_plus": (1206, 637, 44, 42)},
+        )
+        FakeRuntime.scenes = [
+            start, dig, dig_settlement(), duplicate_receipt, dig,
+            dig_settlement(), *sale_flow_scenes(),
+        ]
+        guard = CancellationGuard()
+        guard.wait = lambda _seconds: None
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            return_code = run(
+                self._args(tool_mode="selected", target_digs=2),
+                guard,
+                FakePurchaseGuard(),
+            )
+
+        self.assertEqual(return_code, 0)
+        result = next(
+            json.loads(line[len("result_json="):])
+            for line in output.getvalue().splitlines()
+            if line.startswith("result_json=")
+        )
+        self.assertEqual(result["digs"], 2)
+        self.assertIn('"event": "dig_receipt_ignored"', output.getvalue())
+
 
 class FilePurchaseGuardTests(unittest.TestCase):
     def test_reservation_is_visible_across_instances_until_released(self):
