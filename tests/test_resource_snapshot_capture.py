@@ -6,6 +6,7 @@ from dashboard.metrics import (
     OCR_SIZE,
     PROFILE_ENTRY_POINT,
     _is_backpack,
+    metric_capture_status,
     parse_backpack_resources,
 )
 from tools.run_resource_snapshot_macos import build_snapshot
@@ -126,6 +127,10 @@ class ResourceSnapshotCaptureTests(unittest.TestCase):
         self.assertEqual(snapshot.status, "success")
         self.assertEqual(snapshot.captured_fields, frozenset({"silver"}))
         self.assertEqual(snapshot.values.silver, 20000)
+
+    def test_complete_metric_capture_status_is_success(self):
+        self.assertEqual(metric_capture_status([]), "success")
+        self.assertEqual(metric_capture_status(["gold"]), "partial")
 
 
 if __name__ == "__main__":

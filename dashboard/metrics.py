@@ -37,6 +37,11 @@ RESOURCE_CAPTURE_FIELDS = frozenset(
 )
 
 
+def metric_capture_status(missing_fields: Iterable[str]) -> str:
+    """Return the persisted state for a completed resource capture."""
+    return "partial" if any(missing_fields) else "success"
+
+
 def parse_visible_metrics(texts: Iterable[str]) -> dict:
     """Compatibility parser for labelled OCR text."""
     items = [re.sub(r"\s+", "", str(text)) for text in texts if str(text).strip()]
@@ -383,6 +388,7 @@ def capture_visible_metrics(
     missing = [name for name, key in external_names.items() if name in captured_fields and values[key] is None]
     return {
         **values,
+        "status": metric_capture_status(missing),
         "rawText": raw_text,
         "error": f"未能识别字段：{', '.join(missing)}" if missing else None,
         "resourceEvidence": {
