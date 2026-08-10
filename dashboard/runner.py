@@ -567,7 +567,7 @@ class RunnerManager:
             ]
             if options.get("waitForRoundOne", False):
                 command.append("--wait-for-round-one")
-            if task_id == "keju_huishi":
+            if task_id == "keju":
                 command.append("--navigate-from-main")
             else:
                 command.append("--wait-for-entry")
@@ -958,7 +958,7 @@ class RunnerManager:
                 "--exam-type",
                 "xiangshi" if task_id == "keju" else "huishi",
             ])
-            if task_id == "keju_huishi":
+            if task_id == "keju":
                 command.append("--navigate-from-main")
         elif task_id == "zhuogui":
             command.extend(["--rounds", "1"])
@@ -1004,16 +1004,15 @@ class RunnerManager:
             }
             ready = scene in actionable
         elif task_id == "keju":
-            expected_exam_type = "xiangshi" if task_id == "keju" else "huishi"
-            ready = (
-                scene == "formal_question_ready"
-                and decision.get("examType") == expected_exam_type
-            )
-        elif task_id == "keju_huishi":
             ready = scene in {
                 "exam_ready", "open_activity", "open_daily", "join_task", "scroll_daily", "wait"
             } or (
-                scene == "formal_question_ready" and decision.get("examType") == "huishi"
+                scene == "formal_question_ready" and decision.get("examType") == "xiangshi"
+            )
+        elif task_id == "keju_huishi":
+            ready = (
+                scene == "formal_question_ready"
+                and decision.get("examType") == "huishi"
             )
         elif task_id == "zhuogui":
             ready = bool(proposed and proposed != "stop")

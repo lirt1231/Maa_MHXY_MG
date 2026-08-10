@@ -107,7 +107,7 @@ def parse_args():
     parser.add_argument(
         "--navigate-from-main",
         action="store_true",
-        help="从游戏主界面依次打开活动、日常活动并参加科举会试",
+        help="从游戏主界面依次打开活动、日常活动并参加指定科举活动",
     )
     parser.add_argument(
         "--use-codex",
@@ -381,7 +381,7 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
         from macos_task_runtime import MacOSTaskRuntime
 
         runtime = MacOSTaskRuntime(guard)
-        entry = HuishiEntryWorkflow().execute(
+        entry = HuishiEntryWorkflow(exam_type=args.exam_type).execute(
             WorkflowContext(runtime, guard, inspection_evidence_provider=runtime.inspection_evidence),
             inspect=args.inspect_scene or args.recognize_only,
         )
@@ -390,7 +390,7 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
             return None
         if entry.status == "already_completed":
             return task_result(
-                "already_completed", exam_type="huishi", answers=0, clicks=0, limit=args.max_steps
+                "already_completed", exam_type=args.exam_type, answers=0, clicks=0, limit=args.max_steps
             )
     elif args.inspect_scene:
         from macos_task_runtime import MacOSTaskRuntime

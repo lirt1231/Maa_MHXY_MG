@@ -2,7 +2,11 @@ import unittest
 from types import SimpleNamespace
 
 from tools.automation_workflows import WorkflowContext, WorkflowResult
-from tools.huishi_entry_workflow import HuishiEntryWorkflow, classify_huishi_entry_scene
+from tools.huishi_entry_workflow import (
+    HuishiEntryWorkflow,
+    classify_huishi_entry_scene,
+    classify_keju_entry_scene,
+)
 
 
 def item(text, box):
@@ -77,6 +81,23 @@ class HuishiEntryWorkflowTests(unittest.TestCase):
             [item("科举会试", (330, 260, 120, 30))], {}, (1020, 718)
         )
         self.assertEqual(decision["status"], "unknown")
+
+    def test_xiangshi_entry_uses_its_own_activity_row_and_title(self):
+        main = scene(item("活动", (260, 45, 50, 22)))
+        activity = scene(item("活动", (450, 30, 80, 30)), item("日常活动", (80, 90, 100, 30)))
+        daily = scene(
+            item("活动", (450, 30, 80, 30)), item("日常活动", (80, 90, 100, 30)),
+            item("科举乡试", (250, 180, 100, 25)), item("参加", (500, 210, 60, 25)),
+        )
+        exam = scene(item("科举乡试", (430, 120, 130, 30)))
+        adapter = Adapter([main, activity, daily, exam])
+        result = HuishiEntryWorkflow(exam_type="xiangshi").execute(WorkflowContext(adapter, adapter))
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.payload, {"actions": 3, "clicks": 3})
+        self.assertEqual(
+            classify_keju_entry_scene(exam.texts, {}, exam.image_size, exam_type="xiangshi")["status"],
+            "exam_ready",
+        )
 
 
 if __name__ == "__main__":
