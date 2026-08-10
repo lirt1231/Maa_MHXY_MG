@@ -160,6 +160,7 @@ class KaoguSceneTests(unittest.TestCase):
             ],
             {},
             (1020, 718),
+            phase="shop",
         )
 
         self.assertEqual(decision["status"], "buy_shovel")
@@ -1246,7 +1247,8 @@ class FakeRuntime:
 class FailingClickRuntime(FakeRuntime):
     def click_box(self, box, scene, reason):
         super().click_box(box, scene, reason)
-        raise RuntimeError("injected click failure")
+        if reason == "购买一个洛阳铲":
+            raise RuntimeError("injected click failure")
 
 
 class FakePurchaseGuard:
@@ -1432,6 +1434,14 @@ class KaoguRunnerTests(unittest.TestCase):
 
     @patch("tools.run_kaogu_macos.MacOSTaskRuntime", FakeRuntime)
     def test_successful_purchase_closes_static_shop_then_verifies_tool(self):
+        empty_tool = scene(
+            [
+                text("选择工具", (569, 184, 89, 27)),
+                text("包裹中暂时没有洛阳", (600, 288, 163, 20)),
+                text("购买", (600, 352, 43, 24)),
+                text("使用", (608, 488, 51, 24)),
+            ]
+        )
         shop = scene(
             [
                 text("洛阳杂货铺", (415, 104, 166, 38)),
@@ -1462,6 +1472,7 @@ class KaoguRunnerTests(unittest.TestCase):
             ]
         )
         FakeRuntime.scenes = [
+            empty_tool,
             shop,
             shop,
             shop,
@@ -1489,6 +1500,111 @@ class KaoguRunnerTests(unittest.TestCase):
         self.assertEqual(reasons.count("购买一个洛阳铲"), 1)
         self.assertEqual(reasons.count("考古流程：close_shop"), 1)
         self.assertEqual(purchase_guard.reservations, 1)
+        self.assertEqual(purchase_guard.releases, 1)
+
+    @patch("tools.run_kaogu_macos.MacOSTaskRuntime", FakeRuntime)
+    def test_unreserved_shop_at_start_stops_without_purchase(self):
+        shop = scene(
+            [
+                text("洛阳杂货铺", (415, 104, 166, 38)),
+                text("洛阳铲", (712, 190, 67, 26)),
+                text("购买", (735, 540, 66, 29)),
+                text("×", (1106, 199, 33, 28)),
+            ]
+        )
+        FakeRuntime.scenes = [shop]
+        guard = CancellationGuard()
+        guard.wait = lambda _seconds: None
+
+        with self.assertRaisesRegex(RuntimeError, "未确认从空工具页进入"):
+            run(self._args(), guard, FakePurchaseGuard())
+        self.assertEqual(FakeRuntime.instances[0].clicks, [])
+
+    @patch("tools.run_kaogu_macos.MacOSTaskRuntime", FakeRuntime)
+    def test_empty_tool_after_purchase_can_reopen_shop_for_bounded_replenishment(self):
+        empty_tool = scene(
+            [
+                text("选择工具", (569, 184, 89, 27)),
+                text("包裹中暂时没有洛阳", (600, 288, 163, 20)),
+                text("购买", (600, 352, 43, 24)),
+                text("使用", (608, 488, 51, 24)),
+            ]
+        )
+        shop = scene(
+            [
+                text("洛阳杂货铺", (415, 104, 166, 38)),
+                text("洛阳铲", (712, 190, 67, 26)),
+                text("购买", (735, 540, 66, 29)),
+                text("×", (1106, 199, 33, 28)),
+            ]
+        )
+        tool_selection = scene(
+            [
+                text("选择工具", (467, 184, 89, 27)),
+                text("1", (320, 266, 9, 9)),
+                text("使用", (608, 488, 51, 24)),
+            ]
+        )
+        selected_tool = scene(
+            [
+                text("选择工具", (467, 184, 89, 27)),
+                text("洛阳铲", (320, 266, 52, 21)),
+                text("使用", (608, 488, 51, 24)),
+            ]
+        )
+        start = scene(
+            [
+                text("工坊·考古", (436, 98, 148, 33)),
+                text("考古", (564, 560, 59, 29)),
+                text("消耗活力：54", (500, 490, 96, 23)),
+            ]
+        )
+        dig = scene(
+            [
+                text("洛阳铲", (1040, 510, 58, 23)),
+                text("挖掘", (1044, 550, 52, 29)),
+            ]
+        )
+        # Each static shop is observed twice after its purchase, then closed
+        # before returning to the positively identified tool dialog.
+        FakeRuntime.scenes = [
+            empty_tool,
+            shop,
+            shop,
+            shop,
+            empty_tool,
+            shop,
+            shop,
+            shop,
+            tool_selection,
+            selected_tool,
+            start,
+            dig,
+            dig_settlement(),
+            *sale_flow_scenes(),
+        ]
+        guard = CancellationGuard()
+        guard.wait = lambda _seconds: None
+        purchase_guard = FakePurchaseGuard()
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            return_code = run(
+                self._args(target_digs=1), guard, purchase_guard
+            )
+
+        self.assertEqual(return_code, 0)
+        result = next(
+            json.loads(line[len("result_json="):])
+            for line in output.getvalue().splitlines()
+            if line.startswith("result_json=")
+        )
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["purchases"], 2)
+        reasons = [reason for _, reason in FakeRuntime.instances[0].clicks]
+        self.assertEqual(reasons.count("考古流程：open_shovel_shop"), 2)
+        self.assertEqual(reasons.count("购买一个洛阳铲"), 2)
+        self.assertEqual(reasons.count("考古流程：close_shop"), 2)
         self.assertEqual(purchase_guard.releases, 1)
 
     @patch("tools.run_kaogu_macos.MacOSTaskRuntime", FakeRuntime)
@@ -1810,6 +1926,14 @@ class KaoguRunnerTests(unittest.TestCase):
 
     @patch("tools.run_kaogu_macos.MacOSTaskRuntime", FakeRuntime)
     def test_purchase_once_and_complete_exactly_ten_digs(self):
+        empty_tool = scene(
+            [
+                text("选择工具", (569, 184, 89, 27)),
+                text("包裹中暂时没有洛阳", (600, 288, 163, 20)),
+                text("购买", (600, 352, 43, 24)),
+                text("使用", (608, 488, 51, 24)),
+            ]
+        )
         purchase = scene(
             [
                 text("洛阳铲", (887, 112, 106, 64)),
@@ -1841,6 +1965,7 @@ class KaoguRunnerTests(unittest.TestCase):
             {"shovel": (1030, 398, 76, 78)},
         )
         FakeRuntime.scenes = [
+            empty_tool,
             purchase,
             close_shop,
             select_shovel,
@@ -1886,6 +2011,14 @@ class KaoguRunnerTests(unittest.TestCase):
 
     @patch("tools.run_kaogu_macos.MacOSTaskRuntime", FakeRuntime)
     def test_interrupted_purchase_is_not_repeated_after_restart(self):
+        empty_tool = scene(
+            [
+                text("选择工具", (569, 184, 89, 27)),
+                text("包裹中暂时没有洛阳", (600, 288, 163, 20)),
+                text("购买", (600, 352, 43, 24)),
+                text("使用", (608, 488, 51, 24)),
+            ]
+        )
         purchase = scene(
             [
                 text("洛阳铲", (887, 112, 106, 64)),
@@ -1897,7 +2030,7 @@ class KaoguRunnerTests(unittest.TestCase):
         guard = CancellationGuard()
         guard.wait = lambda _seconds: None
 
-        FakeRuntime.scenes = [purchase, scene(), scene(), scene()]
+        FakeRuntime.scenes = [empty_tool, purchase, scene(), scene(), scene()]
         with self.assertRaisesRegex(RuntimeError, "连续三次无法识别"):
             run(self._args(), guard, purchase_guard)
 
@@ -1919,7 +2052,16 @@ class KaoguRunnerTests(unittest.TestCase):
 
     @patch("tools.run_kaogu_macos.MacOSTaskRuntime", FailingClickRuntime)
     def test_purchase_is_reserved_before_click_backend_is_called(self):
+        empty_tool = scene(
+            [
+                text("选择工具", (569, 184, 89, 27)),
+                text("包裹中暂时没有洛阳", (600, 288, 163, 20)),
+                text("购买", (600, 352, 43, 24)),
+                text("使用", (608, 488, 51, 24)),
+            ]
+        )
         FailingClickRuntime.scenes = [
+            empty_tool,
             scene(
                 [
                     text("洛阳铲", (887, 112, 106, 64)),

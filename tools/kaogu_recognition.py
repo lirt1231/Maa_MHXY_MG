@@ -561,6 +561,15 @@ def classify_kaogu_scene(
         buy_buttons = [{"box": _union_boxes(split_buy_button)}]
     if phase == "shop_closing" and shop_close:
         return {"status": "close_shop", "box": shop_close}
+    if phase == "enter" and shovel_products and shop_close:
+        # An interrupted run may be restarted while the previously confirmed
+        # shop is still visible. This is deliberately not a purchase state:
+        # the workflow can only close it when its durable purchase guard
+        # proves that this run already owns a purchase attempt.
+        return {
+            "status": "shop_resume",
+            "close_box": shop_close,
+        }
     if phase == "shop_purchase_verify" and shop_titles and shovel_products:
         # The current client keeps the shop open after a successful purchase.
         # Preserve the recognized close box so the workflow can leave this
@@ -571,7 +580,11 @@ def classify_kaogu_scene(
             "reason": "awaiting_tool_delivery",
             "close_box": shop_close,
         }
-    if shovel_products and buy_buttons and shop_close:
+    # A visible shop-like overlay alone is never purchase authority. The
+    # workflow must first observe the empty tool dialog and explicitly enter
+    # this shop in the current run; otherwise a stale/transitioning shop page
+    # could consume the bounded purchase reservation.
+    if phase == "shop" and shovel_products and buy_buttons and shop_close:
         return {
             "status": "buy_shovel",
             "box": valid_box(buy_buttons[-1]),

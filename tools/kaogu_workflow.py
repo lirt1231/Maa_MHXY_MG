@@ -132,7 +132,11 @@ DEFAULT_ACTION_LIMITS = {
     "open_production": 2,
     "switch_tier": 4,
     "open_tool_selection": 2,
-    "open_shovel_shop": 1,
+    # A LuoYang shovel can be consumed before the ten-dig target is reached.
+    # Keep this aligned with MAX_PURCHASES: a second shop entry is permitted
+    # only after the tool dialog explicitly proves the previous purchase is
+    # no longer available.
+    "open_shovel_shop": 2,
     "close_shop": 2,
     "select_shovel": 2,
     "use_shovel": 2,
@@ -361,6 +365,24 @@ class KaoguWorkflow:
                         "保持“考古”按钮可见后再启动"
                     ),
                 }
+                status = decision["status"]
+            if status == "shop_resume":
+                close_box = decision.get("close_box")
+                if (
+                    self.purchase_guard is not None
+                    and self.purchase_guard.is_reserved()
+                    and close_box
+                ):
+                    decision = {
+                        "status": "close_shop",
+                        "box": close_box,
+                        "reason": "恢复已中断的洛阳铲购买后验证工具",
+                    }
+                else:
+                    decision = {
+                        "status": "purchase_blocked",
+                        "reason": "未确认从空工具页进入洛阳杂货铺，已停止以避免无证据购买",
+                    }
                 status = decision["status"]
             if (
                 status == "buy_shovel"
@@ -663,6 +685,11 @@ class KaoguWorkflow:
                 # `open_shovel_shop` is emitted only after the tool dialog
                 # positively reports that the bag has no LuoYang shovel.
                 replenishment_authorized = True
+                # This is a new, evidence-bounded shop transaction. Its
+                # eventual close must not inherit the prior shop's local
+                # repetition count, while the purchase guard continues to
+                # enforce the global two-purchase ceiling.
+                actions["close_shop"].reset_repetition()
             action_context = context.action_context(scene, decision, "工坊考古")
             if status == "buy_shovel":
                 if purchases >= self.max_purchases:
