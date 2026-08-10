@@ -428,9 +428,11 @@ class KaoguSceneTests(unittest.TestCase):
 
     def test_live_empty_sale_shop_closes_with_page_identity_and_ocr_control(self):
         texts = [
-            text("古董售卖", (414, 107, 131, 37)),
+            text("古董售卖·", (414, 107, 131, 37)),
             text("总价", (615, 472, 41, 24)),
             text("拥有", (614, 508, 41, 23)),
+            text("没有可以售卖的商品哦", (665, 225, 187, 21)),
+            text("售卖", (729, 551, 73, 35)),
             text("×", (873, 204, 36, 43)),
         ]
 

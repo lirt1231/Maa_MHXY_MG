@@ -284,7 +284,7 @@ def _classify_antique_sale(texts, templates, image_size, phase):
         )
         if close_box is None and sale_close_buttons:
             close_box = valid_box(sale_close_buttons[-1])
-        if close_box and not sell_buttons:
+        if close_box and (not sell_buttons or no_saleable_goods):
             return {"status": "close_sale_shop", "box": close_box}
 
     if _main_screen_evidence(texts, templates, image_size):
