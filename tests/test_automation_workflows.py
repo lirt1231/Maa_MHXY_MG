@@ -1085,7 +1085,6 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
                     _scene("organize_inventory"),
                     _scene("activate_antique"),
                     _scene("wait_for_sale_pathing"),
-                    _scene("select_sale_antique"),
                     _scene("sell_antique"),
                     _scene("cancel_genuine_sale"),
                     _scene("close_sale_shop"),
@@ -1107,8 +1106,8 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
                     "sale_batches": 1,
                     "sale_outcome": "all_non_genuine_sold_genuine_retained",
                     "genuine_protected": True,
-                    "actions": 24,
-                    "clicks": 18,
+                    "actions": 23,
+                    "clicks": 17,
                     "drags": 7,
                 },
             ),
@@ -1134,7 +1133,6 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
             _scene("organize_inventory"),
             _scene("activate_antique"),
             _scene("wait_for_sale_pathing"),
-            _scene("select_sale_antique"),
             _scene("sell_antique"),
             _scene("cancel_genuine_sale"),
             _scene("close_sale_shop"),
@@ -1173,7 +1171,6 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
             _scene("organize_inventory"),
             _scene("activate_antique"),
             _scene("wait_for_sale_pathing"),
-            _scene("select_sale_antique"),
             _scene("sell_antique"),
             _scene("antique_sale_finished"),
             _scene("close_sale_shop"),
@@ -1184,7 +1181,6 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
             _scene("organize_inventory"),
             _scene("activate_antique"),
             _scene("wait_for_sale_pathing"),
-            _scene("select_sale_antique"),
             _scene("sell_antique"),
             _scene("antique_sale_finished"),
             _scene("close_sale_shop"),
@@ -1220,11 +1216,8 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
 
     def test_kaogu_sells_every_visible_antique_before_closing_shop(self):
         adapter = _DesktopAdapterA([
-            _scene("select_sale_antique"),
             _scene("sell_antique"),
-            _scene("select_sale_antique"),
             _scene("sell_antique"),
-            _scene("select_sale_antique"),
             _scene("sell_antique"),
             _scene("sale_candidate_absent"),
             _scene("sale_candidate_absent"),
@@ -1252,7 +1245,6 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
         self.assertEqual(result.status, "completed")
         self.assertEqual(result.payload["sale_clicks"], 3)
         reasons = [entry[-1] for entry in adapter.trace if entry[0] == "click"]
-        self.assertEqual(reasons.count("考古流程：select_sale_antique"), 3)
         self.assertEqual(reasons.count("考古流程：sell_antique"), 3)
         self.assertEqual(reasons.count("考古流程：close_sale_shop"), 1)
 

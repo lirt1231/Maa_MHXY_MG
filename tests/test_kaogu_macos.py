@@ -64,10 +64,7 @@ def sale_flow_scenes(*, include_main=True):
     pathing = scene(templates={"auto_pathing": (1050, 620, 120, 30)})
     sale_page = scene(
         [text("售卖", (890, 592, 150, 58))],
-        {
-            "antique_sale_page": (480, 60, 280, 79),
-            "sale_non_genuine_antique": (170, 153, 46, 44),
-        },
+        {"antique_sale_page": (480, 60, 280, 79)},
     )
     genuine_prompt = scene(
         [
@@ -132,17 +129,7 @@ class KaoguSceneTests(unittest.TestCase):
         self.assertEqual(antique["threshold"], 0.82)
         self.assertEqual(antique["roi_ratio"], [0.1, 0.48, 0.79, 0.27])
 
-        sale_antique = KAOGU_TEMPLATES["sale_non_genuine_antique"]
-        self.assertIn(
-            "jineng/gd/yanpin_sale_live_986.png",
-            sale_antique["templates"],
-        )
-        self.assertIn("jineng/gd/yanpin_live_923.png", sale_antique["templates"])
-        self.assertIn("jineng/gd/gaofang_live_923.png", sale_antique["templates"])
-        self.assertTrue(
-            all("zhenpin" not in template for template in sale_antique["templates"])
-        )
-        self.assertEqual(sale_antique["threshold"], 0.82)
+        self.assertNotIn("sale_non_genuine_antique", KAOGU_TEMPLATES)
 
     def test_shop_close_templates_include_current_narrow_client(self):
         close = KAOGU_TEMPLATES["shop_close"]
@@ -323,49 +310,36 @@ class KaoguSceneTests(unittest.TestCase):
             text("拥有", (635, 500, 42, 23)),
             text("售卖", (731, 553, 70, 32)),
         ]
-        templates = {"sale_non_genuine_antique": (519, 186, 46, 44)}
-
-        select = classify_kaogu_scene(
-            texts, templates, (1020, 718), phase="sale_wait_main"
-        )
         sell = classify_kaogu_scene(
-            texts, templates, (1020, 718), phase="sale_sell"
+            texts, {}, (1020, 718), phase="sale_pathing"
         )
         finished = classify_kaogu_scene(
             texts, {}, (1020, 718), phase="sale_select"
         )
 
-        self.assertEqual(
-            select,
-            {"status": "select_sale_antique", "box": [519, 186, 46, 44]},
-        )
         self.assertEqual(sell, {"status": "sell_antique", "box": [731, 553, 70, 32]})
         self.assertEqual(
             finished,
-            {"status": "sale_candidate_absent", "reason": "confirming_empty_sale"},
+            {"status": "sell_antique", "box": [731, 553, 70, 32]},
         )
 
-    def test_blank_preview_never_hides_the_next_saleable_antique(self):
+    def test_sale_without_control_waits_for_explicit_empty_evidence(self):
         texts = [
             text("古董售卖", (426, 84, 142, 37)),
             text("总价", (636, 461, 42, 25)),
             text("拥有", (635, 500, 42, 23)),
-            text("售卖", (731, 553, 70, 32)),
         ]
 
         decision = classify_kaogu_scene(
             texts,
-            {
-                "antique_sale_complete": (766, 66, 318, 332),
-                "sale_non_genuine_antique": (519, 186, 46, 44),
-            },
+            {},
             (1020, 718),
             phase="sale_select",
         )
 
         self.assertEqual(
             decision,
-            {"status": "select_sale_antique", "box": [519, 186, 46, 44]},
+            {"status": "sale_candidate_absent", "reason": "confirming_empty_sale"},
         )
 
     def test_explicit_no_goods_page_finishes_sale(self):
@@ -413,7 +387,6 @@ class KaoguSceneTests(unittest.TestCase):
             text("古董售卖", (426, 84, 142, 37)),
             text("总价", (636, 461, 42, 25)),
             text("拥有", (635, 500, 42, 23)),
-            text("售卖", (731, 553, 70, 32)),
         ]
 
         decision = classify_kaogu_scene(
@@ -433,7 +406,6 @@ class KaoguSceneTests(unittest.TestCase):
             text("古董售卖", (414, 107, 131, 37)),
             text("总价", (615, 472, 41, 24)),
             text("拥有", (614, 508, 41, 23)),
-            text("售卖", (707, 561, 68, 31)),
             text("×", (873, 204, 36, 43)),
         ]
 
@@ -2012,7 +1984,7 @@ class KaoguRunnerTests(unittest.TestCase):
         self.assertEqual(result["digs"], 10)
         self.assertEqual(result["target_digs"], 10)
         self.assertEqual(result["purchases"], 1)
-        self.assertEqual(result["sale_clicks"], 1)
+        self.assertEqual(result["sale_clicks"], 2)
         self.assertEqual(
             result["sale_outcome"], "all_non_genuine_sold_genuine_retained"
         )

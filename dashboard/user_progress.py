@@ -83,7 +83,6 @@ SCENE_MESSAGES = {
     "activate_antique": "正在双击非真品古董并前往古董商",
     "use_antique": "正在使用非真品古董并前往古董商",
     "wait_for_sale_pathing": "正在自动寻路前往古董商，请勿操作游戏窗口",
-    "select_sale_antique": "正在选择下一件可出售的古董",
     "sell_antique": "正在将非真品古董兑换为银币",
     "sale_candidate_absent": "正在确认非真品古董是否已全部出售",
     "cancel_genuine_sale": "检测到真品，正在取消出售并保留真品",

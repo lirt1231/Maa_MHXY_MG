@@ -97,18 +97,6 @@ KAOGU_TEMPLATES = {
         # with similarly coloured corner ribbons.
         "roi_ratio": [0.1, 0.48, 0.79, 0.27],
     },
-    "sale_non_genuine_antique": {
-        "templates": [
-            "jineng/gd/yanpin_sale_live_986.png",
-            "jineng/gd/yanpin_live_923.png",
-            "jineng/gd/yanpin.png",
-            "jineng/gd/gaofang_live_923.png",
-            "jineng/gd/gaofang.png",
-        ],
-        "threshold": 0.82,
-        "green_mask": True,
-        "roi_ratio": [0.1, 0.18, 0.5, 0.5],
-    },
     "auto_pathing": [
         "zonghe/zidongxunlu1.png",
         "zonghe/zidongxunlu2.png",
@@ -149,7 +137,6 @@ DEFAULT_ACTION_LIMITS = {
     "open_inventory_for_sale": 1,
     "organize_inventory": 1,
     "use_antique": 1,
-    "select_sale_antique": 12,
     "sell_antique": 12,
     "cancel_genuine_sale": 1,
     "close_sale_shop": 2,
@@ -192,7 +179,6 @@ def next_kaogu_phase(status: str, phase: str) -> str:
         "scan_inventory": phase,
         "activate_antique": "sale_pathing",
         "use_antique": "sale_pathing",
-        "select_sale_antique": "sale_sell",
         "sell_antique": "sale_select",
         "cancel_genuine_sale": "sale_closing",
         "close_sale_shop": "sale_confirm_main",
@@ -747,7 +733,6 @@ class KaoguWorkflow:
                         "open_inventory_for_sale",
                         "organize_inventory",
                         "use_antique",
-                        "select_sale_antique",
                         "sell_antique",
                         "cancel_genuine_sale",
                         "close_sale_shop",
