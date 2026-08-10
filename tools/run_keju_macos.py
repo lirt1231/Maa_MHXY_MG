@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Answer an already-open 科举乡试/会试 page on the macOS client."""
+"""Answer 科举乡试 or enter and answer 科举会试 on the macOS client."""
 
 from __future__ import annotations
 
@@ -29,6 +29,7 @@ from macos_quiz_adapter import MacOSQuizInputAdapter, MacOSQuizScene  # noqa: E4
 from quiz_workflows import QuizObservation  # noqa: E402
 from maa.pipeline import JCustomRecognition, JOCR  # noqa: E402
 from keju_reward import parse_huishi_settlement_reward  # noqa: E402
+from huishi_entry_workflow import HuishiEntryWorkflow  # noqa: E402
 
 
 RESULT_PREFIX = "result_json="
@@ -99,6 +100,11 @@ def parse_args():
         "--wait-for-entry",
         action="store_true",
         help="从主界面启动后，仅等待手动进入正确的科举页面，不执行输入",
+    )
+    parser.add_argument(
+        "--navigate-from-main",
+        action="store_true",
+        help="从游戏主界面依次打开活动、日常活动并参加科举会试",
     )
     parser.add_argument(
         "--use-codex",
@@ -363,7 +369,22 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
         "clicks": 0,
         "limit": args.max_steps,
     }
-    if args.inspect_scene:
+    if getattr(args, "navigate_from_main", False):
+        from macos_task_runtime import MacOSTaskRuntime
+
+        runtime = MacOSTaskRuntime(guard)
+        entry = HuishiEntryWorkflow().execute(
+            WorkflowContext(runtime, guard, inspection_evidence_provider=runtime.inspection_evidence),
+            inspect=args.inspect_scene or args.recognize_only,
+        )
+        if isinstance(entry, WorkflowInspection):
+            print("preflight_json=" + json.dumps(entry.to_payload(), ensure_ascii=False), flush=True)
+            return None
+        if entry.status == "already_completed":
+            return task_result(
+                "already_completed", exam_type="huishi", answers=0, clicks=0, limit=args.max_steps
+            )
+    elif args.inspect_scene:
         from macos_task_runtime import MacOSTaskRuntime
 
         runtime = MacOSTaskRuntime(guard)

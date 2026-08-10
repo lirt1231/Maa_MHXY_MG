@@ -318,6 +318,9 @@ class RunnerTaskContractTests(unittest.TestCase):
         self.assertEqual(xiangshi[xiangshi.index("--max-steps") + 1], "10")
         self.assertNotIn("--wait-for-round-one", xiangshi)
         self.assertIn("--wait-for-round-one", huishi)
+        self.assertIn("--wait-for-entry", xiangshi)
+        self.assertNotIn("--wait-for-entry", huishi)
+        self.assertIn("--navigate-from-main", huishi)
 
     def test_sanjie_always_uses_automatic_main_screen_navigation(self):
         command = self.manager._command("sanjieqiyuan", {})
@@ -669,7 +672,10 @@ class RunnerInspectionTests(unittest.TestCase):
         expected = {
             "sanjieqiyuan": ["run_sanjieqiyuan_macos.py", "--inspect-scene", "--input-method", "global"],
             "keju": ["run_keju_macos.py", "--inspect-scene", "--exam-type", "xiangshi"],
-            "keju_huishi": ["run_keju_macos.py", "--inspect-scene", "--exam-type", "huishi"],
+            "keju_huishi": [
+                "run_keju_macos.py", "--inspect-scene", "--exam-type", "huishi",
+                "--navigate-from-main",
+            ],
             "zhuogui": ["run_zhuogui_macos.py", "--inspect-scene", "--rounds", "1"],
             "fuli_qiandao": ["run_fuli_qiandao_macos.py", "--inspect-scene"],
             "bangpai_qiandao": ["run_bangpai_qiandao_macos.py", "--inspect-scene"],

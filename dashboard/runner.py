@@ -567,7 +567,10 @@ class RunnerManager:
             ]
             if options.get("waitForRoundOne", False):
                 command.append("--wait-for-round-one")
-            command.append("--wait-for-entry")
+            if task_id == "keju_huishi":
+                command.append("--navigate-from-main")
+            else:
+                command.append("--wait-for-entry")
             return command
         if task_id == "zhuogui":
             return [
@@ -848,35 +851,39 @@ class RunnerManager:
         if not isinstance(reward, dict) or reward.get("status") != "confirmed":
             reason = reward.get("reason") if isinstance(reward, dict) else "missing"
             self._emit(
-                "warning", "resource", "会试结算页未识别到金币，本次不记录收益",
+                "warning", "resource", "会试结算页未识别到经验和银币，本次不记录收益",
                 {"reason": reason},
             )
             return None
         evidence_payload = reward["evidence"]
-        amount = evidence_payload["amount"]
+        fields = tuple(
+            field for field in ("experience", "silver", "gold") if isinstance(reward.get(field), int)
+        )
+        evidence = {}
+        values = {"experience": None, "silver": None, "gold": None}
+        deltas = {"experience": None, "silver": None, "gold": None}
+        for field in fields:
+            amount = evidence_payload[field]
+            values[field] = reward[field]
+            deltas[field] = reward[field]
+            evidence[field] = ResourceFieldEvidence(
+                status="captured", source_page="huishi_settlement",
+                raw_text=amount["text"], box=tuple(amount["box"]),
+                frame_id=evidence_payload.get("frameId"),
+            )
         captured = ResourceSnapshot(
             target_id="local-primary",
             phase="reward",
             captured_at=utc_now(),
-            values=ResourceValues(gold=reward["gold"]),
-            evidence={
-                "gold": ResourceFieldEvidence(
-                    status="captured",
-                    source_page="huishi_settlement",
-                    raw_text=amount["text"],
-                    box=tuple(amount["box"]),
-                    frame_id=evidence_payload.get("frameId"),
-                ),
-            },
-            captured_fields=frozenset({"gold"}),
+            values=ResourceValues(**values), evidence=evidence, captured_fields=frozenset(fields),
         )
         stored_snapshot = self.database.add_resource_snapshot(run["id"], captured)
         direct_reward = ResourceYield(
             task_status="completed",
             attribution_status="reliable",
-            gold_delta=reward["gold"],
+            experience_delta=deltas["experience"], gold_delta=deltas["gold"], silver_delta=deltas["silver"],
             after_snapshot_id=stored_snapshot.snapshot_id,
-            tracked_fields=frozenset({"gold"}),
+            tracked_fields=frozenset(fields),
             measurement_source="settlement_reward",
         )
         stored = self.database.add_resource_yield(
@@ -889,7 +896,7 @@ class RunnerManager:
                 self._current["resourceYield"] = stored
                 self._current["benefitStatus"] = stored["attributionStatus"]
         self._emit(
-            "info", "resource", "会试结算金币已记录",
+            "info", "resource", "会试结算奖励已记录",
             {"resourceYield": stored},
         )
         return stored
@@ -952,6 +959,8 @@ class RunnerManager:
                 "--exam-type",
                 "xiangshi" if task_id == "keju" else "huishi",
             ])
+            if task_id == "keju_huishi":
+                command.append("--navigate-from-main")
         elif task_id == "zhuogui":
             command.extend(["--rounds", "1"])
         elif task_id == "yunbiao":
@@ -995,11 +1004,17 @@ class RunnerManager:
                 "click_activity_toolbar", "click_activity_template",
             }
             ready = scene in actionable
-        elif task_id in {"keju", "keju_huishi"}:
+        elif task_id == "keju":
             expected_exam_type = "xiangshi" if task_id == "keju" else "huishi"
             ready = (
                 scene == "formal_question_ready"
                 and decision.get("examType") == expected_exam_type
+            )
+        elif task_id == "keju_huishi":
+            ready = scene in {
+                "exam_ready", "open_activity", "open_daily", "join_task", "scroll_daily", "wait"
+            } or (
+                scene == "formal_question_ready" and decision.get("examType") == "huishi"
             )
         elif task_id == "zhuogui":
             ready = bool(proposed and proposed != "stop")
@@ -1247,17 +1262,21 @@ class RunnerManager:
             }:
                 raise RuntimeError("会试结算奖励结果无效")
             if reward["status"] == "confirmed":
-                gold = reward.get("gold")
                 evidence = reward.get("evidence")
                 if (
-                    isinstance(gold, bool) or not isinstance(gold, int) or gold < 0
-                    or not isinstance(evidence, dict)
-                    or not isinstance(evidence.get("amount"), dict)
-                    or not isinstance(evidence["amount"].get("text"), str)
-                    or not isinstance(evidence["amount"].get("box"), list)
-                    or len(evidence["amount"]["box"]) != 4
+                    not isinstance(evidence, dict)
+                    or any(
+                        isinstance(reward.get(field), bool)
+                        or not isinstance(reward.get(field), int)
+                        or reward[field] < 0
+                        or not isinstance(evidence.get(field), dict)
+                        or not isinstance(evidence[field].get("text"), str)
+                        or not isinstance(evidence[field].get("box"), list)
+                        or len(evidence[field]["box"]) != 4
+                        for field in ("experience", "silver")
+                    )
                 ):
-                    raise RuntimeError("会试结算金币证据无效")
+                    raise RuntimeError("会试结算奖励证据无效")
             elif not isinstance(reward.get("reason"), str) or not reward["reason"]:
                 raise RuntimeError("会试结算奖励缺少未采集原因")
         if (
