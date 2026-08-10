@@ -74,9 +74,9 @@ def parse_huishi_settlement_reward(
         (
             item
             for item, text, box in normalized
-            if _HUI_SHI_TITLE_RE.search(text)
+            if _HUI_SHI_TITLE_RE.fullmatch(text)
             and width * 0.18 <= box[0] + box[2] / 2 <= width * 0.82
-            and height * 0.06 <= box[1] + box[3] / 2 <= height * 0.72
+            and height * 0.06 <= box[1] + box[3] / 2 <= height * 0.32
         ),
         None,
     )

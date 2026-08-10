@@ -31,6 +31,17 @@ class HuishiSettlementRewardTests(unittest.TestCase):
         ], IMAGE_SIZE)
         self.assertEqual(reward, {"status": "unavailable", "reason": "huishi_settlement_identity_missing"})
 
+    def test_rejects_huishi_schedule_copy_on_a_xiangshi_settlement_page(self):
+        reward = parse_huishi_settlement_reward([
+            {"text": "科举乡试", "box": [457, 138, 128, 30]},
+            {"text": "科举会试时间：每周六13：00", "box": [421, 393, 405, 18]},
+            {"text": "获得经验", "box": [459, 538, 75, 22]},
+            {"text": "142923", "box": [585, 538, 58, 22]},
+            {"text": "获得银币", "box": [459, 562, 75, 22]},
+            {"text": "7347", "box": [584, 564, 41, 20]},
+        ], IMAGE_SIZE)
+        self.assertEqual(reward, {"status": "unavailable", "reason": "huishi_settlement_identity_missing"})
+
     def test_requires_both_requested_reward_fields(self):
         reward = parse_huishi_settlement_reward([
             {"text": "科举会试完成", "box": [420, 120, 160, 28]},
