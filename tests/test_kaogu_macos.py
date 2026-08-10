@@ -313,11 +313,18 @@ class KaoguSceneTests(unittest.TestCase):
         sell = classify_kaogu_scene(
             texts, {}, (1020, 718), phase="sale_pathing"
         )
+        resumed = classify_kaogu_scene(
+            texts, {}, (1020, 718), phase="sale_wait_main"
+        )
         finished = classify_kaogu_scene(
             texts, {}, (1020, 718), phase="sale_select"
         )
 
         self.assertEqual(sell, {"status": "sell_antique", "box": [731, 553, 70, 32]})
+        self.assertEqual(
+            resumed,
+            {"status": "sell_antique", "box": [731, 553, 70, 32]},
+        )
         self.assertEqual(
             finished,
             {"status": "sell_antique", "box": [731, 553, 70, 32]},

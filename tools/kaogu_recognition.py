@@ -249,10 +249,17 @@ def _classify_antique_sale(texts, templates, image_size, phase):
     )
     if phase in {"sale_select", "sale_sell"} and sale_complete:
         return {"status": "antique_sale_finished", "reason": "no_saleable_antique"}
-    if phase in {"sale_pathing", "sale_select", "sale_sell"} and sale_page and sell_buttons:
+    if phase in {
+        "sale_wait_main",
+        "sale_pathing",
+        "sale_select",
+        "sale_sell",
+    } and sale_page and sell_buttons:
         # The client automatically selects the next antique in its selling
         # list. Selecting item thumbnails here is both redundant and unsafe,
         # so the only allowed input on a confirmed sale page is its control.
+        # `sale_wait_main` is also the recovery entry point after an
+        # interrupted run, which may already be on this page.
         return {"status": "sell_antique", "box": valid_box(sell_buttons[-1])}
     if phase == "sale_select" and sale_page and not sell_buttons:
         return {"status": "sale_candidate_absent", "reason": "confirming_empty_sale"}
