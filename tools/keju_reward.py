@@ -11,6 +11,8 @@ _NUMBER_RE = re.compile(r"(?<!\d)(\d[\d,，.]*)(?!\d)")
 _HUI_SHI_TITLE_RE = re.compile(r"(?:科举)?会试(?:成绩|完成|结束|奖励)?")
 _GOLD_RE = re.compile(r"(?:获得|奖励|本次)?金币")
 _CURRENT_REWARD_RE = re.compile(r"(?:本次|本场)(?:会)?(?:获得)?奖金")
+_EXPERIENCE_RE = re.compile(r"(?:获得|奖励|本次)?(?:经验|经验值)")
+_SILVER_RE = re.compile(r"(?:获得|奖励|本次)?银币")
 
 
 def _normalize(value: object) -> str:
@@ -48,7 +50,7 @@ def _payload_item(item: Mapping[str, Any]) -> dict[str, Any]:
 def parse_huishi_settlement_reward(
     texts: Sequence[Mapping[str, Any]], image_size: tuple[int, int]
 ) -> dict[str, Any]:
-    """Return a gold reward only when the current frame is a 会试 settlement.
+    """Read explicitly labelled rewards only from the current 会试 settlement.
 
     OCR may split ``金币 5000`` into adjacent boxes, so a numeric value is
     accepted either from the gold label itself or a nearby box.  A central
@@ -81,63 +83,59 @@ def parse_huishi_settlement_reward(
     if title is None:
         return {"status": "unavailable", "reason": "huishi_settlement_identity_missing"}
 
-    # The live completion page calls the reward "本次会获得奖金" rather than
-    # "金币". Prefer that label so weekly/monthly accumulated bonuses cannot
-    # be attributed to this run.
-    current_reward_labels = [
-        entry for entry in normalized if _CURRENT_REWARD_RE.search(entry[1])
-    ]
-    gold_labels = [
-        entry
-        for entry in normalized
-        if _GOLD_RE.search(entry[1]) and entry not in current_reward_labels
-    ]
-    for label, label_text, label_box in [*current_reward_labels, *gold_labels]:
-        label_center_y = label_box[1] + label_box[3] / 2
-        if not (_CURRENT_REWARD_RE.search(label_text) or _GOLD_RE.search(label_text)) or not (
-            height * 0.08 <= label_center_y <= height * 0.80
-        ):
+    def find_amount(patterns):
+        labels = [entry for entry in normalized if any(pattern.search(entry[1]) for pattern in patterns)]
+        for label, label_text, label_box in labels:
+            label_center_y = label_box[1] + label_box[3] / 2
+            if not height * 0.30 <= label_center_y <= height * 0.90:
+                continue
+            inline = _number(label_text)
+            if inline is not None:
+                return inline, label, label
+            candidates = []
+            label_center_x = label_box[0] + label_box[2] / 2
+            for amount_item, amount_text, amount_box in normalized:
+                if amount_item is not label and any(
+                    pattern.search(amount_text)
+                    for pattern in (_EXPERIENCE_RE, _SILVER_RE, _CURRENT_REWARD_RE, _GOLD_RE)
+                ):
+                    continue
+                amount = _number(amount_text)
+                if amount is None:
+                    continue
+                horizontal = abs(amount_box[0] + amount_box[2] / 2 - label_center_x)
+                vertical = abs(amount_box[1] + amount_box[3] / 2 - label_center_y)
+                if horizontal <= width * 0.28 and vertical <= height * 0.10:
+                    candidates.append((vertical * 2 + horizontal, amount_item, amount))
+            if candidates:
+                _, amount_item, amount = min(candidates, key=lambda candidate: candidate[0])
+                return amount, label, amount_item
+        return None
+
+    # The completion page may call gold "本次会获得奖金".  Unlike the two
+    # required lower reward rows it remains optional for compatibility.
+    found = {
+        "experience": find_amount((_EXPERIENCE_RE,)),
+        "silver": find_amount((_SILVER_RE,)),
+        "gold": find_amount((_CURRENT_REWARD_RE, _GOLD_RE)),
+    }
+    if found["experience"] is None or found["silver"] is None:
+        return {"status": "unavailable", "reason": "settlement_experience_or_silver_missing"}
+    result = {
+        "status": "confirmed",
+        "experience": found["experience"][0],
+        "silver": found["silver"][0],
+        "evidence": {"sourcePage": "huishi_settlement", "title": _payload_item(title)},
+    }
+    for name, value in found.items():
+        if value is None:
             continue
-        inline = _number(label_text)
-        if inline is not None:
-            return {
-                "status": "confirmed",
-                "gold": inline,
-                "evidence": {
-                    "sourcePage": "huishi_settlement",
-                    "title": _payload_item(title),
-                    "goldLabel": _payload_item(label),
-                    "amount": _payload_item(label),
-                },
-            }
-
-        candidates: list[tuple[float, Mapping[str, Any], int]] = []
-        label_center_x = label_box[0] + label_box[2] / 2
-        for amount_item, amount_text, amount_box in normalized:
-            amount = _number(amount_text)
-            if amount is None:
-                continue
-            amount_center_x = amount_box[0] + amount_box[2] / 2
-            amount_center_y = amount_box[1] + amount_box[3] / 2
-            horizontal = abs(amount_center_x - label_center_x)
-            vertical = abs(amount_center_y - label_center_y)
-            if horizontal > width * 0.28 or vertical > height * 0.10:
-                continue
-            candidates.append((vertical * 2 + horizontal, amount_item, amount))
-        if candidates:
-            _, amount_item, amount = min(candidates, key=lambda candidate: candidate[0])
-            return {
-                "status": "confirmed",
-                "gold": amount,
-                "evidence": {
-                    "sourcePage": "huishi_settlement",
-                    "title": _payload_item(title),
-                    "goldLabel": _payload_item(label),
-                    "amount": _payload_item(amount_item),
-                },
-            }
-
-    return {"status": "unavailable", "reason": "settlement_gold_missing"}
+        amount, label, amount_item = value
+        result["evidence"][f"{name}Label"] = _payload_item(label)
+        result["evidence"][name] = _payload_item(amount_item)
+        if name == "gold":
+            result[name] = amount
+    return result
 
 
 __all__ = ["parse_huishi_settlement_reward"]

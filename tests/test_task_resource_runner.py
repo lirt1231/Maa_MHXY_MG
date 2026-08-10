@@ -232,13 +232,17 @@ class TaskResourceRunnerTests(unittest.TestCase):
     def test_fun_news_skips_character_resource_tracking(self):
         self.assertFalse(self.manager._tracks_task_resources("fun_news"))
 
-    def test_huishi_records_only_confirmed_settlement_gold_without_snapshots(self):
+    def test_huishi_records_confirmed_settlement_rewards_without_snapshots(self):
         settlement_reward = {
             "status": "confirmed",
+            "experience": 12500,
+            "silver": 30000,
             "gold": 12500,
             "evidence": {
                 "sourcePage": "huishi_settlement",
-                "amount": {"text": "12,500", "box": [470, 400, 76, 28]},
+                "experience": {"text": "12,500", "box": [470, 400, 76, 28]},
+                "silver": {"text": "30,000", "box": [470, 440, 76, 28]},
+                "gold": {"text": "12,500", "box": [470, 490, 76, 28]},
             },
         }
         processes = [
@@ -254,6 +258,8 @@ class TaskResourceRunnerTests(unittest.TestCase):
             for call in popen.call_args_list
         ))
         self.assertEqual(current["resourceYield"]["goldDelta"], 12500)
+        self.assertEqual(current["resourceYield"]["experienceDelta"], 12500)
+        self.assertEqual(current["resourceYield"]["silverDelta"], 30000)
         self.assertEqual(
             current["resourceYield"]["measurementSource"], "settlement_reward"
         )

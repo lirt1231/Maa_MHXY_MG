@@ -284,12 +284,10 @@ class ResourceYield:
         if self.measurement_source == "settlement_reward":
             if self.before_snapshot_id is not None or self.after_snapshot_id is None:
                 raise ValueError("结算奖励必须只关联结算快照")
-            if self.tracked_fields != frozenset({"gold"}):
-                raise ValueError("结算奖励只能记录金币")
-            if self.experience_delta is not None or self.silver_delta is not None:
-                raise ValueError("结算奖励不能记录经验或银币")
-            if self.attribution_status == "reliable" and self.gold_delta is None:
-                raise ValueError("可靠的结算奖励必须包含金币")
+            if self.attribution_status == "reliable" and any(
+                deltas[name] is None for name in self.tracked_fields
+            ):
+                raise ValueError("可靠的结算奖励必须包含全部已确认字段")
 
     def to_payload(self) -> dict[str, Any]:
         return {
