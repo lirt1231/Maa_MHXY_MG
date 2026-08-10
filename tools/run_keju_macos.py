@@ -55,6 +55,9 @@ MAX_WAITING_POLLS = 180
 MAX_SAME_QUESTION_POLLS = 8
 HUI_SHI_REWARD_POLLS = 8
 HUI_SHI_REWARD_POLL_SECONDS = 1.0
+_SEMANTIC_RECOGNITION_STATUSES = frozenset(
+    {"waiting", "wrong_exam_type", "unverified_exam_type", "no_question", "unreliable"}
+)
 
 
 def task_result(status: str, *, exam_type: str = "xiangshi", **payload) -> dict:
@@ -213,8 +216,12 @@ def recognize_keju_frame(tasker, capture, recognizer, guard):
             image,
         ).wait()
         guard.checkpoint()
-        if not task.succeeded:
+        if not task.succeeded and getattr(recognizer, "last_status", "") not in _SEMANTIC_RECOGNITION_STATUSES:
             raise RuntimeError("Maa 自定义识别任务未成功")
+        if not task.succeeded:
+            # The recognizer deliberately returns an empty box for a known,
+            # non-clickable page state.  Its status is the workflow result.
+            return None
         detail = task.get()
         if detail is None or not detail.nodes:
             raise RuntimeError("Maa 自定义识别未返回结果")

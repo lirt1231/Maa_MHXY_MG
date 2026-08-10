@@ -122,6 +122,25 @@ class KejuExplicitFrameTests(unittest.TestCase):
 
         self.assertEqual(self.recognizer.last_status, "recognition_failed")
 
+    def test_waiting_status_survives_empty_custom_recognition_result(self):
+        self.task.succeeded = False
+
+        def waiting_recognition(*_args):
+            self.recognizer.last_status = "waiting"
+            return self.task
+
+        self.tasker.post_recognition.side_effect = waiting_recognition
+
+        self.assertIsNone(
+            recognize_keju_frame(
+                self.tasker,
+                self.capture,
+                self.recognizer,
+                self.guard,
+            )
+        )
+        self.assertEqual(self.recognizer.last_status, "waiting")
+
     def test_running_status_cannot_escape_as_success(self):
         def incomplete_recognition(*_args):
             self.recognizer.last_status = "running"
