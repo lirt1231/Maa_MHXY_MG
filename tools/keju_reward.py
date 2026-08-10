@@ -9,6 +9,7 @@ from typing import Any
 
 _NUMBER_RE = re.compile(r"(?<!\d)(\d[\d,，.]*)(?!\d)")
 _HUI_SHI_TITLE_RE = re.compile(r"(?:科举)?会试(?:成绩|完成|结束|奖励)?")
+_XIANG_SHI_TITLE_RE = re.compile(r"科举乡试(?:成绩|完成|结束|奖励)?")
 _GOLD_RE = re.compile(r"(?:获得|奖励|本次)?金币")
 _CURRENT_REWARD_RE = re.compile(r"(?:本次|本场)(?:会)?(?:获得)?奖金")
 _EXPERIENCE_RE = re.compile(r"(?:获得|奖励|本次)?(?:经验|经验值)")
@@ -47,10 +48,10 @@ def _payload_item(item: Mapping[str, Any]) -> dict[str, Any]:
     return {"text": str(item.get("text", "")), "box": list(_box(item) or ())}
 
 
-def parse_huishi_settlement_reward(
+def parse_xiangshi_settlement_reward(
     texts: Sequence[Mapping[str, Any]], image_size: tuple[int, int]
 ) -> dict[str, Any]:
-    """Read explicitly labelled rewards only from the current 会试 settlement.
+    """Read experience and silver only from the current 乡试 settlement.
 
     OCR may split ``金币 5000`` into adjacent boxes, so a numeric value is
     accepted either from the gold label itself or a nearby box.  A central
@@ -74,14 +75,14 @@ def parse_huishi_settlement_reward(
         (
             item
             for item, text, box in normalized
-            if _HUI_SHI_TITLE_RE.fullmatch(text)
+            if _XIANG_SHI_TITLE_RE.fullmatch(text)
             and width * 0.18 <= box[0] + box[2] / 2 <= width * 0.82
             and height * 0.06 <= box[1] + box[3] / 2 <= height * 0.32
         ),
         None,
     )
     if title is None:
-        return {"status": "unavailable", "reason": "huishi_settlement_identity_missing"}
+        return {"status": "unavailable", "reason": "xiangshi_settlement_identity_missing"}
 
     def find_amount(patterns):
         labels = [entry for entry in normalized if any(pattern.search(entry[1]) for pattern in patterns)]
@@ -125,7 +126,7 @@ def parse_huishi_settlement_reward(
         "status": "confirmed",
         "experience": found["experience"][0],
         "silver": found["silver"][0],
-        "evidence": {"sourcePage": "huishi_settlement", "title": _payload_item(title)},
+        "evidence": {"sourcePage": "xiangshi_settlement", "title": _payload_item(title)},
     }
     for name, value in found.items():
         if value is None:
@@ -138,4 +139,59 @@ def parse_huishi_settlement_reward(
     return result
 
 
-__all__ = ["parse_huishi_settlement_reward"]
+def parse_huishi_settlement_reward(
+    texts: Sequence[Mapping[str, Any]], image_size: tuple[int, int]
+) -> dict[str, Any]:
+    """Read the gold-only reward from a confirmed 会试 settlement page."""
+    width, height = image_size
+    if width <= 0 or height <= 0:
+        return {"status": "unavailable", "reason": "invalid_image_size"}
+    normalized = [
+        (item, _normalize(item.get("text")), box)
+        for item in texts
+        if isinstance(item, Mapping) and (box := _box(item)) is not None
+    ]
+    title = next(
+        (
+            item for item, text, box in normalized
+            if _HUI_SHI_TITLE_RE.fullmatch(text)
+            and width * 0.18 <= box[0] + box[2] / 2 <= width * 0.82
+            and height * 0.06 <= box[1] + box[3] / 2 <= height * 0.32
+        ),
+        None,
+    )
+    if title is None:
+        return {"status": "unavailable", "reason": "huishi_settlement_identity_missing"}
+    for label, label_text, label_box in normalized:
+        if not (_CURRENT_REWARD_RE.search(label_text) or _GOLD_RE.search(label_text)):
+            continue
+        center_y = label_box[1] + label_box[3] / 2
+        if not height * 0.08 <= center_y <= height * 0.80:
+            continue
+        amount = _number(label_text)
+        amount_item = label
+        if amount is None:
+            center_x = label_box[0] + label_box[2] / 2
+            candidates = []
+            for candidate, candidate_text, candidate_box in normalized:
+                value = _number(candidate_text)
+                if value is None:
+                    continue
+                horizontal = abs(candidate_box[0] + candidate_box[2] / 2 - center_x)
+                vertical = abs(candidate_box[1] + candidate_box[3] / 2 - center_y)
+                if horizontal <= width * 0.28 and vertical <= height * 0.10:
+                    candidates.append((vertical * 2 + horizontal, candidate, value))
+            if not candidates:
+                continue
+            _, amount_item, amount = min(candidates, key=lambda candidate: candidate[0])
+        return {
+            "status": "confirmed", "gold": amount,
+            "evidence": {
+                "sourcePage": "huishi_settlement", "title": _payload_item(title),
+                "goldLabel": _payload_item(label), "amount": _payload_item(amount_item),
+            },
+        }
+    return {"status": "unavailable", "reason": "settlement_gold_missing"}
+
+
+__all__ = ["parse_huishi_settlement_reward", "parse_xiangshi_settlement_reward"]

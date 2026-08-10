@@ -43,7 +43,7 @@ RESOURCE_YIELD_FIELDS_BY_TASK = {
 }
 # 宝图领取后、趣闻点赞时均没有可归因的角色资源变化；会试单独从结算页读取金币。
 # 跳过边界快照与收益记录，而不是将未发生的变化写成 0。
-RESOURCE_TRACKING_DISABLED_TASKS = frozenset({"baotu", "fun_news", "keju_huishi"})
+RESOURCE_TRACKING_DISABLED_TASKS = frozenset({"baotu", "fun_news", "keju", "keju_huishi"})
 # 会试的最终结算页是金币收益的唯一可信来源，必须保留给结算识别与用户复核。
 TASKS_RETAIN_RESULT_SCREEN = frozenset({"keju_huishi"})
 TASK_SUCCESS_RESULTS = {"completed", "already_completed"}
@@ -67,7 +67,7 @@ TASK_RESULT_SCHEMAS = {
     },
     "keju": {
         "statuses": {"completed", "already_completed", "limit_reached", "safe_stopped", "cancelled"},
-        "fields": {"task_id", "status", "reason", "answers", "clicks", "limit"},
+        "fields": {"task_id", "status", "reason", "answers", "clicks", "limit", "settlement_reward"},
         "required": {
             status: {"answers", "clicks", "limit"}
             for status in TASK_RESULT_STATUSES
@@ -846,28 +846,27 @@ class RunnerManager:
         )
         return stored
 
-    def _store_huishi_settlement_reward(self, run: dict, result: dict) -> dict | None:
+    def _store_keju_settlement_reward(
+        self, run: dict, result: dict, *, fields: tuple[str, ...], source_page: str, label: str
+    ) -> dict | None:
         reward = result.get("settlement_reward")
         if not isinstance(reward, dict) or reward.get("status") != "confirmed":
             reason = reward.get("reason") if isinstance(reward, dict) else "missing"
             self._emit(
-                "warning", "resource", "会试结算页未识别到经验和银币，本次不记录收益",
+                "warning", "resource", f"{label}结算页未识别到奖励，本次不记录收益",
                 {"reason": reason},
             )
             return None
         evidence_payload = reward["evidence"]
-        fields = tuple(
-            field for field in ("experience", "silver", "gold") if isinstance(reward.get(field), int)
-        )
         evidence = {}
         values = {"experience": None, "silver": None, "gold": None}
         deltas = {"experience": None, "silver": None, "gold": None}
         for field in fields:
-            amount = evidence_payload[field]
+            amount = evidence_payload["amount"] if field == "gold" else evidence_payload[field]
             values[field] = reward[field]
             deltas[field] = reward[field]
             evidence[field] = ResourceFieldEvidence(
-                status="captured", source_page="huishi_settlement",
+                status="captured", source_page=source_page,
                 raw_text=amount["text"], box=tuple(amount["box"]),
                 frame_id=evidence_payload.get("frameId"),
             )
@@ -896,7 +895,7 @@ class RunnerManager:
                 self._current["resourceYield"] = stored
                 self._current["benefitStatus"] = stored["attributionStatus"]
         self._emit(
-            "info", "resource", "会试结算奖励已记录",
+            "info", "resource", f"{label}结算奖励已记录",
             {"resourceYield": stored},
         )
         return stored
@@ -1255,30 +1254,31 @@ class RunnerManager:
                 raise RuntimeError("任务最终结果包含无效的自动完成证据")
         elif "confirmationPolls" in result:
             raise RuntimeError("任务最终结果缺少自动完成证据")
-        if task_id == "keju_huishi" and "settlement_reward" in result:
+        if task_id in {"keju", "keju_huishi"} and "settlement_reward" in result:
             reward = result["settlement_reward"]
             if not isinstance(reward, dict) or reward.get("status") not in {
                 "confirmed", "unavailable",
             }:
-                raise RuntimeError("会试结算奖励结果无效")
+                raise RuntimeError("科举结算奖励结果无效")
             if reward["status"] == "confirmed":
                 evidence = reward.get("evidence")
+                fields = ("experience", "silver") if task_id == "keju" else ("gold",)
                 if (
                     not isinstance(evidence, dict)
                     or any(
                         isinstance(reward.get(field), bool)
                         or not isinstance(reward.get(field), int)
                         or reward[field] < 0
-                        or not isinstance(evidence.get(field), dict)
-                        or not isinstance(evidence[field].get("text"), str)
-                        or not isinstance(evidence[field].get("box"), list)
-                        or len(evidence[field]["box"]) != 4
-                        for field in ("experience", "silver")
+                        or not isinstance(evidence.get("amount" if field == "gold" else field), dict)
+                        or not isinstance(evidence["amount" if field == "gold" else field].get("text"), str)
+                        or not isinstance(evidence["amount" if field == "gold" else field].get("box"), list)
+                        or len(evidence["amount" if field == "gold" else field]["box"]) != 4
+                        for field in fields
                     )
                 ):
-                    raise RuntimeError("会试结算奖励证据无效")
+                    raise RuntimeError("科举结算奖励证据无效")
             elif not isinstance(reward.get("reason"), str) or not reward["reason"]:
-                raise RuntimeError("会试结算奖励缺少未采集原因")
+                raise RuntimeError("科举结算奖励缺少未采集原因")
         if (
             task_id == "zhuogui"
             and status == "completed"
@@ -1421,11 +1421,16 @@ class RunnerManager:
                 task_result = self._parse_task_result(run["taskId"], output_lines)
                 result_status = task_result["status"]
                 if result_status in TASK_SUCCESS_RESULTS and return_code == 0:
-                    if (
-                        run["taskId"] == "keju_huishi"
-                        and task_result["status"] == "completed"
-                    ):
-                        self._store_huishi_settlement_reward(run, task_result)
+                    if run["taskId"] == "keju" and task_result["status"] == "completed":
+                        self._store_keju_settlement_reward(
+                            run, task_result, fields=("experience", "silver"),
+                            source_page="xiangshi_settlement", label="科举乡试",
+                        )
+                    elif run["taskId"] == "keju_huishi" and task_result["status"] == "completed":
+                        self._store_keju_settlement_reward(
+                            run, task_result, fields=("gold",),
+                            source_page="huishi_settlement", label="科举会试",
+                        )
                     with self._lock:
                         if self._stop_requested:
                             status = "cancelled"

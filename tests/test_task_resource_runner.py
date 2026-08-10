@@ -94,7 +94,7 @@ def task_process(status="completed", *, task_id="sanjieqiyuan", settlement_rewar
             "limit": 20,
             **({"settlement_reward": settlement_reward} if settlement_reward is not None else {}),
         }
-        if task_id == "keju_huishi"
+        if task_id in {"keju", "keju_huishi"}
         else {
             "task_id": task_id,
             "status": status,
@@ -172,6 +172,10 @@ class TaskResourceRunnerTests(unittest.TestCase):
                 "keju_huishi", {"waitForRoundOne": True}, checklist_confirmed=True
             )
 
+    def start_xiangshi(self):
+        with patch("dashboard.runner.ensure_task_available"):
+            return self.manager.start("keju", {}, checklist_confirmed=True)
+
     def test_completed_task_records_before_after_and_net_changes(self):
         processes = [
             snapshot_process("before", captured_at="2026-08-05T02:00:00+00:00"),
@@ -232,17 +236,13 @@ class TaskResourceRunnerTests(unittest.TestCase):
     def test_fun_news_skips_character_resource_tracking(self):
         self.assertFalse(self.manager._tracks_task_resources("fun_news"))
 
-    def test_huishi_records_confirmed_settlement_rewards_without_snapshots(self):
+    def test_huishi_records_confirmed_settlement_gold_without_snapshots(self):
         settlement_reward = {
             "status": "confirmed",
-            "experience": 12500,
-            "silver": 30000,
             "gold": 12500,
             "evidence": {
                 "sourcePage": "huishi_settlement",
-                "experience": {"text": "12,500", "box": [470, 400, 76, 28]},
-                "silver": {"text": "30,000", "box": [470, 440, 76, 28]},
-                "gold": {"text": "12,500", "box": [470, 490, 76, 28]},
+                "amount": {"text": "12,500", "box": [470, 490, 76, 28]},
             },
         }
         processes = [
@@ -258,13 +258,33 @@ class TaskResourceRunnerTests(unittest.TestCase):
             for call in popen.call_args_list
         ))
         self.assertEqual(current["resourceYield"]["goldDelta"], 12500)
-        self.assertEqual(current["resourceYield"]["experienceDelta"], 12500)
-        self.assertEqual(current["resourceYield"]["silverDelta"], 30000)
+        self.assertIsNone(current["resourceYield"]["experienceDelta"])
+        self.assertIsNone(current["resourceYield"]["silverDelta"])
         self.assertEqual(
             current["resourceYield"]["measurementSource"], "settlement_reward"
         )
         self.assertIsNone(current["resourceYield"]["before"])
         self.assertEqual(current["homeRecovery"]["status"], "not_requested")
+
+    def test_xiangshi_records_settlement_experience_and_silver_without_snapshots(self):
+        settlement_reward = {
+            "status": "confirmed", "experience": 142923, "silver": 7347,
+            "evidence": {
+                "sourcePage": "xiangshi_settlement",
+                "experience": {"text": "142923", "box": [585, 538, 58, 22]},
+                "silver": {"text": "7347", "box": [584, 564, 41, 20]},
+            },
+        }
+        processes = [
+            task_process(task_id="keju", settlement_reward=settlement_reward), recovery_process(),
+        ]
+        with patch("dashboard.runner.subprocess.Popen", side_effect=processes) as popen:
+            self.start_xiangshi()
+            current = self.wait_for(lambda run: run["status"] == "succeeded")
+        self.assertEqual(popen.call_count, 2)
+        self.assertEqual(current["resourceYield"]["experienceDelta"], 142923)
+        self.assertEqual(current["resourceYield"]["silverDelta"], 7347)
+        self.assertIsNone(current["resourceYield"]["goldDelta"])
 
     def test_safe_stop_never_captures_after(self):
         processes = [

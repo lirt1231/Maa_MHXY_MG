@@ -28,7 +28,10 @@ from keju_workflow import (  # noqa: E402
 from macos_quiz_adapter import MacOSQuizInputAdapter, MacOSQuizScene  # noqa: E402
 from quiz_workflows import QuizObservation  # noqa: E402
 from maa.pipeline import JCustomRecognition, JOCR  # noqa: E402
-from keju_reward import parse_huishi_settlement_reward  # noqa: E402
+from keju_reward import (  # noqa: E402
+    parse_huishi_settlement_reward,
+    parse_xiangshi_settlement_reward,
+)
 from huishi_entry_workflow import HuishiEntryWorkflow  # noqa: E402
 
 
@@ -246,7 +249,7 @@ def recognize_keju_frame(tasker, capture, recognizer, guard):
     return detail.nodes[-1].recognition
 
 
-def capture_huishi_settlement_reward(tasker, capture, guard) -> dict:
+def capture_keju_settlement_reward(tasker, capture, guard, exam_type: str) -> dict:
     """Wait briefly for a post-answer settlement page without any input."""
     last_reason = "settlement_not_observed"
     for poll in range(1, HUI_SHI_REWARD_POLLS + 1):
@@ -265,7 +268,12 @@ def capture_huishi_settlement_reward(tasker, capture, guard) -> dict:
                 {"text": item.text, "box": list(item.box)}
                 for item in detail.nodes[-1].recognition.filtered_results
             ]
-            result = parse_huishi_settlement_reward(texts, (width, height))
+            parser = (
+                parse_xiangshi_settlement_reward
+                if exam_type == "xiangshi"
+                else parse_huishi_settlement_reward
+            )
+            result = parser(texts, (width, height))
             if result["status"] == "confirmed":
                 result["evidence"].update({
                     "frameId": capture.last_signature.frame_id,
@@ -273,13 +281,13 @@ def capture_huishi_settlement_reward(tasker, capture, guard) -> dict:
                     "imageSize": [width, height],
                     "poll": poll,
                 })
-                print("huishi_settlement_reward=" + json.dumps(result, ensure_ascii=False), flush=True)
+                print("keju_settlement_reward=" + json.dumps(result, ensure_ascii=False), flush=True)
                 return result
             last_reason = result["reason"]
         if poll < HUI_SHI_REWARD_POLLS:
             time.sleep(HUI_SHI_REWARD_POLL_SECONDS)
     result = {"status": "unavailable", "reason": last_reason}
-    print("huishi_settlement_reward=" + json.dumps(result, ensure_ascii=False), flush=True)
+    print("keju_settlement_reward=" + json.dumps(result, ensure_ascii=False), flush=True)
     return result
 
 
@@ -566,9 +574,9 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
     result_payload = {
         **outcome.payload,
     }
-    if outcome.status == "completed" and args.exam_type == "huishi":
-        result_payload["settlement_reward"] = capture_huishi_settlement_reward(
-            tasker, capture, guard
+    if outcome.status == "completed":
+        result_payload["settlement_reward"] = capture_keju_settlement_reward(
+            tasker, capture, guard, args.exam_type
         )
     return task_result(
         outcome.status,
