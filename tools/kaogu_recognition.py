@@ -142,6 +142,12 @@ def _classify_antique_sale(texts, templates, image_size, phase):
         image_size,
         {"min_x": 0.55, "max_x": 0.9, "min_y": 0.68, "max_y": 0.92},
     )
+    no_saleable_goods = find_items(
+        texts,
+        r"^没有可以售卖的商品(?:哦)?$",
+        image_size,
+        {"min_x": 0.55, "max_x": 0.9, "min_y": 0.2, "max_y": 0.55},
+    )
     sale_close_buttons = find_items(
         texts,
         r"^[xX×]$",
@@ -247,7 +253,12 @@ def _classify_antique_sale(texts, templates, image_size, phase):
         max_x=0.95,
         max_y=0.65,
     )
-    if phase in {"sale_select", "sale_sell"} and sale_complete:
+    if phase in {
+        "sale_wait_main",
+        "sale_pathing",
+        "sale_select",
+        "sale_sell",
+    } and (sale_complete or no_saleable_goods):
         return {"status": "antique_sale_finished", "reason": "no_saleable_antique"}
     if phase in {
         "sale_wait_main",

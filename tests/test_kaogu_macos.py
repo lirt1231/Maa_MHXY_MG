@@ -175,12 +175,30 @@ class KaoguSceneTests(unittest.TestCase):
             },
         )
 
-    def test_sale_completion_uses_only_explicit_no_goods_template(self):
+    def test_sale_completion_uses_explicit_no_goods_evidence(self):
         completion = KAOGU_TEMPLATES["antique_sale_complete"]
 
         self.assertEqual(
             completion["templates"],
             ["jineng/shoumai_wancheng2.png"],
+        )
+
+        decision = classify_kaogu_scene(
+            [
+                text("古董售卖", (426, 84, 142, 37)),
+                text("总价", (636, 461, 42, 25)),
+                text("拥有", (635, 500, 42, 23)),
+                text("没有可以售卖的商品哦", (665, 225, 187, 21)),
+                text("售卖", (731, 552, 72, 35)),
+            ],
+            {},
+            (1020, 718),
+            phase="sale_wait_main",
+        )
+
+        self.assertEqual(
+            decision,
+            {"status": "antique_sale_finished", "reason": "no_saleable_antique"},
         )
 
     def test_dig_keeps_workflow_in_digging_phase(self):
