@@ -502,6 +502,18 @@ class KaoguSceneTests(unittest.TestCase):
             {"status": "close_inventory", "box": [982, 107, 99, 34]},
         )
 
+        final_confirmation = classify_kaogu_scene(
+            inventory.texts,
+            inventory.templates,
+            IMAGE_SIZE,
+            phase="sale_confirm_main",
+        )
+
+        self.assertEqual(
+            final_confirmation,
+            {"status": "close_inventory", "box": [982, 107, 99, 34]},
+        )
+
     def test_post_sale_rescan_main_reopens_inventory(self):
         main = sale_flow_scenes()[0]
 

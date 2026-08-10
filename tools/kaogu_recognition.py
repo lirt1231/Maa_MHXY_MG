@@ -237,7 +237,11 @@ def _classify_antique_sale(texts, templates, image_size, phase):
         return {"status": "activate_antique", "box": antique}
     if phase == "sale_inventory_scan" and inventory_page:
         return {"status": "scan_inventory"}
-    if phase == "sale_inventory_verify_empty" and inventory_page and inventory_tabs:
+    if (
+        phase in {"sale_inventory_verify_empty", "sale_confirm_main"}
+        and inventory_page
+        and inventory_tabs
+    ):
         return {
             "status": "close_inventory",
             "box": _inventory_close_box(valid_box(inventory_tabs[-1])),
