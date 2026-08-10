@@ -808,6 +808,13 @@ def run(guard: CancellationGuard, args=None) -> int:
                 f"{payload['limit']} question={payload['question']}",
                 flush=True,
             )
+        elif event == "answer_transition_wait":
+            print(
+                f"answer_transition_wait={payload['poll']}/"
+                f"{payload['limit']} question={payload['question']} "
+                f"selected={payload['selectedAnswers']}",
+                flush=True,
+            )
 
     outcome = SanjieqiyuanWorkflow(
         source,

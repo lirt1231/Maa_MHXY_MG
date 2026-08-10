@@ -650,6 +650,49 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
             ["wait", "wait", "click"],
         )
 
+    def test_sanjie_waits_ten_seconds_for_slow_multi_select_transition(self):
+        adapter = _DesktopAdapterA([])
+        awaiting = _quiz_observation(
+            "awaiting_transition",
+            question="找出2个示例角色",
+            question_key="第4题",
+        )
+        source = _QuizSource([
+            _quiz_observation(
+                "ready",
+                question="找出2个示例角色",
+                question_key="第4题",
+                answer="甲",
+                click=(500, 300),
+            ),
+            *[awaiting for _ in range(8)],
+            _quiz_observation("finished"),
+        ])
+        events = []
+
+        result = SanjieqiyuanWorkflow(
+            source,
+            lambda: "completed",
+            initial_wait_seconds=0,
+            answer_wait_seconds=0,
+        ).execute(
+            WorkflowContext(
+                adapter,
+                adapter,
+                lambda event, **payload: events.append((event, payload)),
+            )
+        )
+
+        self.assertEqual(result.status, "completed")
+        waits = [payload for event, payload in events if event == "answer_transition_wait"]
+        self.assertEqual(len(waits), 8)
+        self.assertEqual(waits[-1]["limit"], 20)
+        self.assertEqual(waits[-1]["selectedAnswers"], ["甲"])
+        self.assertEqual(
+            [entry[0] for entry in adapter.trace],
+            ["click", *["wait"] * 8],
+        )
+
     def test_sanjie_stops_after_bounded_answer_ocr_retries(self):
         adapter = _DesktopAdapterA([])
         missed = _quiz_observation(

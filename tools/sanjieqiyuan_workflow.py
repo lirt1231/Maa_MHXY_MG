@@ -187,12 +187,14 @@ class SanjieqiyuanWorkflow:
     max_questions: int = 10
     answer_wait_seconds: float = 1.2
     initial_wait_seconds: float = 1.5
-    max_transition_polls: int = 6
+    max_transition_polls: int = 20
     max_answer_not_found_polls: int = 4
 
     def __post_init__(self):
         if self.max_questions <= 0:
             raise ValueError("三界奇缘最大答题数必须是正整数")
+        if self.max_transition_polls <= 0:
+            raise ValueError("三界奇缘切题等待上限必须是正整数")
         if self.max_answer_not_found_polls <= 0:
             raise ValueError("三界奇缘答案识别重试上限必须是正整数")
 
@@ -251,6 +253,14 @@ class SanjieqiyuanWorkflow:
                 )
             if status == "awaiting_transition":
                 unchanged_polls += 1
+                context.emit(
+                    "answer_transition_wait",
+                    question=question,
+                    questionKey=question_key,
+                    selectedAnswers=sorted(selected_answers),
+                    poll=unchanged_polls,
+                    limit=self.max_transition_polls,
+                )
                 if unchanged_polls >= self.max_transition_polls:
                     raise RuntimeError("本题答案已全部选择但题目持续未变化，已安全停止")
                 context.waiter.wait(0.5)
