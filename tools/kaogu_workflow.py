@@ -92,7 +92,10 @@ KAOGU_TEMPLATES = {
         ],
         "threshold": 0.82,
         "green_mask": True,
-        "roi_ratio": [0.1, 0.18, 0.79, 0.57],
+        # After the bounded inventory sort, archaeology antiques occupy the
+        # lower rows. The upper rows contain unrelated event/reward badges
+        # with similarly coloured corner ribbons.
+        "roi_ratio": [0.1, 0.48, 0.79, 0.27],
     },
     "sale_non_genuine_antique": {
         "templates": [

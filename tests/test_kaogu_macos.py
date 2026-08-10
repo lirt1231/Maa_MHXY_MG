@@ -58,7 +58,7 @@ def sale_flow_scenes(*, include_main=True):
         inventory.texts,
         {
             "inventory_page": (335, 5, 567, 58),
-            "non_genuine_antique": (700, 220, 64, 42),
+            "non_genuine_antique": (700, 420, 64, 42),
         },
     )
     pathing = scene(templates={"auto_pathing": (1050, 620, 120, 30)})
@@ -130,7 +130,7 @@ class KaoguSceneTests(unittest.TestCase):
         )
         self.assertTrue(antique["green_mask"])
         self.assertEqual(antique["threshold"], 0.82)
-        self.assertEqual(antique["roi_ratio"], [0.1, 0.18, 0.79, 0.57])
+        self.assertEqual(antique["roi_ratio"], [0.1, 0.48, 0.79, 0.27])
 
         sale_antique = KAOGU_TEMPLATES["sale_non_genuine_antique"]
         self.assertIn(
@@ -288,7 +288,23 @@ class KaoguSceneTests(unittest.TestCase):
         self.assertEqual(normalize, {"status": "normalize_inventory"})
         self.assertEqual(organize["status"], "organize_inventory")
         self.assertEqual(activate["status"], "activate_antique")
-        self.assertEqual(activate["box"], [700, 220, 64, 42])
+        self.assertEqual(activate["box"], [700, 420, 64, 42])
+
+    def test_upper_inventory_event_badge_never_activates_as_an_antique(self):
+        inventory = sale_flow_scenes()[1]
+        decision = classify_kaogu_scene(
+            inventory.texts,
+            {
+                "inventory_page": (335, 5, 567, 58),
+                # The live client places unrelated “赛事” ribbons in this
+                # upper slot; their corner shape must not authorize a click.
+                "non_genuine_antique": (511, 294, 50, 42),
+            },
+            IMAGE_SIZE,
+            phase="sale_inventory_scan",
+        )
+
+        self.assertEqual(decision, {"status": "scan_inventory"})
 
     def test_genuine_confirmation_can_only_cancel(self):
         prompt = sale_flow_scenes()[9]

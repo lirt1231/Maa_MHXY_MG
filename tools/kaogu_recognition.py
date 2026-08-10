@@ -203,8 +203,8 @@ def _classify_antique_sale(texts, templates, image_size, phase):
         image_size,
         min_x=0.1,
         max_x=0.95,
-        min_y=0.12,
-        max_y=0.92,
+        min_y=0.48,
+        max_y=0.75,
     )
     sale_antique = _template_box(
         templates,
