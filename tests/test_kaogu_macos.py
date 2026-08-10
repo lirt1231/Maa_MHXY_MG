@@ -185,7 +185,7 @@ class KaoguSceneTests(unittest.TestCase):
 
         decision = classify_kaogu_scene(
             [
-                text("古董售卖", (426, 84, 142, 37)),
+                text("古董售卖·", (426, 84, 142, 37)),
                 text("总价", (636, 461, 42, 25)),
                 text("拥有", (635, 500, 42, 23)),
                 text("没有可以售卖的商品哦", (665, 225, 187, 21)),

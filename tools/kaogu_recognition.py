@@ -126,7 +126,7 @@ def _classify_antique_sale(texts, templates, image_size, phase):
     )
     sale_titles = find_items(
         texts,
-        r"^古董售卖$",
+        r"^古董售卖[·.。]?$",
         image_size,
         {"min_x": 0.3, "max_x": 0.7, "max_y": 0.3},
     )
