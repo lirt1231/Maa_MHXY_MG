@@ -117,6 +117,34 @@ class YunbiaoSceneTests(unittest.TestCase):
 
         self.assertEqual(decision["status"], "delivery_active")
 
+    def test_route_map_progress_keeps_waiting_when_countdown_ocr_is_missing(self):
+        decision = classify_yunbiao_scene(
+            [
+                text(
+                    "本日运镖次数 普通镖：2/3 高级镖：0/3",
+                    (466, 609, 306, 20),
+                ),
+            ],
+            {},
+            (1020, 718),
+            "delivering",
+        )
+
+        self.assertEqual(
+            decision,
+            {"status": "delivery_active", "source": "route_map_progress"},
+        )
+
+    def test_route_map_progress_cannot_start_delivery_from_an_entry_page(self):
+        decision = classify_yunbiao_scene(
+            [text("本日运镖次数 普通镖：2/3 高级镖：0/3", (466, 609, 306, 20))],
+            {},
+            (1020, 718),
+            "enter",
+        )
+
+        self.assertEqual(decision["status"], "unknown")
+
     def test_current_battle_cancel_is_wait_only(self):
         decision = classify_yunbiao_scene(
             [text("取消", (961, 680, 44, 25))],
@@ -128,6 +156,37 @@ class YunbiaoSceneTests(unittest.TestCase):
 
 
 class YunbiaoRunnerTests(unittest.TestCase):
+    @patch("tools.run_yunbiao_macos.MacOSTaskRuntime")
+    def test_confirmed_delivery_tolerates_a_minute_of_transient_unknown_scenes(
+        self, runtime_class
+    ):
+        runtime = runtime_class.return_value
+        normal = scene([text("押送普通镖银", (760, 300, 160, 28))])
+        confirm = scene([text("确定", (480, 390, 80, 30))])
+        active = scene([text("距离运镖完成：42秒", (120, 20, 180, 25))])
+        runtime.read_scene.side_effect = [
+            normal,
+            confirm,
+            active,
+            *[scene() for _ in range(6)],
+            normal,
+        ]
+        args = SimpleNamespace(
+            inspect_scene=False, recognize_only=False, rounds=1, max_steps=12
+        )
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            self.assertEqual(run(args, Mock()), 0)
+
+        result = next(
+            json.loads(line[len("result_json="):])
+            for line in output.getvalue().splitlines()
+            if line.startswith("result_json=")
+        )
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(runtime.click_box.call_count, 2)
+
     @patch("tools.run_yunbiao_macos.MacOSTaskRuntime")
     def test_zero_remaining_dialogue_completes_accepted_final_round(
         self, runtime_class

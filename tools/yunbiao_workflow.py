@@ -43,6 +43,9 @@ except ImportError:  # Direct execution through a platform runner.
     from yunbiao_recognition import classify_yunbiao_scene
 
 
+DELIVERY_UNKNOWN_POLL_LIMIT = 60
+
+
 @dataclass(frozen=True)
 class YunbiaoWorkflow:
     rounds: int = 3
@@ -235,7 +238,11 @@ class YunbiaoWorkflow:
                 continue
 
             unknown_polls += 1
-            unknown_limit = 6 if phase in {"await_delivery", "delivering"} else 3
+            unknown_limit = (
+                DELIVERY_UNKNOWN_POLL_LIMIT
+                if phase in {"await_delivery", "delivering"}
+                else 3
+            )
             if unknown_polls >= unknown_limit:
                 raise RuntimeError("连续多次无法识别普通运镖页面，已停止以避免无证据点击")
             context.waiter.wait(1.0)

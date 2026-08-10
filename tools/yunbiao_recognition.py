@@ -58,6 +58,19 @@ def classify_yunbiao_scene(
     if active:
         return {"status": "delivery_active"}
 
+    # The route map can remain visible while its countdown is briefly hidden
+    # by animation or OCR loss. Its ordinary-escort counter is independent
+    # evidence that this is still the automatic delivery phase, not a new
+    # task-entry page. Only recognize it after this run has accepted a round.
+    route_map_progress = find_items(
+        texts,
+        r".*本日运镖次数.*普通镖[:：]?[0-3]/3.*",
+        image_size,
+        {"min_x": 0.20, "max_x": 0.90, "min_y": 0.70, "max_y": 0.98},
+    )
+    if route_map_progress and phase in {"await_delivery", "delivering"}:
+        return {"status": "delivery_active", "source": "route_map_progress"}
+
     confirmations = find_items(
         texts,
         r"确定",
