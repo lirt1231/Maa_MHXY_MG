@@ -96,9 +96,10 @@ int focus_target_window(pid_t owner_pid, CGRect target_bounds)
     if (!application_element) {
         return -7;
     }
-    AXError frontmost_result = AXUIElementSetAttributeValue(
+    // Accessibility focus is best-effort. AppKit activation below can still
+    // bring the game forward when AX access is temporarily unavailable.
+    AXUIElementSetAttributeValue(
         application_element, kAXFrontmostAttribute, kCFBooleanTrue);
-    AXError raise_result = kAXErrorFailure;
     CFTypeRef windows_value = nullptr;
     if (AXUIElementCopyAttributeValue(
             application_element, kAXWindowsAttribute, &windows_value) == kAXErrorSuccess
@@ -109,7 +110,7 @@ int focus_target_window(pid_t owner_pid, CGRect target_bounds)
             AXUIElementRef window_element = (AXUIElementRef)CFArrayGetValueAtIndex(
                 windows, index);
             if (ax_window_matches_bounds(window_element, target_bounds)) {
-                raise_result = AXUIElementPerformAction(window_element, kAXRaiseAction);
+                AXUIElementPerformAction(window_element, kAXRaiseAction);
                 break;
             }
         }
@@ -119,15 +120,12 @@ int focus_target_window(pid_t owner_pid, CGRect target_bounds)
     }
     CFRelease(application_element);
 
-    if (frontmost_result != kAXErrorSuccess && raise_result != kAXErrorSuccess) {
-        return -7;
-    }
     NSRunningApplication* application =
         [NSRunningApplication runningApplicationWithProcessIdentifier:owner_pid];
     if (!application || application.terminated) {
         return -7;
     }
-    [application activateWithOptions:0];
+    [application activateWithOptions:NSApplicationActivateAllWindows];
     bool frontmost_confirmed = false;
     for (int attempt = 0; attempt < 10; ++attempt) {
         NSRunningApplication* frontmost =
