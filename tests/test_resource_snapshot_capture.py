@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 from dashboard.metrics import (
     BACKPACK_ENTRY_POINT,
@@ -43,12 +43,12 @@ class ResourceSnapshotCaptureTests(unittest.TestCase):
             {"text": "福利", "box": [10, 135, 45, 25]},
             {"text": "当前", "box": [8, 640, 45, 25]},
         ]
-        wait_for.side_effect = [(None, battle), (None, main)]
+        wait_for.side_effect = [(None, battle), (None, main), (None, main)]
         native_input = Mock()
 
         self.assertIs(_ensure_main(object(), native_input, 1), main)
         native_input.click.assert_not_called()
-        sleep.assert_called_once_with(1)
+        self.assertEqual(sleep.call_args_list, [call(1), call(0.6)])
 
     @patch("dashboard.metrics.time.sleep")
     @patch("dashboard.metrics._wait_for")

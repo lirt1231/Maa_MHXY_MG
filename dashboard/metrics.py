@@ -243,6 +243,7 @@ def _field_evidence(item: dict | None, source_page: str, frame_id: str) -> dict:
 
 
 def _ensure_main(tasker, native_input, window_id: int) -> list[dict]:
+    main_polls = 0
     for _ in range(12):
         _, results = _wait_for(
             tasker,
@@ -252,7 +253,12 @@ def _ensure_main(tasker, native_input, window_id: int) -> list[dict]:
             step="等待游戏画面",
         )
         if _is_main(results):
-            return results
+            main_polls += 1
+            if main_polls >= 2:
+                return results
+            time.sleep(0.6)
+            continue
+        main_polls = 0
         if _is_profile(results) or _is_backpack(results) or _is_social_messages(results):
             _close_panel(native_input)
             continue
