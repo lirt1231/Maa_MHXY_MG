@@ -9,6 +9,7 @@ import numpy as np
 
 from tools.run_keju_macos import (
     CancellationRequested,
+    bind_keju_window,
     classify_keju_inspection,
     detect_exam_type,
     main,
@@ -160,6 +161,39 @@ class KejuExplicitFrameTests(unittest.TestCase):
 
 
 class KejuMacOSRunnerStateTests(unittest.TestCase):
+    def test_navigation_reuses_bound_window_without_second_toolkit_lookup(self):
+        toolkit = Mock()
+        controller_factory = Mock()
+        capture_factory = Mock()
+        input_factory = Mock()
+        runtime = SimpleNamespace(
+            window_id=157261,
+            controller=object(),
+            capture=object(),
+            native_input=object(),
+        )
+
+        components = bind_keju_window(
+            Mock(),
+            navigation_runtime=runtime,
+            toolkit=toolkit,
+            controller_factory=controller_factory,
+            capture_factory=capture_factory,
+            input_factory=input_factory,
+            screencap_method=object(),
+            input_method=object(),
+        )
+
+        self.assertEqual(
+            components,
+            (runtime.window_id, runtime.controller, runtime.capture, runtime.native_input),
+        )
+        toolkit.init_option.assert_not_called()
+        toolkit.find_desktop_windows.assert_not_called()
+        controller_factory.assert_not_called()
+        capture_factory.assert_not_called()
+        input_factory.assert_not_called()
+
     def test_single_scene_inspection_classifies_without_answering(self):
         self.assertEqual(
             classify_keju_inspection([{"text": "第 3 / 15 题 剩余时间 20"}])["status"],

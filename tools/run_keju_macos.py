@@ -200,6 +200,49 @@ def classify_keju_inspection(
     return {"status": "unknown", "examType": None}
 
 
+def bind_keju_window(
+    guard,
+    *,
+    navigation_runtime,
+    toolkit,
+    controller_factory,
+    capture_factory,
+    input_factory,
+    screencap_method,
+    input_method,
+):
+    """Reuse the identity-checked navigation window when one is already bound."""
+    if navigation_runtime is not None:
+        return (
+            navigation_runtime.window_id,
+            navigation_runtime.controller,
+            navigation_runtime.capture,
+            navigation_runtime.native_input,
+        )
+
+    toolkit.init_option(str(ROOT))
+    windows = [
+        window
+        for window in toolkit.find_desktop_windows()
+        if window.class_name == "com.netease.my" and window.window_name == "梦幻西游"
+    ]
+    if not windows:
+        raise RuntimeError("未找到已打开的梦幻西游窗口")
+
+    window_id = windows[0].hwnd
+    controller = controller_factory(window_id, screencap_method, input_method)
+    connection = controller.post_connection().wait()
+    guard.checkpoint()
+    if not connection.succeeded:
+        raise RuntimeError("连接梦幻西游窗口失败")
+    return (
+        window_id,
+        controller,
+        capture_factory(controller, window_id),
+        input_factory(window_id),
+    )
+
+
 def recognize_keju_frame(tasker, capture, recognizer, guard):
     """Recognize exactly the frame captured from the bound game window."""
     recognizer.last_status = "capturing"
@@ -377,12 +420,17 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
         "clicks": 0,
         "limit": args.max_steps,
     }
+    navigation_runtime = None
     if getattr(args, "navigate_from_main", False):
         from macos_task_runtime import MacOSTaskRuntime
 
-        runtime = MacOSTaskRuntime(guard)
+        navigation_runtime = MacOSTaskRuntime(guard)
         entry = HuishiEntryWorkflow(exam_type=args.exam_type).execute(
-            WorkflowContext(runtime, guard, inspection_evidence_provider=runtime.inspection_evidence),
+            WorkflowContext(
+                navigation_runtime,
+                guard,
+                inspection_evidence_provider=navigation_runtime.inspection_evidence,
+            ),
             inspect=args.inspect_scene or args.recognize_only,
         )
         if isinstance(entry, WorkflowInspection):
@@ -465,25 +513,16 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
     if args.wait_for_entry:
         os.environ["MAA_KEJU_WAIT_FOR_ENTRY"] = "1"
 
-    Toolkit.init_option(str(ROOT))
-    windows = [
-        window
-        for window in Toolkit.find_desktop_windows()
-        if window.class_name == "com.netease.my" and window.window_name == "梦幻西游"
-    ]
-    if not windows:
-        raise RuntimeError("未找到已打开的梦幻西游窗口")
-
-    window_id = windows[0].hwnd
-    controller = MacOSController(
-        window_id,
-        MaaMacOSScreencapMethodEnum.ScreenCaptureKit,
-        MaaMacOSInputMethodEnum.GlobalEvent,
+    window_id, controller, capture, native_input = bind_keju_window(
+        guard,
+        navigation_runtime=navigation_runtime,
+        toolkit=Toolkit,
+        controller_factory=MacOSController,
+        capture_factory=WindowCapture,
+        input_factory=NativeMacOSInput,
+        screencap_method=MaaMacOSScreencapMethodEnum.ScreenCaptureKit,
+        input_method=MaaMacOSInputMethodEnum.GlobalEvent,
     )
-    connection = controller.post_connection().wait()
-    guard.checkpoint()
-    if not connection.succeeded:
-        raise RuntimeError("连接梦幻西游窗口失败")
 
     from custom.recognition.keju_hybrid import KejuHybridAnswer
 
@@ -501,8 +540,6 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
         raise RuntimeError("初始化 Maa Tasker 失败")
     guard.bind_tasker(tasker)
 
-    capture = WindowCapture(controller, window_id)
-    native_input = NativeMacOSInput(window_id)
     source = KejuMacOSObservationSource(
         tasker,
         capture,
