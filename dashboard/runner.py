@@ -174,12 +174,13 @@ TASK_RESULT_SCHEMAS = {
         "fields": {
             "task_id", "status", "reason", "digs", "target_digs", "purchases",
             "sale_clicks", "sale_batches", "sale_outcome", "genuine_protected",
-            "actions", "clicks", "drags",
+            "cleanup_status", "cleanup_warning", "actions", "clicks", "drags",
         },
         "required": {
             status: {
                 "digs", "target_digs", "purchases", "sale_clicks",
                 "sale_outcome", "genuine_protected", "actions", "clicks",
+                "cleanup_status", "cleanup_warning",
             }
             for status in {"completed", "already_completed"}
         },
@@ -1297,10 +1298,23 @@ class RunnerManager:
         if task_id == "kaogu" and status == "completed":
             if result.get("genuine_protected") is not True:
                 raise RuntimeError("考古结果未确认真品保护")
-            if result.get("sale_outcome") not in {
+            cleanup_status = result.get("cleanup_status")
+            cleanup_warning = result.get("cleanup_warning")
+            if cleanup_status not in {"completed", "incomplete"}:
+                raise RuntimeError("考古结果缺少有效的收尾状态")
+            if cleanup_status == "completed" and cleanup_warning is not None:
+                raise RuntimeError("考古结果的已完成收尾不应包含警告")
+            if cleanup_status == "incomplete" and (
+                not isinstance(cleanup_warning, str) or not cleanup_warning.strip()
+            ):
+                raise RuntimeError("考古结果的未完成收尾缺少原因")
+            valid_sale_outcomes = {
                 "all_non_genuine_sold",
                 "all_non_genuine_sold_genuine_retained",
-            }:
+            }
+            if cleanup_status == "incomplete":
+                valid_sale_outcomes.add("cleanup_incomplete")
+            if result.get("sale_outcome") not in valid_sale_outcomes:
                 raise RuntimeError("考古结果缺少有效的古董售卖结论")
         return result
 
@@ -1330,6 +1344,11 @@ class RunnerManager:
                 "mijingxiangyao": "秘境降妖已达到本次战斗场数上限",
             }.get(task_id, f"{task_name}已达到本次执行上限")
         if status == "completed":
+            if task_id == "kaogu" and result.get("cleanup_status") == "incomplete":
+                return (
+                    "工坊考古完成 10 次挖掘，但古董整理未完整完成："
+                    f"{result['cleanup_warning']}"
+                )
             return {
                 "sanjieqiyuan": "三界奇缘答题完成",
                 "keju": "科举乡试答题完成",
@@ -1644,7 +1663,12 @@ class RunnerManager:
                         failure_phase=failure_phase,
                     )
                     level = "error" if status == "failed" else (
-                        "warning" if status == "cancelled" else "info"
+                        "warning"
+                        if status == "cancelled" or (
+                            isinstance(task_result, dict)
+                            and task_result.get("cleanup_status") == "incomplete"
+                        )
+                        else "info"
                     )
                     message = error or self._task_result_message(
                         run["taskId"], task_result

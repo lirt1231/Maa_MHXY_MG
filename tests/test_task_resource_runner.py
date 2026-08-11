@@ -113,6 +113,31 @@ def task_process(status="completed", *, task_id="sanjieqiyuan", settlement_rewar
     ])
 
 
+def kaogu_task_process(*, cleanup_status="completed", cleanup_warning=None):
+    return FinishedProcess([
+        "result_json=" + json.dumps({
+            "task_id": "kaogu",
+            "status": "completed",
+            "digs": 10,
+            "target_digs": 10,
+            "purchases": 1,
+            "sale_clicks": 2,
+            "sale_batches": 1,
+            "sale_outcome": (
+                "cleanup_incomplete"
+                if cleanup_status == "incomplete"
+                else "all_non_genuine_sold_genuine_retained"
+            ),
+            "genuine_protected": True,
+            "cleanup_status": cleanup_status,
+            "cleanup_warning": cleanup_warning,
+            "actions": 18,
+            "clicks": 14,
+            "drags": 3,
+        }, ensure_ascii=False)
+    ])
+
+
 def recovery_process():
     payload = {
         "status": "confirmed",
@@ -165,6 +190,9 @@ class TaskResourceRunnerTests(unittest.TestCase):
 
     def start_baotu(self):
         return self.manager.start("baotu", {}, checklist_confirmed=True)
+
+    def start_kaogu(self):
+        return self.manager.start("kaogu", {}, checklist_confirmed=True)
 
     def start_huishi(self):
         with patch("dashboard.runner.ensure_task_available"):
@@ -351,6 +379,37 @@ class TaskResourceRunnerTests(unittest.TestCase):
         command = self.manager._resource_snapshot_command("kaogu", "before")
 
         self.assertEqual(command[-2:], ["--fields", "silver"])
+
+    def test_kaogu_cleanup_warning_recovers_and_records_silver_delta(self):
+        processes = [
+            snapshot_process(
+                "before", captured_at="2026-08-05T02:00:00+00:00", silver=20000,
+            ),
+            kaogu_task_process(
+                cleanup_status="incomplete",
+                cleanup_warning="capture geometry changed during cleanup",
+            ),
+            recovery_process(),
+            snapshot_process(
+                "after", captured_at="2026-08-05T02:10:00+00:00", silver=20880,
+            ),
+        ]
+        with patch("dashboard.runner.subprocess.Popen", side_effect=processes) as popen:
+            self.start_kaogu()
+            current = self.wait_for(lambda run: run["status"] == "succeeded")
+
+        self.assertEqual(popen.call_count, 4)
+        self.assertEqual(current["result"]["cleanup_status"], "incomplete")
+        self.assertEqual(
+            current["result"]["cleanup_warning"],
+            "capture geometry changed during cleanup",
+        )
+        self.assertEqual(current["homeRecovery"]["status"], "confirmed")
+        self.assertEqual(current["resourceYield"]["attributionStatus"], "reliable")
+        self.assertEqual(current["resourceYield"]["silverDelta"], 880)
+        final_event = self.database.events_after(0)[-1]
+        self.assertEqual(final_event["level"], "warning")
+        self.assertIn("古董整理未完整完成", final_event["message"])
 
     def test_stop_during_after_capture_cancels_capture_and_spawns_nothing_else(self):
         after = BlockingProcess()

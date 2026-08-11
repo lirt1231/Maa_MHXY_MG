@@ -539,6 +539,13 @@ class RunnerTaskContractTests(unittest.TestCase):
                 "status": "limit_reached", "battles": 18, "actions": 40,
                 "clicks": 22, "max_battles": 18,
             },
+            "kaogu": {
+                "status": "completed", "digs": 10, "target_digs": 10,
+                "purchases": 1, "sale_clicks": 2, "sale_batches": 1,
+                "sale_outcome": "cleanup_incomplete", "genuine_protected": True,
+                "cleanup_status": "incomplete", "cleanup_warning": "capture changed",
+                "actions": 18, "clicks": 14, "drags": 3,
+            },
         }
         for task_id, payload in fixtures.items():
             with self.subTest(task_id=task_id):
@@ -578,6 +585,21 @@ class RunnerTaskContractTests(unittest.TestCase):
                     '"actions":2,"clicks":2,"completionEvidence":"guessed",'
                     '"confirmationPolls":1}'
                 ],
+            )
+
+    def test_result_parser_rejects_kaogu_cleanup_warning_without_reason(self):
+        payload = {
+            "task_id": "kaogu", "status": "completed", "digs": 10,
+            "target_digs": 10, "purchases": 1, "sale_clicks": 2,
+            "sale_batches": 1, "sale_outcome": "cleanup_incomplete",
+            "genuine_protected": True, "cleanup_status": "incomplete",
+            "cleanup_warning": None, "actions": 18, "clicks": 14, "drags": 3,
+        }
+
+        with self.assertRaisesRegex(RuntimeError, "未完成收尾缺少原因"):
+            self.manager._parse_task_result(
+                "kaogu",
+                ["result_json=" + json.dumps(payload, ensure_ascii=False)],
             )
 
     def test_result_parser_rejects_mismatched_task_and_non_string_reason(self):
