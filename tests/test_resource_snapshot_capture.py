@@ -59,6 +59,31 @@ class ResourceSnapshotCaptureTests(unittest.TestCase):
             _ensure_main(object(), Mock(), 1)
         self.assertEqual(wait_for.call_count, 12)
 
+    @patch("dashboard.metrics.time.sleep")
+    @patch("dashboard.metrics._wait_for")
+    def test_resource_capture_closes_live_team_quick_panel(self, wait_for, sleep):
+        quick_team = [
+            {"text": "福利", "box": [14, 129, 31, 16]},
+            {"text": "活动", "box": [261, 49, 39, 19]},
+            {"text": "任务", "box": [870, 108, 39, 22]},
+            {"text": "队伍", "box": [970, 106, 46, 25]},
+            {"text": "请组建或加入队伍", "box": [850, 263, 147, 30]},
+            {"text": "创建", "box": [851, 378, 46, 24]},
+            {"text": "找队", "box": [946, 376, 52, 30]},
+        ]
+        main = [
+            {"text": "福利", "box": [14, 129, 31, 16]},
+            {"text": "活动", "box": [261, 49, 39, 19]},
+            {"text": "任务", "box": [870, 108, 39, 22]},
+            {"text": "队伍", "box": [970, 106, 46, 25]},
+        ]
+        wait_for.side_effect = [(None, quick_team), (None, main), (None, main)]
+        native_input = Mock()
+
+        self.assertIs(_ensure_main(object(), native_input, 1), main)
+        native_input.click.assert_called_once_with(798, 113, (1020, 718))
+        self.assertEqual(sleep.call_args_list, [call(1), call(0.6)])
+
     def test_fixed_resource_icons_are_normalized_to_the_game_canvas(self):
         self.assertEqual(BACKPACK_ENTRY_POINT, (985, 630))
         self.assertEqual(PROFILE_ENTRY_POINT, (978, 55))

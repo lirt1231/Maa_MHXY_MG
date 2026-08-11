@@ -10,6 +10,7 @@ try:
     from .fixed_game_controls import (
         CLOSE_STANDARD_PANEL,
         CLOSE_HUISHI_SETTLEMENT,
+        CLOSE_TEAM_QUICK_PANEL,
         OPEN_BACKPACK,
         OPEN_CHARACTER_PROFILE,
         FixedGameControl,
@@ -19,6 +20,7 @@ except ImportError:  # Direct execution through tools/run_resource_snapshot_maco
     from fixed_game_controls import (
         CLOSE_STANDARD_PANEL,
         CLOSE_HUISHI_SETTLEMENT,
+        CLOSE_TEAM_QUICK_PANEL,
         OPEN_BACKPACK,
         OPEN_CHARACTER_PROFILE,
         FixedGameControl,
@@ -63,6 +65,11 @@ class CloseStandardPanelAction(FixedPanelControlAction):
 class CloseHuishiSettlementAction(FixedPanelControlAction):
     def __init__(self):
         super().__init__(CLOSE_HUISHI_SETTLEMENT)
+
+
+class CloseTeamQuickPanelAction(FixedPanelControlAction):
+    def __init__(self):
+        super().__init__(CLOSE_TEAM_QUICK_PANEL)
 
 
 def parse_number(value: str) -> int | None:
@@ -161,6 +168,7 @@ class CaptureExperience:
 __all__ = [
     "CloseStandardPanelAction",
     "CloseHuishiSettlementAction",
+    "CloseTeamQuickPanelAction",
     "CaptureExperience",
     "CaptureWallet",
     "FixedPanelControlAction",

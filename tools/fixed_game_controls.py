@@ -28,6 +28,9 @@ CLOSE_STANDARD_PANEL = FixedGameControl(
 CLOSE_HUISHI_SETTLEMENT = FixedGameControl(
     "close_huishi_settlement", (909, 204), "huishi_settlement", "关闭已确认的会试结算页"
 )
+CLOSE_TEAM_QUICK_PANEL = FixedGameControl(
+    "close_team_quick_panel", (798, 113), "team_quick_panel", "收起已确认的快捷组队面板"
+)
 CLOSE_TEMPORARY_BAG = FixedGameControl(
     "close_temporary_bag", (691, 172), "temporary_bag", "关闭已确认的临时包裹"
 )
@@ -37,6 +40,7 @@ __all__ = [
     "CLOSE_STANDARD_PANEL",
     "CLOSE_HUISHI_SETTLEMENT",
     "CLOSE_TEMPORARY_BAG",
+    "CLOSE_TEAM_QUICK_PANEL",
     "FixedGameControl",
     "OPEN_BACKPACK",
     "OPEN_CHARACTER_PROFILE",

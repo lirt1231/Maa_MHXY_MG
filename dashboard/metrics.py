@@ -20,6 +20,7 @@ from tools.resource_panel_actions import (
     CaptureWallet,
     CloseHuishiSettlementAction,
     CloseStandardPanelAction,
+    CloseTeamQuickPanelAction,
     OpenBackpackAction,
     OpenCharacterProfileAction,
     parse_backpack_resources,
@@ -125,12 +126,16 @@ def _has(results: list[dict], *needles: str) -> bool:
 
 
 def _is_main(results: list[dict]) -> bool:
+    return _classify_main(results).get("status") == "main_screen"
+
+
+def _classify_main(results: list[dict]) -> dict:
     scene = SimpleNamespace(
         image_size=OCR_SIZE,
         texts=results,
         templates={},
     )
-    return classify_return_scene("resource_snapshot", scene).get("status") == "main_screen"
+    return classify_return_scene("resource_snapshot", scene)
 
 
 def _is_backpack(results: list[dict]) -> bool:
@@ -252,13 +257,23 @@ def _ensure_main(tasker, native_input, window_id: int) -> list[dict]:
             timeout=4,
             step="等待游戏画面",
         )
-        if _is_main(results):
+        main_decision = _classify_main(results)
+        if main_decision.get("status") == "main_screen":
             main_polls += 1
             if main_polls >= 2:
                 return results
             time.sleep(0.6)
             continue
         main_polls = 0
+        if (
+            main_decision.get("status") == "close_known_page"
+            and main_decision.get("scene") == "team_quick_panel"
+        ):
+            CloseTeamQuickPanelAction().execute(
+                native_input, confirmed_scene="team_quick_panel"
+            )
+            time.sleep(1)
+            continue
         if _is_profile(results) or _is_backpack(results) or _is_social_messages(results):
             _close_panel(native_input)
             continue
