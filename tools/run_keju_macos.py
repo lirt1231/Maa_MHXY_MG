@@ -226,10 +226,18 @@ def bind_keju_window(
         for window in toolkit.find_desktop_windows()
         if window.class_name == "com.netease.my" and window.window_name == "梦幻西游"
     ]
-    if not windows:
+    if len(windows) > 1:
+        raise RuntimeError("检测到多个梦幻西游窗口，无法保证截图与输入属于同一窗口")
+    if windows:
+        window_id = windows[0].hwnd
+        native_input = input_factory(window_id)
+    else:
+        native_input = input_factory()
+        window_id = native_input.find_window_id()
+    if not window_id:
         raise RuntimeError("未找到已打开的梦幻西游窗口")
+    native_input.bind_window(window_id)
 
-    window_id = windows[0].hwnd
     controller = controller_factory(window_id, screencap_method, input_method)
     connection = controller.post_connection().wait()
     guard.checkpoint()
@@ -239,7 +247,7 @@ def bind_keju_window(
         window_id,
         controller,
         capture_factory(controller, window_id),
-        input_factory(window_id),
+        native_input,
     )
 
 

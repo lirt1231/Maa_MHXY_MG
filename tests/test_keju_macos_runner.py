@@ -194,6 +194,39 @@ class KejuMacOSRunnerStateTests(unittest.TestCase):
         capture_factory.assert_not_called()
         input_factory.assert_not_called()
 
+    def test_direct_answering_falls_back_to_native_window_lookup(self):
+        toolkit = Mock()
+        toolkit.find_desktop_windows.return_value = []
+        native_input = Mock()
+        native_input.find_window_id.return_value = 157261
+        input_factory = Mock(return_value=native_input)
+        connection = Mock(succeeded=True)
+        controller = Mock()
+        controller.post_connection.return_value.wait.return_value = connection
+        controller_factory = Mock(return_value=controller)
+        capture = object()
+        capture_factory = Mock(return_value=capture)
+        guard = Mock()
+
+        components = bind_keju_window(
+            guard,
+            navigation_runtime=None,
+            toolkit=toolkit,
+            controller_factory=controller_factory,
+            capture_factory=capture_factory,
+            input_factory=input_factory,
+            screencap_method="screen_capture_kit",
+            input_method="global_event",
+        )
+
+        self.assertEqual(components, (157261, controller, capture, native_input))
+        native_input.find_window_id.assert_called_once_with()
+        native_input.bind_window.assert_called_once_with(157261)
+        controller_factory.assert_called_once_with(
+            157261, "screen_capture_kit", "global_event"
+        )
+        guard.checkpoint.assert_called_once_with()
+
     def test_single_scene_inspection_classifies_without_answering(self):
         self.assertEqual(
             classify_keju_inspection([{"text": "第 3 / 15 题 剩余时间 20"}])["status"],
