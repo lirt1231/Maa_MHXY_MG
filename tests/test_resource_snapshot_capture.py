@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from dashboard.metrics import (
     BACKPACK_ENTRY_POINT,
@@ -8,6 +8,7 @@ from dashboard.metrics import (
     _is_backpack,
     _is_huishi_settlement,
     _is_main,
+    _ensure_main,
     _is_social_messages,
     metric_capture_status,
     parse_backpack_resources,
@@ -31,6 +32,32 @@ class ResourceSnapshotCaptureTests(unittest.TestCase):
             {"text": "任务", "box": [780, 80, 45, 25]},
             {"text": "活动", "box": [260, 45, 50, 22]},
         ]))
+
+    @patch("dashboard.metrics.time.sleep")
+    @patch("dashboard.metrics._wait_for")
+    def test_resource_capture_waits_without_input_for_main_screen(self, wait_for, sleep):
+        battle = [{"text": "取消", "box": [961, 680, 44, 25]}]
+        main = [
+            {"text": "任务", "box": [780, 80, 45, 25]},
+            {"text": "队伍", "box": [930, 95, 45, 25]},
+            {"text": "福利", "box": [10, 135, 45, 25]},
+            {"text": "当前", "box": [8, 640, 45, 25]},
+        ]
+        wait_for.side_effect = [(None, battle), (None, main)]
+        native_input = Mock()
+
+        self.assertIs(_ensure_main(object(), native_input, 1), main)
+        native_input.click.assert_not_called()
+        sleep.assert_called_once_with(1)
+
+    @patch("dashboard.metrics.time.sleep")
+    @patch("dashboard.metrics._wait_for")
+    def test_resource_capture_stops_after_bounded_unknown_frames(self, wait_for, _sleep):
+        wait_for.return_value = (None, [{"text": "取消", "box": [961, 680, 44, 25]}])
+
+        with self.assertRaisesRegex(RuntimeError, "等待安全主界面超时"):
+            _ensure_main(object(), Mock(), 1)
+        self.assertEqual(wait_for.call_count, 12)
 
     def test_fixed_resource_icons_are_normalized_to_the_game_canvas(self):
         self.assertEqual(BACKPACK_ENTRY_POINT, (985, 630))

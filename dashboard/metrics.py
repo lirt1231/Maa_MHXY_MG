@@ -243,7 +243,7 @@ def _field_evidence(item: dict | None, source_page: str, frame_id: str) -> dict:
 
 
 def _ensure_main(tasker, native_input, window_id: int) -> list[dict]:
-    for _ in range(4):
+    for _ in range(12):
         _, results = _wait_for(
             tasker,
             window_id,
@@ -262,8 +262,11 @@ def _ensure_main(tasker, native_input, window_id: int) -> list[dict]:
             )
             time.sleep(1)
             continue
-        raise RuntimeError("当前页面无法安全返回主界面，请先结束战斗或关闭特殊活动页面")
-    raise RuntimeError("自动返回游戏主界面失败")
+        # Battle, automatic pathing and unknown activity transitions are
+        # observed without input.  A later main-screen frame may safely resume
+        # capture; persistent unknown scenes still stop at the bounded limit.
+        time.sleep(1)
+    raise RuntimeError("等待安全主界面超时，请先结束战斗或关闭特殊活动页面")
 
 
 def _restore_known_resource_panel(tasker, native_input, window_id: int) -> bool:
