@@ -33,6 +33,18 @@ class ResourceSnapshotCaptureTests(unittest.TestCase):
             {"text": "活动", "box": [260, 45, 50, 22]},
         ]))
 
+    def test_resource_capture_accepts_live_collapsed_main_menu(self):
+        results = [
+            {"text": "长安城", "box": [100, 28, 54, 23]},
+            {"text": "福利", "box": [15, 129, 30, 16]},
+            {"text": "活动", "box": [261, 49, 40, 19]},
+            {"text": "排行", "box": [323, 51, 37, 16]},
+            {"text": "挂机", "box": [387, 52, 27, 12]},
+            {"text": "包里", "box": [976, 621, 27, 13]},
+        ]
+
+        self.assertTrue(_is_main(results))
+
     @patch("dashboard.metrics.time.sleep")
     @patch("dashboard.metrics._wait_for")
     def test_resource_capture_waits_without_input_for_main_screen(self, wait_for, sleep):

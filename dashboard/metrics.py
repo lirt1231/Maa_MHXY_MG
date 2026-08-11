@@ -135,7 +135,39 @@ def _classify_main(results: list[dict]) -> dict:
         texts=results,
         templates={},
     )
-    return classify_return_scene("resource_snapshot", scene)
+    decision = classify_return_scene("resource_snapshot", scene)
+    if decision.get("status") != "unknown" or str(decision.get("reason", "")).startswith("team_"):
+        return decision
+    # The main screen can collapse its task/team ribbon. Require independent
+    # location, navigation, side-menu and backpack evidence before using the
+    # fixed resource controls in that layout.
+    has_location = any(
+        "长安城" in str(item["text"])
+        and item["box"][0] <= 180
+        and item["box"][1] <= 90
+        for item in results
+    )
+    has_left_menu = any(
+        str(item["text"]) in {"福利", "商城"}
+        and item["box"][0] <= 180
+        and 70 <= item["box"][1] <= 300
+        for item in results
+    )
+    toolbar_count = sum(
+        str(item["text"]) in {"活动", "排行", "挂机", "社群"}
+        and 150 <= item["box"][0] <= 600
+        and item["box"][1] <= 100
+        for item in results
+    )
+    has_backpack = any(
+        re.fullmatch(r"包[裹里]", str(item["text"]))
+        and item["box"][0] >= 900
+        and item["box"][1] >= 560
+        for item in results
+    )
+    if has_location and has_left_menu and toolbar_count >= 2 and has_backpack:
+        return {"status": "main_screen", "anchors": ["collapsed_resource_main"]}
+    return decision
 
 
 def _is_backpack(results: list[dict]) -> bool:
