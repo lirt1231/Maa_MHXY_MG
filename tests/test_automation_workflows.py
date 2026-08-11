@@ -8,6 +8,7 @@ from tools.baotu_workflow import BaotuWorkflow
 from tools.fuli_qiandao_workflow import WelfareSignInWorkflow
 from tools.kaogu_workflow import KaoguWorkflow
 from tools.keju_workflow import KejuWorkflow
+from tools.macos_cancellation import CancellationRequested
 from tools.mijingxiangyao_workflow import MijingxiangyaoWorkflow
 from tools.quiz_workflows import QuizObservation
 from tools.sanjieqiyuan_workflow import (
@@ -54,6 +55,18 @@ class _DesktopAdapterA(_MemoryAdapterBase):
 
 class _DesktopAdapterB(_MemoryAdapterBase):
     pass
+
+
+class _FailingSceneAdapter(_MemoryAdapterBase):
+    def read_scene(self, templates=None):
+        if self.index >= len(self.scenes):
+            raise RuntimeError("capture geometry changed during cleanup")
+        return super().read_scene(templates)
+
+
+class _CancelledSceneAdapter(_MemoryAdapterBase):
+    def read_scene(self, templates=None):
+        raise CancellationRequested("stop requested")
 
 
 def _scene(status, box=None):
@@ -1106,6 +1119,8 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
                     "sale_batches": 1,
                     "sale_outcome": "all_non_genuine_sold_genuine_retained",
                     "genuine_protected": True,
+                    "cleanup_status": "completed",
+                    "cleanup_warning": None,
                     "actions": 23,
                     "clicks": 17,
                     "drags": 7,
@@ -1161,6 +1176,47 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
         reasons = [entry[-1] for entry in adapter.trace if entry[0] == "click"]
         self.assertNotIn("购买一个洛阳铲", reasons)
         self.assertFalse(any("次挖掘" in reason for reason in reasons))
+
+    def test_kaogu_preserves_completed_digs_when_cleanup_capture_fails(self):
+        adapter = _FailingSceneAdapter([
+            _scene("dig"),
+            _scene("dig_confirmed"),
+        ])
+        workflow = KaoguWorkflow(
+            target_digs=1,
+            max_steps=3,
+            classifier=_kaogu_classifier,
+        )
+
+        result = workflow.execute(WorkflowContext(adapter, adapter))
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.payload["digs"], 1)
+        self.assertEqual(result.payload["clicks"], 1)
+        self.assertEqual(result.payload["sale_outcome"], "cleanup_incomplete")
+        self.assertEqual(result.payload["cleanup_status"], "incomplete")
+        self.assertEqual(
+            result.payload["cleanup_warning"],
+            "capture geometry changed during cleanup",
+        )
+
+    def test_kaogu_does_not_downgrade_capture_failure_before_target(self):
+        adapter = _FailingSceneAdapter([])
+        workflow = KaoguWorkflow(target_digs=1, classifier=_kaogu_classifier)
+
+        with self.assertRaisesRegex(RuntimeError, "capture geometry changed"):
+            workflow.execute(WorkflowContext(adapter, adapter))
+
+    def test_kaogu_does_not_downgrade_cancellation_after_target(self):
+        adapter = _CancelledSceneAdapter([])
+        workflow = KaoguWorkflow(
+            target_digs=1,
+            initial_digs=1,
+            classifier=_kaogu_classifier,
+        )
+
+        with self.assertRaisesRegex(CancellationRequested, "stop requested"):
+            workflow.execute(WorkflowContext(adapter, adapter))
 
     def test_kaogu_rescans_and_sells_a_second_inventory_batch(self):
         adapter = _DesktopAdapterA([
@@ -1248,7 +1304,7 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
         self.assertEqual(reasons.count("考古流程：sell_antique"), 3)
         self.assertEqual(reasons.count("考古流程：close_sale_shop"), 1)
 
-    def test_kaogu_stops_after_bounded_inventory_scan_without_clicking_items(self):
+    def test_kaogu_reports_incomplete_cleanup_after_bounded_inventory_scan(self):
         adapter = _DesktopAdapterA([
             _scene("open_inventory_for_sale"),
             _scene("normalize_inventory"),
@@ -1265,13 +1321,15 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
             classifier=_kaogu_classifier,
         )
 
-        with self.assertRaisesRegex(RuntimeError, "未找到非真品古董"):
-            workflow.execute(WorkflowContext(adapter, adapter))
+        result = workflow.execute(WorkflowContext(adapter, adapter))
 
         clicks = [entry for entry in adapter.trace if entry[0] == "click"]
         drags = [entry for entry in adapter.trace if entry[0] == "drag"]
         self.assertEqual(len(clicks), 2)
         self.assertEqual(len(drags), 4)
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.payload["cleanup_status"], "incomplete")
+        self.assertIn("未找到非真品古董", result.payload["cleanup_warning"])
 
 
 if __name__ == "__main__":

@@ -291,7 +291,12 @@ class KaoguWorkflow:
         normalize_inventory = actions["normalize_inventory"]
         scan_inventory = actions["scan_inventory"]
 
-        def result(status: str) -> WorkflowResult:
+        def result(
+            status: str,
+            *,
+            cleanup_status: str = "completed",
+            cleanup_warning: str | None = None,
+        ) -> WorkflowResult:
             if (
                 status in {"completed", "already_completed"}
                 and self.purchase_guard is not None
@@ -307,24 +312,59 @@ class KaoguWorkflow:
                     "sale_batches": sale_batches,
                     "sale_outcome": sale_outcome,
                     "genuine_protected": True,
+                    "cleanup_status": cleanup_status,
+                    "cleanup_warning": cleanup_warning,
                     "actions": metrics.actions,
                     "clicks": metrics.clicks,
                     "drags": metrics.drags,
                 },
             )
 
+        def cleanup_interrupted(exc: Exception) -> WorkflowResult:
+            nonlocal sale_outcome
+            if (
+                digs < self.target_digs
+                or any(
+                    base.__name__ == "CancellationRequested"
+                    for base in type(exc).__mro__
+                )
+            ):
+                raise exc
+            warning = str(exc).strip() or exc.__class__.__name__
+            sale_outcome = "cleanup_incomplete"
+            context.emit(
+                "cleanup_warning",
+                digs=digs,
+                targetDigs=self.target_digs,
+                reason=warning,
+            )
+            return result(
+                "completed",
+                cleanup_status="incomplete",
+                cleanup_warning=warning,
+            )
+
+        def perform_cleanup_action(action, action_context):
+            try:
+                return action.execute(action_context)
+            except Exception as exc:
+                return cleanup_interrupted(exc)
+
         total_step_limit = self.max_steps + self.max_final_observations
         for step in range(1, total_step_limit + 1):
             if digs < self.target_digs and step > self.max_steps:
                 raise RuntimeError("考古流程超过最大识别步骤，已安全停止")
-            scene = context.runtime.read_scene(KAOGU_TEMPLATES)
-            decision = self.classifier(
-                scene.texts,
-                scene.templates,
-                scene.image_size,
-                phase=phase,
-                tool_mode=self.tool_mode,
-            )
+            try:
+                scene = context.runtime.read_scene(KAOGU_TEMPLATES)
+                decision = self.classifier(
+                    scene.texts,
+                    scene.templates,
+                    scene.image_size,
+                    phase=phase,
+                    tool_mode=self.tool_mode,
+                )
+            except Exception as exc:
+                return cleanup_interrupted(exc)
             status = decision["status"]
             if (
                 self.tool_mode == "selected"
@@ -436,8 +476,8 @@ class KaoguWorkflow:
             if digs >= self.target_digs:
                 final_observations += 1
                 if final_observations > self.max_final_observations:
-                    raise RuntimeError(
-                        "最后一次考古长时间未结束，已安全停止"
+                    return cleanup_interrupted(
+                        RuntimeError("最后一次考古长时间未结束，收尾未完成")
                     )
                 if status == "antique_sale_main_confirmed":
                     confirmed_main_polls += 1
@@ -464,7 +504,9 @@ class KaoguWorkflow:
                 }:
                     sale_wait_polls += 1
                     if sale_wait_polls > self.max_sale_wait_polls:
-                        raise RuntimeError("古董售卖页面长时间未就绪，已安全停止并保留现场")
+                        return cleanup_interrupted(
+                            RuntimeError("古董售卖页面长时间未就绪，收尾未完成并保留现场")
+                        )
                     context.waiter.wait(1.0)
                     continue
                 sale_wait_polls = 0
@@ -700,15 +742,24 @@ class KaoguWorkflow:
                 pending_dig_polls = 0
                 context.waiter.wait(1.8)
             elif status == "activate_antique":
-                metrics.record(activate_antique.execute(action_context))
+                action_result = perform_cleanup_action(activate_antique, action_context)
+                if isinstance(action_result, WorkflowResult):
+                    return action_result
+                metrics.record(action_result)
             elif status == "normalize_inventory":
-                metrics.record(normalize_inventory.execute(action_context))
+                action_result = perform_cleanup_action(normalize_inventory, action_context)
+                if isinstance(action_result, WorkflowResult):
+                    return action_result
+                metrics.record(action_result)
                 normalize_drags += 1
                 if normalize_drags >= self.inventory_normalize_drags:
                     phase = "sale_inventory_sort"
                     continue
             elif status == "scan_inventory":
-                metrics.record(scan_inventory.execute(action_context))
+                action_result = perform_cleanup_action(scan_inventory, action_context)
+                if isinstance(action_result, WorkflowResult):
+                    return action_result
+                metrics.record(action_result)
                 scan_drags += 1
                 if (
                     sale_batches > 0
@@ -719,8 +770,13 @@ class KaoguWorkflow:
             else:
                 action = actions.get(status)
                 if action is None:
-                    raise RuntimeError(f"考古流程返回了不支持的动作：{status}")
-                metrics.record(action.execute(action_context))
+                    return cleanup_interrupted(
+                        RuntimeError(f"考古流程返回了不支持的动作：{status}")
+                    )
+                action_result = perform_cleanup_action(action, action_context)
+                if isinstance(action_result, WorkflowResult):
+                    return action_result
+                metrics.record(action_result)
                 if status == "sell_antique":
                     sale_clicks += 1
                 elif status == "cancel_genuine_sale":
