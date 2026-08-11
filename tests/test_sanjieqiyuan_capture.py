@@ -204,6 +204,32 @@ class NativeMacOSInputBindingTests(unittest.TestCase):
             [42, 42],
         )
 
+    @patch("tools.macos_window_adapter.time.sleep")
+    @patch("tools.macos_window_adapter.subprocess.run")
+    def test_click_retries_once_after_system_activation_on_focus_error(
+        self, run_command, sleep
+    ):
+        native_input = self.input_stub(314)
+        native_input.click_function.side_effect = [-7, 0]
+        run_command.return_value = subprocess.CompletedProcess([], 0, b"", b"")
+
+        native_input.click(100, 200, (1020, 718))
+
+        self.assertEqual(native_input.click_function.call_count, 2)
+        self.assertEqual(run_command.call_args.args[0][:2], ["/usr/bin/osascript", "-e"])
+        sleep.assert_called_once_with(0.1)
+
+    @patch("tools.macos_window_adapter.subprocess.run")
+    def test_click_does_not_retry_non_focus_errors(self, run_command):
+        native_input = self.input_stub(314)
+        native_input.click_function.return_value = -4
+
+        with self.assertRaisesRegex(RuntimeError, "错误码：-4"):
+            native_input.click(100, 200, (1020, 718))
+
+        native_input.click_function.assert_called_once()
+        run_command.assert_not_called()
+
     def test_rejects_invalid_window_binding(self):
         native_input = self.input_stub()
 

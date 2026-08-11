@@ -34,6 +34,11 @@ GEOMETRY_CAPTURE_ATTEMPTS = 8
 GEOMETRY_RETRY_WAIT_SECONDS = 1.0
 GEOMETRY_INPUT_ATTEMPTS = 3
 GEOMETRY_INPUT_RETRY_WAIT_SECONDS = 0.05
+FOCUS_ERROR = -7
+ACTIVATE_GAME_SCRIPT = (
+    'tell application "System Events" to set frontmost of first application process '
+    'whose bundle identifier is "com.netease.my" to true'
+)
 
 
 class _TransientGeometryMismatch(RuntimeError):
@@ -282,29 +287,49 @@ class NativeMacOSInput:
             output_pid.value,
         )
 
+    def _retry_after_focus_failure(self, operation):
+        result = operation()
+        if result != FOCUS_ERROR:
+            return result
+        activated = subprocess.run(
+            ["/usr/bin/osascript", "-e", ACTIVATE_GAME_SCRIPT],
+            capture_output=True,
+            check=False,
+            timeout=5,
+        )
+        if activated.returncode != 0:
+            detail = activated.stderr.decode(errors="replace").strip()
+            raise RuntimeError(f"激活梦幻西游窗口失败：{detail or activated.returncode}")
+        time.sleep(0.1)
+        return operation()
+
     def click_screen(self, point):
         output_x = ctypes.c_double()
         output_y = ctypes.c_double()
-        result = self.screen_click_function(
-            self._bound_window_id(),
-            b"com.netease.my",
-            float(point[0]),
-            float(point[1]),
-            ctypes.byref(output_x),
-            ctypes.byref(output_y),
+        result = self._retry_after_focus_failure(
+            lambda: self.screen_click_function(
+                self._bound_window_id(),
+                b"com.netease.my",
+                float(point[0]),
+                float(point[1]),
+                ctypes.byref(output_x),
+                ctypes.byref(output_y),
+            )
         )
         if result != 0:
             raise RuntimeError(f"原生屏幕点点击失败，错误码：{result}")
         return output_x.value, output_y.value
 
     def drag_screen(self, start, end):
-        result = self.screen_drag_function(
-            self._bound_window_id(),
-            b"com.netease.my",
-            float(start[0]),
-            float(start[1]),
-            float(end[0]),
-            float(end[1]),
+        result = self._retry_after_focus_failure(
+            lambda: self.screen_drag_function(
+                self._bound_window_id(),
+                b"com.netease.my",
+                float(start[0]),
+                float(start[1]),
+                float(end[0]),
+                float(end[1]),
+            )
         )
         if result != 0:
             raise RuntimeError(f"原生屏幕点拖动失败，错误码：{result}")
@@ -312,30 +337,34 @@ class NativeMacOSInput:
     def click(self, x, y, source_size):
         output_x = ctypes.c_double()
         output_y = ctypes.c_double()
-        result = self.click_function(
-            self._bound_window_id(),
-            b"com.netease.my",
-            float(x),
-            float(y),
-            float(source_size[0]),
-            float(source_size[1]),
-            ctypes.byref(output_x),
-            ctypes.byref(output_y),
+        result = self._retry_after_focus_failure(
+            lambda: self.click_function(
+                self._bound_window_id(),
+                b"com.netease.my",
+                float(x),
+                float(y),
+                float(source_size[0]),
+                float(source_size[1]),
+                ctypes.byref(output_x),
+                ctypes.byref(output_y),
+            )
         )
         if result != 0:
             raise RuntimeError(f"原生窗口点击失败，错误码：{result}")
         return output_x.value, output_y.value
 
     def drag(self, from_point, to_point, source_size):
-        result = self.drag_function(
-            self._bound_window_id(),
-            b"com.netease.my",
-            float(from_point[0]),
-            float(from_point[1]),
-            float(to_point[0]),
-            float(to_point[1]),
-            float(source_size[0]),
-            float(source_size[1]),
+        result = self._retry_after_focus_failure(
+            lambda: self.drag_function(
+                self._bound_window_id(),
+                b"com.netease.my",
+                float(from_point[0]),
+                float(from_point[1]),
+                float(to_point[0]),
+                float(to_point[1]),
+                float(source_size[0]),
+                float(source_size[1]),
+            )
         )
         if result != 0:
             raise RuntimeError(f"原生窗口拖动失败，错误码：{result}")
