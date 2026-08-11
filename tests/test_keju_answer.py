@@ -741,6 +741,71 @@ class HybridAnswerTests(unittest.TestCase):
         self.assertEqual(recognizer.last_answer, "C")
         self.assertEqual(recognizer.last_source, "huishi_forced_model_guess")
 
+    def test_recognizer_uses_codex_when_configured_api_fails(self):
+        recognizer = object.__new__(keju_hybrid.KejuHybridAnswer)
+        image = np.ones((720, 923, 3), dtype=np.uint8)
+        context = SimpleNamespace(get_node_data=lambda _name: {"attach": {}})
+        option_results = iter([
+            ("A.随遇而安", [340, 315, 225, 80]),
+            ("B.出生入死", [570, 315, 230, 80]),
+            ("C.一路顺风", [340, 395, 225, 75]),
+            ("D.荣归故里", [570, 395, 230, 75]),
+        ])
+
+        with (
+            patch.dict("os.environ", {
+                "MAA_KEJU_EXAM_TYPE": "xiangshi",
+                "MAA_KEJU_RECOGNIZE_ONLY": "1",
+                "MAA_KEJU_API_KEY": "test-key",
+                "MAA_KEJU_URL": "https://example.test/v1/chat/completions",
+                "MAA_KEJU_MODEL": "test-model",
+                "MAA_KEJU_USE_CODEX": "1",
+            }),
+            patch.object(
+                keju_hybrid,
+                "_ocr_region",
+                side_effect=["科举乡试", "第4/10题小李广回乡猜一成语"],
+            ),
+            patch.object(
+                keju_hybrid,
+                "_ocr_region_with_box",
+                side_effect=lambda *_args: next(option_results),
+            ),
+            patch.object(keju_hybrid, "search_candidates", return_value=[]),
+            patch.object(keju_hybrid, "search_knowledge", return_value=[]),
+            patch.object(keju_hybrid, "search_web_evidence", return_value={
+                "query": "小李广回乡 猜成语", "queries": [],
+                "evidence": [{
+                    "id": "web-1", "provider": "test", "kind": "result",
+                    "title": "谜底", "snippet": "荣归故里",
+                    "url": "https://example.test/riddle", "rank": 1,
+                }],
+                "providers": {}, "elapsed_ms": 1,
+            }),
+            patch.object(
+                keju_hybrid,
+                "_request_model",
+                side_effect=keju_hybrid.requests.HTTPError("400 Bad Request"),
+            ),
+            patch.object(
+                keju_hybrid,
+                "_request_codex_model",
+                return_value=json.dumps({
+                    "answer": "D", "confidence": 0.95,
+                    "evidence_ids": ["web-1"], "reason": "谜底为荣归故里。",
+                }),
+            ),
+        ):
+            recognizer._analyze(
+                context,
+                SimpleNamespace(image=image),
+                keju_hybrid._StageTimings(),
+            )
+
+        self.assertEqual(recognizer.last_status, "ready")
+        self.assertEqual(recognizer.last_answer, "D")
+        self.assertEqual(recognizer.last_source, "web_search_verified_codex")
+
     def test_recognizer_preserves_raw_round_metadata_after_cleaning_question(self):
         recognizer = object.__new__(keju_hybrid.KejuHybridAnswer)
         image = np.ones((720, 923, 3), dtype=np.uint8)

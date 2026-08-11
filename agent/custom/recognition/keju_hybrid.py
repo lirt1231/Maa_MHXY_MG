@@ -701,6 +701,21 @@ class KejuHybridAnswer(CustomRecognition):
                     model_evidence_ids = correction["evidence_ids"]
                     model_reason = model_error
 
+        def request_codex_decision(prompt):
+            nonlocal model_source
+            codex_timeout = float(os.environ.get("MAA_KEJU_CODEX_TIMEOUT", "120"))
+            with timings.track("model_request"):
+                model_content = _request_codex_model(
+                    prompt, max(timeout, codex_timeout)
+                )
+            with timings.track("parse_decision"):
+                model_decision = parse_model_decision(
+                    model_content, tuple(valid_options)
+                )
+                accept_model_decision(model_decision, "Codex")
+            if model_answer and model_source is None:
+                model_source = "web_search_verified_codex"
+
         if trusted_local_answer:
             model_error = "题库精确命中，跳过远端模型"
         elif trusted_knowledge_answer:
@@ -708,6 +723,7 @@ class KejuHybridAnswer(CustomRecognition):
         elif api_key and url and model and (
             web_result["evidence"] or force_model_answer
         ):
+            prompt = None
             try:
                 with timings.track("parse_decision"):
                     prompt = build_verification_prompt(
@@ -740,6 +756,18 @@ class KejuHybridAnswer(CustomRecognition):
                     model_source = "web_search_verified_model"
             except (requests.RequestException, KeyError, IndexError, ValueError) as exc:
                 model_error = f"{type(exc).__name__}: {exc}"
+                if (
+                    prompt is not None
+                    and os.environ.get("MAA_KEJU_USE_CODEX") == "1"
+                ):
+                    api_error = model_error
+                    try:
+                        request_codex_decision(prompt)
+                    except (OSError, subprocess.SubprocessError, ValueError) as codex_exc:
+                        model_error = (
+                            f"{api_error}; Codex fallback "
+                            f"{type(codex_exc).__name__}: {codex_exc}"
+                        )
         elif os.environ.get("MAA_KEJU_USE_CODEX") == "1" and (
             web_result["evidence"] or force_model_answer
         ):
@@ -757,18 +785,7 @@ class KejuHybridAnswer(CustomRecognition):
                         web_result["evidence"],
                         force_answer=force_model_answer,
                     )
-                codex_timeout = float(os.environ.get("MAA_KEJU_CODEX_TIMEOUT", "120"))
-                with timings.track("model_request"):
-                    model_content = _request_codex_model(
-                        prompt, max(timeout, codex_timeout)
-                    )
-                with timings.track("parse_decision"):
-                    model_decision = parse_model_decision(
-                        model_content, tuple(valid_options)
-                    )
-                    accept_model_decision(model_decision, "Codex")
-                if model_answer and model_source is None:
-                    model_source = "web_search_verified_codex"
+                request_codex_decision(prompt)
             except (OSError, subprocess.SubprocessError, ValueError) as exc:
                 model_error = f"{type(exc).__name__}: {exc}"
         else:
