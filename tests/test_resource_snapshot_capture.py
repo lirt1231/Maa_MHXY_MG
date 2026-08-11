@@ -7,6 +7,7 @@ from dashboard.metrics import (
     PROFILE_ENTRY_POINT,
     _is_backpack,
     _is_huishi_settlement,
+    _is_main,
     _is_social_messages,
     metric_capture_status,
     parse_backpack_resources,
@@ -15,6 +16,22 @@ from tools.run_resource_snapshot_macos import build_snapshot
 
 
 class ResourceSnapshotCaptureTests(unittest.TestCase):
+    def test_resource_capture_reuses_cross_region_main_screen_evidence(self):
+        results = [
+            {"text": "任务", "box": [780, 80, 45, 25]},
+            {"text": "队伍", "box": [930, 95, 45, 25]},
+            {"text": "福利", "box": [10, 135, 45, 25]},
+            {"text": "当前", "box": [8, 640, 45, 25]},
+        ]
+
+        self.assertTrue(_is_main(results))
+
+    def test_resource_capture_rejects_sparse_toolbar_text(self):
+        self.assertFalse(_is_main([
+            {"text": "任务", "box": [780, 80, 45, 25]},
+            {"text": "活动", "box": [260, 45, 50, 22]},
+        ]))
+
     def test_fixed_resource_icons_are_normalized_to_the_game_canvas(self):
         self.assertEqual(BACKPACK_ENTRY_POINT, (985, 630))
         self.assertEqual(PROFILE_ENTRY_POINT, (978, 55))

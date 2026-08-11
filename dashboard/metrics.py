@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Iterable
 
 import numpy as np
@@ -25,6 +26,7 @@ from tools.resource_panel_actions import (
     parse_number,
     parse_profile_resources,
 )
+from tools.return_to_main_workflow import classify_return_scene
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -123,9 +125,12 @@ def _has(results: list[dict], *needles: str) -> bool:
 
 
 def _is_main(results: list[dict]) -> bool:
-    return _has(results, "任务") and any(
-        _has(results, marker) for marker in ("活动", "指引", "商城")
+    scene = SimpleNamespace(
+        image_size=OCR_SIZE,
+        texts=results,
+        templates={},
     )
+    return classify_return_scene("resource_snapshot", scene).get("status") == "main_screen"
 
 
 def _is_backpack(results: list[dict]) -> bool:
