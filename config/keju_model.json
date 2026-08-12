@@ -1,0 +1,15 @@
+{
+    "url": "https://api.vveai.com/v1/chat/completions",
+    "model": "gemini-3-flash-preview-nothinking",
+    "timeout": 6,
+    "keychain_service": "Maa_MHXY_MG_Keju_VVEAI",
+    "keychain_account": "vveai",
+    "minimum_confidence": 0.62,
+    "web_search": {
+        "enabled": true,
+        "timeout": 2.5,
+        "limit_per_provider": 3,
+        "providers": ["duckduckgo", "bing_rss"]
+    },
+    "extra_body": {}
+}
