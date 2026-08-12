@@ -301,6 +301,21 @@ class HybridAnswerTests(unittest.TestCase):
 
         self.assertIsNone(infer_direct_evidence_option(evidence, options))
 
+    def test_direct_question_answer_blocks_conflicting_repeated_mentions(self):
+        question = "圆洗有颜色的衣服时先用什么水浸泡10分钟后再洗不容易掉色"
+        evidence = [
+            {"id": "web-1", "title": "衣服防掉色方法", "snippet": "盐水或醋水都可用于固色。"},
+            {"id": "web-2", "title": "衣服固色建议", "snippet": "白醋也可帮助衣物固色。"},
+            {
+                "id": "web-3",
+                "title": "洗有颜色的衣服时先用什么水浸泡10分钟",
+                "snippet": "答案是5%的盐水。",
+            },
+        ]
+        options = {"A": "漂白水", "B": "醋", "C": "5%的盐水", "D": "50%的盐水"}
+
+        self.assertIsNone(infer_direct_evidence_option(evidence, options, question))
+
     def test_parse_json_and_plain_model_answers(self):
         self.assertEqual(parse_model_answer('{"answer":"C","confidence":0.9}'), "C")
         self.assertEqual(parse_model_answer("答案为 B。"), "B")

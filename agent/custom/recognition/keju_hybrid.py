@@ -701,7 +701,7 @@ class KejuHybridAnswer(CustomRecognition):
                 model_source = "huishi_forced_model_guess"
             elif model_error and model_error.startswith("证据直接纠偏"):
                 correction = infer_direct_evidence_option(
-                    web_result["evidence"], valid_options
+                    web_result["evidence"], valid_options, question
                 )
                 if correction:
                     model_source = "web_evidence_direct_override"

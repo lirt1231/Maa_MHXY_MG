@@ -264,15 +264,17 @@ def validate_forced_model_decision(decision, valid_choices=VALID_CHOICES, label=
     return answer, None
 
 
-def infer_direct_evidence_option(evidence, options):
+def infer_direct_evidence_option(evidence, options, question=None):
     """Find one option directly and repeatedly supported by retrieved text."""
     support = {}
+    normalized_question = normalize_text(question or "")
     for choice, option_text in options.items():
         selected = normalize_text(str(option_text))
         if not selected:
             continue
         ids = []
         explicit_total = False
+        direct_question_match = False
         numeric = bool(re.fullmatch(r"[+-]?\d+(?:\.\d+)?", selected))
         for item in evidence or []:
             text = " ".join(str(item.get(key, "")) for key in ("title", "snippet"))
@@ -284,13 +286,19 @@ def infer_direct_evidence_option(evidence, options):
             if not mentioned:
                 continue
             ids.append(str(item.get("id", "")))
+            normalized_title = normalize_text(str(item.get("title", "")))
+            if normalized_question and normalized_title:
+                question_match = SequenceMatcher(
+                    None, normalized_question, normalized_title
+                ).ratio()
+                direct_question_match = direct_question_match or question_match >= 0.75
             if numeric and re.search(
                 rf"(?:(?:一共|总共|合计|共计)\D{{0,8}}{re.escape(selected)}(?!\d)|"
                 rf"合\D{{0,2}}{re.escape(selected)}(?!\d))",
                 text,
             ):
                 explicit_total = True
-        if len(set(ids)) >= 2 or explicit_total:
+        if len(set(ids)) >= 2 or explicit_total or direct_question_match:
             support[choice] = [item_id for item_id in dict.fromkeys(ids) if item_id]
     if len(support) != 1:
         return None
@@ -321,7 +329,7 @@ def resolve_model_decision(
     )
     if answer is not None:
         return answer, False, None
-    direct_evidence = infer_direct_evidence_option(evidence, options)
+    direct_evidence = infer_direct_evidence_option(evidence, options, question)
     if direct_evidence is not None:
         corrected = direct_evidence["answer"]
         return (
