@@ -246,6 +246,13 @@ def _clean_option_text(choice, text):
     text = re.sub(rf"^{choice}\s*[.、:：]?\s*", "", text, flags=re.IGNORECASE)
     # 当前会试界面会把 B 选项左侧的【中华历史】等分类标签一起 OCR。
     text = re.sub(r"^[【\[（(][^】\]）)]{1,16}[】\]）)]\s*[A-D]?\s*", "", text)
+    # 跨行选项偶尔会把左侧选项标记重复插入正文，例如“不妨碍A别人”。
+    text = re.sub(
+        rf"(?<=[\u3400-\u9fff]){choice}(?=[\u3400-\u9fff])",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
     return text.strip()
 
 

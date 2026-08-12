@@ -527,6 +527,16 @@ class HybridAnswerTests(unittest.TestCase):
     def test_fullwidth_option_prefix_is_removed(self):
         self.assertEqual(keju_hybrid._clean_option_text("B", "Ｂ６"), "6")
 
+    def test_repeated_option_marker_inside_chinese_text_is_removed(self):
+        self.assertEqual(
+            keju_hybrid._clean_option_text("A", "A轻声细语,不妨碍A别人"),
+            "轻声细语,不妨碍别人",
+        )
+        self.assertEqual(
+            keju_hybrid._clean_option_text("B", "B选择A方案"),
+            "选择A方案",
+        )
+
     def test_question_ocr_drops_low_confidence_decorative_fragments(self):
         results = [
             SimpleNamespace(text="1", box=[394, 196, 24, 21], score=0.21),
