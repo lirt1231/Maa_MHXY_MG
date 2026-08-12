@@ -633,7 +633,7 @@ class ReturnToMainWorkflowTests(unittest.TestCase):
             [[420, 520, 180, 48], [785, 190, 43, 57], [821, 466, 32, 37]],
         )
 
-    def test_live_sanjie_completion_uses_fixed_close_after_cross_region_anchors(self):
+    def test_live_sanjie_completion_waits_for_self_dismissal_without_clicking(self):
         completion = scene(
             [
                 ("三界奇缘国", [103, 251, 46, 189]),
@@ -650,9 +650,29 @@ class ReturnToMainWorkflowTests(unittest.TestCase):
         ).execute(runtime, Guard())
 
         self.assertEqual(result.status, "confirmed")
-        self.assertEqual(result.outcome, "recovered")
-        self.assertEqual(result.clicks, 1)
-        self.assertEqual(runtime.clicks[0][0], [882, 129, 51, 86])
+        self.assertEqual(result.outcome, "already_main")
+        self.assertEqual(result.clicks, 0)
+        self.assertEqual(runtime.clicks, [])
+
+    def test_persistent_sanjie_completion_exhausts_observations_without_clicking(self):
+        completion = scene(
+            [
+                ("三界奇缘国", [103, 251, 46, 189]),
+                ("10/10", [281, 157, 48, 19]),
+                ("已获得奖励", [207, 460, 127, 21]),
+                ("恭喜少侠完成所有题目！", [536, 403, 192, 23]),
+            ],
+        )
+        runtime = Runtime([completion, completion])
+
+        result = ReturnToMainWorkflow(
+            "sanjieqiyuan", max_observations=2, wait_seconds=0
+        ).execute(runtime, Guard())
+
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.reason, "返回主界面观察预算已耗尽")
+        self.assertEqual(result.clicks, 0)
+        self.assertEqual(runtime.clicks, [])
 
     def test_sanjie_fixed_close_requires_all_terminal_anchors(self):
         incomplete = scene(

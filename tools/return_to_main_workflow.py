@@ -405,12 +405,12 @@ def classify_return_scene(task_id: str, scene) -> dict[str, Any]:
     )
     if sanjie_completion:
         return {
-            "status": "close_known_page",
+            "status": "wait",
             "scene": "sanjie_completion",
-            "action_id": "close:sanjie_completion",
-            # This completion page has a fixed close control. Three terminal
-            # regions must agree before the scaled region becomes actionable.
-            "box": _relative_box(scene.image_size, 0.865, 0.18, 0.05, 0.12),
+            # The live completion panel dismisses itself while OCR and
+            # template matching are still running. Clicking a coordinate from
+            # that stale frame can activate the main screen underneath.
+            "reason": "sanjie_completion_dismissing",
         }
 
     if task_id == "shimen" and _find_region(
