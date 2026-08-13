@@ -75,6 +75,7 @@ OVERLAY_PATTERN = re.compile(
 # before input.  Visual matching may establish page identity, but never moves
 # the click target for these controls.
 _TEMPORARY_BAG_CLOSE_BOX = (0.655, 0.205, 0.045, 0.070)
+_SANJIE_COMPLETION_CLOSE_BOX = (0.86, 0.20, 0.06, 0.10)
 
 
 def _has_overlay_identity(scene) -> bool:
@@ -446,12 +447,12 @@ def classify_return_scene(task_id: str, scene) -> dict[str, Any]:
     )
     if sanjie_completion:
         return {
-            "status": "wait",
+            "status": "close_known_page",
             "scene": "sanjie_completion",
-            # The live completion panel dismisses itself while OCR and
-            # template matching are still running. Clicking a coordinate from
-            # that stale frame can activate the main screen underneath.
-            "reason": "sanjie_completion_dismissing",
+            "action_id": "close:sanjie_completion",
+            # The settlement panel has a fixed red X.  Its identity requires
+            # independent progress, reward and completion-text evidence above.
+            "box": _relative_box(scene.image_size, *_SANJIE_COMPLETION_CLOSE_BOX),
         }
 
     if task_id == "shimen" and _find_region(

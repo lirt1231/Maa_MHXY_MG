@@ -657,7 +657,7 @@ class ReturnToMainWorkflowTests(unittest.TestCase):
             [[420, 520, 180, 48], [785, 190, 43, 57], [821, 466, 32, 37]],
         )
 
-    def test_live_sanjie_completion_waits_for_self_dismissal_without_clicking(self):
+    def test_live_sanjie_completion_uses_its_fixed_close_after_full_identity(self):
         completion = scene(
             [
                 ("三界奇缘国", [103, 251, 46, 189]),
@@ -674,11 +674,11 @@ class ReturnToMainWorkflowTests(unittest.TestCase):
         ).execute(runtime, Guard())
 
         self.assertEqual(result.status, "confirmed")
-        self.assertEqual(result.outcome, "already_main")
-        self.assertEqual(result.clicks, 0)
-        self.assertEqual(runtime.clicks, [])
+        self.assertEqual(result.outcome, "recovered")
+        self.assertEqual(result.clicks, 1)
+        self.assertEqual(runtime.clicks[0][0], [877, 144, 61, 72])
 
-    def test_persistent_sanjie_completion_exhausts_observations_without_clicking(self):
+    def test_persistent_sanjie_completion_does_not_repeat_the_fixed_close(self):
         completion = scene(
             [
                 ("三界奇缘国", [103, 251, 46, 189]),
@@ -694,9 +694,9 @@ class ReturnToMainWorkflowTests(unittest.TestCase):
         ).execute(runtime, Guard())
 
         self.assertEqual(result.status, "failed")
-        self.assertEqual(result.reason, "返回主界面观察预算已耗尽")
-        self.assertEqual(result.clicks, 0)
-        self.assertEqual(runtime.clicks, [])
+        self.assertEqual(result.reason, "同一关闭动作不得重复")
+        self.assertEqual(result.clicks, 1)
+        self.assertEqual(len(runtime.clicks), 1)
 
     def test_sanjie_fixed_close_requires_all_terminal_anchors(self):
         incomplete = scene(
