@@ -85,7 +85,7 @@ def snapshot_process(
 def task_process(status="completed", *, task_id="sanjieqiyuan", settlement_reward=None):
     payload = (
         {"task_id": task_id, "status": status, "actions": 2, "clicks": 2}
-        if task_id == "baotu"
+        if task_id in {"baotu", "shimen"}
         else {
             "task_id": task_id,
             "status": status,
@@ -194,6 +194,9 @@ class TaskResourceRunnerTests(unittest.TestCase):
     def start_kaogu(self):
         return self.manager.start("kaogu", {}, checklist_confirmed=True)
 
+    def start_shimen(self):
+        return self.manager.start("shimen", {}, checklist_confirmed=True)
+
     def start_huishi(self):
         with patch("dashboard.runner.ensure_task_available"):
             return self.manager.start(
@@ -231,6 +234,30 @@ class TaskResourceRunnerTests(unittest.TestCase):
         self.assertEqual(current["resourceYield"]["silverDelta"], 250)
         stored = self.database.recent_runs(1)[0]
         self.assertEqual(stored["resourceYield"], current["resourceYield"])
+
+    def test_confirmed_shimen_recovery_records_after_resources(self):
+        processes = [
+            snapshot_process(
+                "before", captured_at="2026-08-13T06:04:46+00:00",
+                experience=152243979, gold=822658, silver=5441209,
+            ),
+            task_process(task_id="shimen"),
+            recovery_process(),
+            snapshot_process(
+                "after", captured_at="2026-08-13T06:10:54+00:00",
+                experience=153021599, gold=822658, silver=5446183,
+            ),
+        ]
+        with patch("dashboard.runner.subprocess.Popen", side_effect=processes) as popen:
+            self.start_shimen()
+            current = self.wait_for(lambda run: run["status"] == "succeeded")
+
+        self.assertEqual(popen.call_count, 4)
+        self.assertEqual(current["homeRecovery"]["status"], "confirmed")
+        self.assertEqual(current["resourceYield"]["attributionStatus"], "reliable")
+        self.assertEqual(current["resourceYield"]["experienceDelta"], 777620)
+        self.assertEqual(current["resourceYield"]["silverDelta"], 4974)
+        self.assertEqual(current["resourceYield"]["goldDelta"], 0)
 
     def test_already_completed_does_not_capture_after_or_report_zero(self):
         processes = [
