@@ -1121,6 +1121,20 @@ class KaoguSceneTests(unittest.TestCase):
         self.assertEqual(decision["status"], "dig")
         self.assertEqual(no_shovel["status"], "wait_for_dig")
 
+    def test_dig_ignores_the_normal_temporary_bag_panel(self):
+        decision = classify_kaogu_scene(
+            [
+                text("临时道具栏", (520, 150, 150, 36)),
+                text("洛阳铲", (1040, 510, 58, 23)),
+                text("挖掘", (1044, 550, 101, 51)),
+            ],
+            {},
+            IMAGE_SIZE,
+            phase="digging",
+        )
+
+        self.assertEqual(decision, {"status": "dig", "box": [1044, 550, 101, 51]})
+
     def test_manual_mode_digs_with_any_selected_tool(self):
         decision = classify_kaogu_scene(
             [text("挖掘", (1044, 550, 101, 51))],

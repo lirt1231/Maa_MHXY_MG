@@ -397,18 +397,6 @@ def classify_kaogu_scene(
     if archaeology_product:
         return {"status": "wait_for_dig", "reason": "archaeology_product"}
 
-    temporary_bag = find_items(
-        texts,
-        r"临时(?:道具|物品)(?:栏|包裹)",
-        image_size,
-        {"min_x": 0.3, "max_x": 0.7, "max_y": 0.4},
-    )
-    if temporary_bag:
-        return {
-            "status": "close_temporary_bag",
-            "box": _relative_box(image_size, 0.655, 0.205, 0.045, 0.07),
-        }
-
     inventory_title = find_items(
         texts,
         r"物品",
