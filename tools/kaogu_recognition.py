@@ -397,6 +397,18 @@ def classify_kaogu_scene(
     if archaeology_product:
         return {"status": "wait_for_dig", "reason": "archaeology_product"}
 
+    dig_buttons = find_items(
+        texts,
+        r"挖掘",
+        image_size,
+        {"min_x": 0.72, "min_y": 0.62},
+    )
+    right_shovel_labels = find_items(
+        texts,
+        r"^洛阳铲$",
+        image_size,
+        {"min_x": 0.72, "min_y": 0.6, "max_y": 0.9},
+    )
     inventory_title = find_items(
         texts,
         r"物品",
@@ -421,6 +433,18 @@ def classify_kaogu_scene(
             "box": _inventory_close_box(valid_box(inventory_tabs[0])),
         }
 
+    temporary_bag = find_items(
+        texts,
+        r"临时(?:道具|物品)(?:栏|包裹)",
+        image_size,
+        {"min_x": 0.3, "max_x": 0.7, "max_y": 0.4},
+    )
+    if temporary_bag and not dig_buttons:
+        return {
+            "status": "close_temporary_bag",
+            "box": _relative_box(image_size, 0.655, 0.205, 0.045, 0.07),
+        }
+
     shovel = _template_box(
         templates,
         "shovel",
@@ -429,18 +453,6 @@ def classify_kaogu_scene(
         max_x=0.95,
         min_y=0.15,
         max_y=0.8,
-    )
-    dig_buttons = find_items(
-        texts,
-        r"挖掘",
-        image_size,
-        {"min_x": 0.72, "min_y": 0.62},
-    )
-    right_shovel_labels = find_items(
-        texts,
-        r"^洛阳铲$",
-        image_size,
-        {"min_x": 0.72, "min_y": 0.6, "max_y": 0.9},
     )
     if tool_mode == "selected" and phase == "digging" and dig_buttons:
         return {

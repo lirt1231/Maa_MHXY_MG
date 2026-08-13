@@ -132,6 +132,7 @@ DEFAULT_ACTION_LIMITS = {
     "select_shovel": 2,
     "use_shovel": 2,
     "start_archaeology": 1,
+    "close_temporary_bag": 1,
     "close_inventory": 2,
     "open_inventory_for_sale": 1,
     "organize_inventory": 1,
@@ -169,6 +170,7 @@ def next_kaogu_phase(status: str, phase: str) -> str:
         "select_shovel": "tool_select",
         "use_shovel": "tool_ready",
         "start_archaeology": "digging",
+        "close_temporary_bag": phase,
     "dig": "digging",
     "dig_confirmed_on_main": "enter",
         "open_inventory_for_sale": "sale_inventory_normalize",
@@ -678,6 +680,12 @@ class KaoguWorkflow:
                 if wait_polls >= self.max_wait_polls:
                     raise RuntimeError("长时间未出现下一次挖掘按钮，已安全停止")
                 context.waiter.wait(0.6)
+                continue
+            if status == "close_temporary_bag" and pending_dig:
+                # A submitted dig can display the bag before its completion
+                # evidence arrives. Keep waiting rather than interacting with
+                # that overlay or retrying the accepted click.
+                context.waiter.wait(0.8)
                 continue
             if status == "unknown":
                 unknown_polls += 1

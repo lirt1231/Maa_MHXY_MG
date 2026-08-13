@@ -1239,6 +1239,24 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
         click_reasons = [entry[-1] for entry in adapter.trace if entry[0] == "click"]
         self.assertEqual(click_reasons, ["进行第 1 次挖掘", "进行第 1 次挖掘"])
 
+    def test_kaogu_waits_for_pending_dig_before_closing_temporary_bag(self):
+        adapter = _DesktopAdapterA([
+            _scene("dig"),
+            _scene("close_temporary_bag"),
+            _scene("dig_confirmed"),
+        ])
+        workflow = KaoguWorkflow(
+            target_digs=1,
+            max_steps=3,
+            classifier=_kaogu_classifier,
+        )
+
+        result = workflow.execute(WorkflowContext(adapter, adapter))
+
+        self.assertEqual(result.status, "completed")
+        click_reasons = [entry[-1] for entry in adapter.trace if entry[0] == "click"]
+        self.assertEqual(click_reasons, ["进行第 1 次挖掘"])
+
     def test_kaogu_does_not_downgrade_capture_failure_before_target(self):
         adapter = _FailingSceneAdapter([])
         workflow = KaoguWorkflow(target_digs=1, classifier=_kaogu_classifier)

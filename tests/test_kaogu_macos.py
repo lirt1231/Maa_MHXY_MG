@@ -1135,6 +1135,16 @@ class KaoguSceneTests(unittest.TestCase):
 
         self.assertEqual(decision, {"status": "dig", "box": [1044, 550, 101, 51]})
 
+    def test_temporary_bag_closes_only_when_it_hides_the_dig_panel(self):
+        decision = classify_kaogu_scene(
+            [text("临时道具栏", (520, 150, 150, 36))],
+            {},
+            IMAGE_SIZE,
+            phase="digging",
+        )
+
+        self.assertEqual(decision["status"], "close_temporary_bag")
+
     def test_manual_mode_digs_with_any_selected_tool(self):
         decision = classify_kaogu_scene(
             [text("挖掘", (1044, 550, 101, 51))],
