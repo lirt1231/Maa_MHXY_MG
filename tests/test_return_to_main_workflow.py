@@ -192,7 +192,7 @@ class ReturnToMainWorkflowTests(unittest.TestCase):
 
         self.assertEqual(result.status, "confirmed")
         self.assertEqual(result.outcome, "recovered")
-        self.assertEqual(runtime.clicks[0][0], [877, 144, 61, 72])
+        self.assertEqual(runtime.clicks[0][0], [877, 169, 61, 72])
 
     def test_welfare_scratch_and_parent_are_distinct_close_actions(self):
         scratch = scene(

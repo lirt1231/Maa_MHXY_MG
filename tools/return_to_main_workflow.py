@@ -76,7 +76,7 @@ OVERLAY_PATTERN = re.compile(
 # the click target for these controls.
 _TEMPORARY_BAG_CLOSE_BOX = (0.655, 0.205, 0.045, 0.070)
 _SANJIE_COMPLETION_CLOSE_BOX = (0.86, 0.20, 0.06, 0.10)
-_XIANGSHI_SETTLEMENT_CLOSE_BOX = (0.86, 0.20, 0.06, 0.10)
+_XIANGSHI_SETTLEMENT_CLOSE_BOX = (0.86, 0.235, 0.06, 0.10)
 
 
 def _has_overlay_identity(scene) -> bool:
