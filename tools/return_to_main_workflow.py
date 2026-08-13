@@ -239,6 +239,27 @@ def _full_team_panel_present(scene) -> bool:
     return bool(has_header and has_side_tabs)
 
 
+def _collapsed_main_screen(scene) -> bool:
+    """Recognize the main UI when its task/team ribbon is not OCR-readable."""
+    has_location = any(
+        re.fullmatch(r"[\u4e00-\u9fff]{2,8}", str(item.get("text", "")))
+        and valid_box(item)
+        and in_region(item, scene.image_size, min_x=0.05, max_x=0.22, max_y=0.12)
+        for item in _texts(scene)
+    )
+    has_left_menu = _find_region(
+        scene, r"^(?:福利|商城)$", max_x=0.18, min_y=0.08, max_y=0.42
+    )
+    toolbar_count = sum(
+        bool(re.search(r"活动|排行|挂机|社群", str(item.get("text", ""))))
+        and valid_box(item)
+        and in_region(item, scene.image_size, min_x=0.15, max_x=0.62, max_y=0.14)
+        for item in _texts(scene)
+    )
+    has_backpack = _find_region(scene, r"^包[裹里]$", min_x=0.88, min_y=0.76)
+    return bool(has_location and has_left_menu and toolbar_count >= 2 and has_backpack)
+
+
 def _shimen_quick_reward_on_main_screen(scene, anchors: list[str]) -> bool:
     """Recognize the non-modal Shimen reward card that remains on the main UI.
 
@@ -374,6 +395,9 @@ def classify_return_scene(task_id: str, scene) -> dict[str, Any]:
             "status": "unknown",
             "reason": "team_panel_identity_incomplete",
         }
+
+    if _collapsed_main_screen(scene) and not _has_overlay_identity(scene):
+        return {"status": "main_screen", "anchors": ["collapsed_main_screen"]}
 
     quick_reward_on_main_screen = (
         task_id == "shimen" and _shimen_quick_reward_on_main_screen(scene, anchors)

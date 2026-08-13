@@ -44,7 +44,7 @@ class MainScreenConfirmation:
         ):
             return "failed", self, "两次主界面截图标定不一致"
         shared_anchors = sorted(set(self.first_anchors) & set(anchors))
-        if len(shared_anchors) < 3:
+        if "collapsed_main_screen" not in shared_anchors and len(shared_anchors) < 3:
             return "failed", self, "两帧主界面锚点不一致"
         return (
             "confirmed",

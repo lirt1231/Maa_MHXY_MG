@@ -434,6 +434,28 @@ class ReturnToMainWorkflowTests(unittest.TestCase):
             "activity_toolbar", "left_menu", "task_team_tabs"
         ])
 
+    def test_collapsed_main_screen_confirms_with_two_composite_frames(self):
+        def collapsed_main():
+            return scene(
+                [
+                    ("宝象国", [102, 29, 52, 23]),
+                    ("福利", [14, 128, 32, 17]),
+                    ("活动", [260, 50, 38, 19]),
+                    ("排行", [320, 50, 38, 19]),
+                    ("包裹", [971, 620, 32, 17]),
+                ]
+            )
+
+        runtime = Runtime([collapsed_main(), collapsed_main()])
+        result = ReturnToMainWorkflow("sanjieqiyuan", wait_seconds=0).execute(
+            runtime, Guard()
+        )
+
+        self.assertEqual(result.status, "confirmed")
+        self.assertEqual(result.outcome, "already_main")
+        self.assertEqual(result.evidence["anchors"], ["collapsed_main_screen"])
+        self.assertEqual(runtime.clicks, [])
+
     def test_transient_completion_overlay_waits_without_input(self):
         transient = main_scene()
         transient.texts.extend(
