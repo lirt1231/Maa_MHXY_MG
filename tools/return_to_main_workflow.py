@@ -250,14 +250,16 @@ def _collapsed_main_screen(scene) -> bool:
     has_left_menu = _find_region(
         scene, r"^(?:福利|商城)$", max_x=0.18, min_y=0.08, max_y=0.42
     )
-    toolbar_count = sum(
-        bool(re.search(r"活动|排行|挂机|社群", str(item.get("text", ""))))
-        and valid_box(item)
-        and in_region(item, scene.image_size, min_x=0.15, max_x=0.62, max_y=0.14)
+    toolbar_labels = {
+        label
         for item in _texts(scene)
-    )
+        if valid_box(item)
+        and in_region(item, scene.image_size, min_x=0.15, max_x=0.62, max_y=0.14)
+        for label in ("活动", "排行", "挂机", "社群")
+        if label in str(item.get("text", ""))
+    }
     has_backpack = _find_region(scene, r"^包[裹里]$", min_x=0.88, min_y=0.76)
-    return bool(has_location and has_left_menu and toolbar_count >= 2 and has_backpack)
+    return bool(has_location and has_left_menu and len(toolbar_labels) >= 2 and has_backpack)
 
 
 def _shimen_quick_reward_on_main_screen(scene, anchors: list[str]) -> bool:
