@@ -151,7 +151,44 @@ def build_verification_prompt(
         '{"answer":"A|B|C|D","confidence":0.95,'
         '"evidence_ids":["web-1"],"reason":"证据事实及其与所选选项的对应关系"}\n'
         "输入：\n"
-        + json.dumps(payload, ensure_ascii=False)
+    + json.dumps(payload, ensure_ascii=False)
+    )
+
+
+def build_xiangshi_prompt(
+    question,
+    options,
+    candidates,
+    knowledge_candidates=None,
+    web_evidence=None,
+):
+    """Build the slower, common-knowledge-oriented 乡试 prompt.
+
+    Search is still supplied on every non-bank question, but unlike a timed
+    会试 answer it is not the sole acceptable basis for a sound answer.
+    """
+    model_question = re.sub(r"^剩余时间\s*\d*", "", str(question or "").strip())
+    payload = {
+        "question": model_question.strip("-—:：,，.。?？!！ "),
+        "options": options,
+        "similar_questions": [
+            {"question": item["question"], "answers": item["answers"], "similarity": item["similarity"]}
+            for item in candidates
+        ],
+        "knowledge_evidence": list(knowledge_candidates or []),
+        "web_evidence": list(web_evidence or []),
+    }
+    return (
+        "你正在回答梦幻西游手游科举乡试单选题。乡试主要考察常识和基础知识，"
+        "请先完整理解题干与每个选项，再选择最正确的选项字母。网页搜索结果、题库相似题和知识片段"
+        "都只是辅助材料；若它们不完整、无关或互相矛盾，可以依据可靠常识和排除法作答。\n"
+        "规则：\n"
+        "1. 网页证据直接且一致时优先采用；网页答案字母必须先还原为答案文本，再映射到当前选项。\n"
+        "2. 没有可用网页证据时 evidence_ids 必须为空，并在 reason 中说明采用的常识或排除依据；不得伪造引用。\n"
+        "3. confidence 必须如实反映把握。无法可靠判断时也要给出最可能选项和低置信度，供人工复核。\n"
+        "4. reason 只写一到两句。只输出一个 JSON 对象，不要输出 Markdown：\n"
+        '{"answer":"A|B|C|D","confidence":0.85,"evidence_ids":["web-1"],"reason":"简要依据"}\n'
+        "输入：\n" + json.dumps(payload, ensure_ascii=False)
     )
 
 
@@ -261,6 +298,28 @@ def validate_forced_model_decision(decision, valid_choices=VALID_CHOICES, label=
         return None, f"{label}回复的选项无效"
     if not decision.get("reason", "").strip():
         return None, f"{label}没有提供证据解释或猜测依据"
+    return answer, None
+
+
+def validate_xiangshi_model_decision(
+    decision,
+    valid_choices=VALID_CHOICES,
+    minimum_confidence=0.70,
+    label="模型",
+):
+    """Accept a sufficiently confident 乡试 decision without web citations."""
+    if not decision:
+        return None, f"{label}回复中没有有效选项"
+    answer = decision.get("answer")
+    if answer not in valid_choices:
+        return None, f"{label}回复的选项无效"
+    if decision.get("confidence", 0.0) < minimum_confidence:
+        return None, (
+            f"{label}置信度不足:{decision.get('confidence', 0.0):.2f}"
+            f"<{minimum_confidence:.2f}"
+        )
+    if not decision.get("reason", "").strip():
+        return None, f"{label}没有提供作答依据"
     return answer, None
 
 

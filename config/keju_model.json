@@ -11,5 +11,19 @@
         "limit_per_provider": 3,
         "providers": ["duckduckgo", "bing_rss"]
     },
-    "extra_body": {}
+    "extra_body": {},
+    "exam_profiles": {
+        "xiangshi": {
+            "model": "gemini-3.5-flash",
+            "timeout": 12,
+            "max_tokens": 512,
+            "minimum_confidence": 0.70
+        },
+        "huishi": {
+            "model": "gemini-3-flash-preview-nothinking",
+            "timeout": 6,
+            "max_tokens": 220,
+            "minimum_confidence": 0.62
+        }
+    }
 }

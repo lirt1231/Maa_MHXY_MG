@@ -16,6 +16,7 @@ from utils import logger
 
 from .keju_answer_core import (
     VALID_CHOICES,
+    build_xiangshi_prompt,
     build_verification_prompt,
     infer_direct_evidence_option,
     knowledge_fallback,
@@ -24,6 +25,7 @@ from .keju_answer_core import (
     parse_model_decision,
     resolve_model_decision,
     scale_roi,
+    validate_xiangshi_model_decision,
 )
 from .searchAnswer import search_candidates
 from .keju_knowledge import search_knowledge
@@ -299,7 +301,7 @@ def _request_model(url, api_key, model, prompt, timeout, extra_body=None):
             {"role": "user", "content": prompt},
         ],
         "temperature": 0,
-        "max_tokens": 220,
+        "max_tokens": int(os.environ.get("MAA_KEJU_MAX_TOKENS", "220")),
         "stream": False,
     }
     request_body.update(extra_body or {})
@@ -372,6 +374,7 @@ class KejuHybridAnswer(CustomRecognition):
         timings = _StageTimings()
         self.last_status = "running"
         self.last_reason = ""
+        self.last_manual_review = None
         try:
             return self._analyze(context, argv, timings)
         except RuntimeError as exc:
@@ -671,11 +674,15 @@ class KejuHybridAnswer(CustomRecognition):
         model_reason = ""
         model_error = None
         model_source = None
+        xiangshi_mode = expected_exam_type == "xiangshi"
         force_model_answer = expected_exam_type == "huishi"
         minimum_confidence = float(
             os.environ.get(
                 "MAA_KEJU_MODEL_MIN_CONFIDENCE",
-                attach.get("model_minimum_confidence", 0.62),
+                attach.get(
+                    "model_minimum_confidence",
+                    0.70 if xiangshi_mode else 0.62,
+                ),
             )
         )
         valid_web_ids = {item["id"] for item in web_result["evidence"]}
@@ -687,16 +694,25 @@ class KejuHybridAnswer(CustomRecognition):
                 model_confidence = decision["confidence"]
                 model_evidence_ids = decision["evidence_ids"]
                 model_reason = decision["reason"]
-            model_answer, forced_guess, model_error = resolve_model_decision(
-                decision,
-                valid_web_ids,
-                minimum_confidence,
-                label,
-                evidence=web_result["evidence"],
-                options=valid_options,
-                question=question,
-                force_answer=force_model_answer,
-            )
+            if xiangshi_mode:
+                model_answer, model_error = validate_xiangshi_model_decision(
+                    decision,
+                    tuple(valid_options),
+                    minimum_confidence,
+                    label,
+                )
+                forced_guess = False
+            else:
+                model_answer, forced_guess, model_error = resolve_model_decision(
+                    decision,
+                    valid_web_ids,
+                    minimum_confidence,
+                    label,
+                    evidence=web_result["evidence"],
+                    options=valid_options,
+                    question=question,
+                    force_answer=force_model_answer,
+                )
             if forced_guess:
                 model_source = "huishi_forced_model_guess"
             elif model_error and model_error.startswith("证据直接纠偏"):
@@ -727,23 +743,17 @@ class KejuHybridAnswer(CustomRecognition):
             model_error = "题库精确命中，跳过远端模型"
         elif trusted_knowledge_answer:
             model_error = "知识库高置信度命中，跳过远端模型"
-        elif api_key and url and model and (
-            web_result["evidence"] or force_model_answer
-        ):
+        elif api_key and url and model and (web_result["evidence"] or force_model_answer or xiangshi_mode):
             prompt = None
             try:
                 with timings.track("parse_decision"):
-                    prompt = build_verification_prompt(
-                        web_result["query"] or question,
-                        valid_options,
+                    prompt_builder = build_xiangshi_prompt if xiangshi_mode else build_verification_prompt
+                    prompt = prompt_builder(
+                        web_result["query"] or question, valid_options,
                         [item for item in candidates if item["similarity"] >= 50],
-                        [
-                            item
-                            for item in knowledge_candidates
-                            if item["similarity"] >= 50
-                        ],
+                        [item for item in knowledge_candidates if item["similarity"] >= 50],
                         web_result["evidence"],
-                        force_answer=force_model_answer,
+                        **({} if xiangshi_mode else {"force_answer": force_model_answer}),
                     )
                 with timings.track("model_request"):
                     model_content = _request_model(
@@ -775,22 +785,16 @@ class KejuHybridAnswer(CustomRecognition):
                             f"{api_error}; Codex fallback "
                             f"{type(codex_exc).__name__}: {codex_exc}"
                         )
-        elif os.environ.get("MAA_KEJU_USE_CODEX") == "1" and (
-            web_result["evidence"] or force_model_answer
-        ):
+        elif os.environ.get("MAA_KEJU_USE_CODEX") == "1" and (web_result["evidence"] or force_model_answer or xiangshi_mode):
             try:
                 with timings.track("parse_decision"):
-                    prompt = build_verification_prompt(
-                        web_result["query"] or question,
-                        valid_options,
+                    prompt_builder = build_xiangshi_prompt if xiangshi_mode else build_verification_prompt
+                    prompt = prompt_builder(
+                        web_result["query"] or question, valid_options,
                         [item for item in candidates if item["similarity"] >= 50],
-                        [
-                            item
-                            for item in knowledge_candidates
-                            if item["similarity"] >= 50
-                        ],
+                        [item for item in knowledge_candidates if item["similarity"] >= 50],
                         web_result["evidence"],
-                        force_answer=force_model_answer,
+                        **({} if xiangshi_mode else {"force_answer": force_model_answer}),
                     )
                 request_codex_decision(prompt)
             except (OSError, subprocess.SubprocessError, ValueError) as exc:
@@ -819,6 +823,25 @@ class KejuHybridAnswer(CustomRecognition):
                 else "question_bank_fallback"
             )
         if final_answer not in VALID_CHOICES or final_answer not in valid_options:
+            self.last_manual_review = {
+                "question": question,
+                "options": valid_options,
+                "model": {
+                    "answer": model_answer or "",
+                    "confidence": model_confidence,
+                    "evidenceIds": model_evidence_ids,
+                    "reason": model_reason,
+                    "error": model_error,
+                    "source": model_source,
+                    "rawResponse": locals().get("model_content", ""),
+                },
+                "webSearch": {
+                    "query": web_result["query"],
+                    "queries": web_result.get("queries", []),
+                    "evidence": web_result["evidence"],
+                },
+                "reason": model_error or "没有可用于自动作答的答案",
+            }
             self.last_status = "unreliable"
             self.last_question = question
             self.last_options = valid_options

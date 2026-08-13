@@ -55,6 +55,20 @@ EXAM_FINAL_QUESTION_NUMBERS = {
     "xiangshi": 10,
     "huishi": 20,
 }
+DEFAULT_MODEL_PROFILES = {
+    "xiangshi": {
+        "model": "gemini-3.5-flash",
+        "timeout": 12,
+        "max_tokens": 512,
+        "minimum_confidence": 0.70,
+    },
+    "huishi": {
+        "model": "gemini-3-flash-preview-nothinking",
+        "timeout": 6,
+        "max_tokens": 220,
+        "minimum_confidence": 0.62,
+    },
+}
 MAX_WAITING_POLLS = 180
 MAX_SAME_QUESTION_POLLS = 8
 HUI_SHI_REWARD_POLLS = 8
@@ -137,6 +151,17 @@ def load_local_model_config():
     if not path.exists():
         return {}
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def model_profile_for_exam(config: dict, exam_type: str) -> dict:
+    """Merge shared local configuration with an optional exam profile."""
+    profile = dict(DEFAULT_MODEL_PROFILES.get(exam_type, {}))
+    profile.update(config)
+    profiles = config.get("exam_profiles", {})
+    if isinstance(profiles, dict) and isinstance(profiles.get(exam_type), dict):
+        profile.update(profiles[exam_type])
+    profile.pop("exam_profiles", None)
+    return profile
 
 
 def read_keychain_password(service, account):
@@ -472,7 +497,7 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
     from maa.toolkit import Toolkit
     from macos_window_adapter import NativeMacOSInput, WindowCapture
 
-    local_config = load_local_model_config()
+    local_config = model_profile_for_exam(load_local_model_config(), args.exam_type)
     os.environ["MAA_DIRECT_RESOURCE"] = "1"
     os.environ["MAA_KEJU_RECOGNIZE_ONLY"] = "1"
     os.environ["MAA_KEJU_EXAM_TYPE"] = args.exam_type
@@ -484,6 +509,8 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
         os.environ["MAA_KEJU_MODEL"] = model
     if local_config.get("timeout"):
         os.environ["MAA_KEJU_TIMEOUT"] = str(local_config["timeout"])
+    if local_config.get("max_tokens"):
+        os.environ["MAA_KEJU_MAX_TOKENS"] = str(local_config["max_tokens"])
     if local_config.get("extra_body"):
         os.environ["MAA_KEJU_MODEL_EXTRA_BODY"] = json.dumps(
             local_config["extra_body"], ensure_ascii=False

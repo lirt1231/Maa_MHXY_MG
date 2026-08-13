@@ -15,6 +15,7 @@ from tools.run_keju_macos import (
     main,
     parse_args,
     parse_question_round,
+    model_profile_for_exam,
     recognize_keju_frame,
     should_end_loop,
     stable_question_key,
@@ -23,6 +24,20 @@ from tools.run_keju_macos import (
 
 
 class KejuArgumentTests(unittest.TestCase):
+    def test_exam_profile_overrides_only_the_selected_exam_fields(self):
+        profile = model_profile_for_exam({
+            "url": "https://example.test/v1/chat/completions",
+            "model": "shared", "timeout": 6,
+            "exam_profiles": {
+                "xiangshi": {"model": "gemini-3.5-flash", "timeout": 12},
+                "huishi": {"model": "gemini-3-flash-preview-nothinking"},
+            },
+        }, "xiangshi")
+
+        self.assertEqual(profile["model"], "gemini-3.5-flash")
+        self.assertEqual(profile["timeout"], 12)
+        self.assertEqual(profile["url"], "https://example.test/v1/chat/completions")
+        self.assertNotIn("exam_profiles", profile)
     def test_xiangshi_defaults_to_ten_answers(self):
         with patch(
             "tools.run_keju_macos.sys.argv",

@@ -220,6 +220,21 @@ class HybridAnswerTests(unittest.TestCase):
         self.assertIn("必须选择最可能的一个选项", prompt)
         self.assertIn("不得伪造引用", prompt)
 
+    def test_xiangshi_common_knowledge_prompt_does_not_require_web_citation(self):
+        from custom.recognition.keju_answer_core import build_xiangshi_prompt, validate_xiangshi_model_decision
+
+        prompt = build_xiangshi_prompt(
+            "常识题", {"A": "甲", "B": "乙", "C": "丙", "D": "丁"}, [], [], []
+        )
+        answer, error = validate_xiangshi_model_decision({
+            "answer": "B", "confidence": 0.70, "evidence_ids": [],
+            "reason": "依据基础常识选择 B。",
+        })
+
+        self.assertIn("常识和基础知识", prompt)
+        self.assertIn("evidence_ids 必须为空", prompt)
+        self.assertEqual((answer, error), ("B", None))
+
     def test_huishi_can_transparently_force_a_reasoned_model_guess(self):
         guess = {
             "answer": "D",
