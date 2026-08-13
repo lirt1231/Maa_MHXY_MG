@@ -35,6 +35,7 @@ GEOMETRY_RETRY_WAIT_SECONDS = 1.0
 GEOMETRY_INPUT_ATTEMPTS = 3
 GEOMETRY_INPUT_RETRY_WAIT_SECONDS = 0.05
 FOCUS_ERROR = -7
+WINDOW_RESOLUTION_ERROR = -4
 ACTIVATE_GAME_SCRIPT = (
     'tell application "System Events" to set frontmost of first application process '
     'whose bundle identifier is "com.netease.my" to true'
@@ -289,6 +290,12 @@ class NativeMacOSInput:
 
     def _retry_after_focus_failure(self, operation):
         result = operation()
+        if result == WINDOW_RESOLUTION_ERROR:
+            refreshed_window_id = self.find_window_id()
+            if not refreshed_window_id:
+                return result
+            self.bind_window(refreshed_window_id)
+            return operation()
         if result != FOCUS_ERROR:
             return result
         activated = subprocess.run(

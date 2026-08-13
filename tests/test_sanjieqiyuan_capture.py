@@ -220,7 +220,7 @@ class NativeMacOSInputBindingTests(unittest.TestCase):
         sleep.assert_called_once_with(0.1)
 
     @patch("tools.macos_window_adapter.subprocess.run")
-    def test_click_does_not_retry_non_focus_errors(self, run_command):
+    def test_click_does_not_retry_resolution_error_when_no_game_window_is_visible(self, run_command):
         native_input = self.input_stub(314)
         native_input.click_function.return_value = -4
 
@@ -228,7 +228,23 @@ class NativeMacOSInputBindingTests(unittest.TestCase):
             native_input.click(100, 200, (1020, 718))
 
         native_input.click_function.assert_called_once()
+        native_input.find_window_function.assert_called_once_with(
+            b"com.netease.my", "梦幻西游".encode()
+        )
         run_command.assert_not_called()
+
+    def test_click_refreshes_the_bound_game_window_after_resolution_error(self):
+        native_input = self.input_stub(314)
+        native_input.find_window_function.return_value = 271
+        native_input.click_function.side_effect = [-4, 0]
+
+        native_input.click(100, 200, (1020, 718))
+
+        self.assertEqual(
+            [call.args[0] for call in native_input.click_function.call_args_list],
+            [314, 271],
+        )
+        self.assertEqual(native_input.window_id, 271)
 
     def test_rejects_invalid_window_binding(self):
         native_input = self.input_stub()
