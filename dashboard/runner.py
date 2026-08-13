@@ -1455,6 +1455,7 @@ class RunnerManager:
                     cwd=ROOT,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
+                    stdin=subprocess.PIPE,
                     text=True,
                     encoding="utf-8",
                     errors="replace",

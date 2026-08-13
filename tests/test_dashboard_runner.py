@@ -108,6 +108,17 @@ class RunnerStopBarrierTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "没有可提交"):
             self.manager.submit_manual_review("xiangshi-review", "request-1", "C")
 
+    def test_formal_task_process_keeps_stdin_for_xiangshi_manual_review(self):
+        process = _FakeProcess()
+
+        with patch("dashboard.runner.subprocess.Popen", return_value=process) as popen:
+            self.manager.start("keju", {}, checklist_confirmed=True)
+            self._wait_for_status("running")
+            process.exit(0)
+
+        self._wait_for_status("failed")
+        self.assertIs(popen.call_args.kwargs["stdin"], subprocess.PIPE)
+
     def _wait_for_status(self, expected: str, timeout: float = 1.0):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
