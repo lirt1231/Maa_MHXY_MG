@@ -1200,6 +1200,45 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
             "capture geometry changed during cleanup",
         )
 
+    def test_kaogu_next_dig_button_confirms_a_prior_accepted_dig_with_missed_ocr(self):
+        adapter = _DesktopAdapterA([
+            _scene("dig"),
+            _scene("wait_for_dig"),
+            _scene("wait_for_dig"),
+            _scene("dig"),
+            _scene("dig_confirmed"),
+        ])
+        workflow = KaoguWorkflow(
+            target_digs=2,
+            max_steps=5,
+            classifier=_kaogu_classifier,
+        )
+
+        result = workflow.execute(WorkflowContext(adapter, adapter))
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.payload["digs"], 2)
+        click_reasons = [entry[-1] for entry in adapter.trace if entry[0] == "click"]
+        self.assertEqual(click_reasons, ["进行第 1 次挖掘", "进行第 2 次挖掘"])
+
+    def test_kaogu_retries_only_when_the_pending_dig_button_stays_visible(self):
+        adapter = _DesktopAdapterA([
+            _scene("dig"),
+            _scene("dig"),
+            _scene("dig_confirmed"),
+        ])
+        workflow = KaoguWorkflow(
+            target_digs=1,
+            max_steps=3,
+            classifier=_kaogu_classifier,
+        )
+
+        result = workflow.execute(WorkflowContext(adapter, adapter))
+
+        self.assertEqual(result.status, "completed")
+        click_reasons = [entry[-1] for entry in adapter.trace if entry[0] == "click"]
+        self.assertEqual(click_reasons, ["进行第 1 次挖掘", "进行第 1 次挖掘"])
+
     def test_kaogu_does_not_downgrade_capture_failure_before_target(self):
         adapter = _FailingSceneAdapter([])
         workflow = KaoguWorkflow(target_digs=1, classifier=_kaogu_classifier)

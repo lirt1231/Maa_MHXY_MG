@@ -267,6 +267,8 @@ class KaoguWorkflow:
         normalize_drags = 0
         scan_drags = 0
         pending_dig = False
+        dig_accepted = False
+        dig_absent_polls = 0
         pending_dig_attempts = 0
         pending_dig_polls = 0
         start_main_polls = 0
@@ -290,6 +292,24 @@ class KaoguWorkflow:
         activate_antique = actions["activate_antique"]
         normalize_inventory = actions["normalize_inventory"]
         scan_inventory = actions["scan_inventory"]
+
+        def confirm_pending_dig(*, evidence: str) -> None:
+            nonlocal digs, pending_dig, dig_accepted, dig_absent_polls
+            nonlocal pending_dig_attempts, pending_dig_polls, phase
+            digs += 1
+            pending_dig = False
+            dig_accepted = False
+            dig_absent_polls = 0
+            pending_dig_attempts = 0
+            pending_dig_polls = 0
+            dig.reset_repetition()
+            context.emit(
+                "dig_confirmed",
+                digs=digs,
+                targetDigs=self.target_digs,
+                evidence=evidence,
+            )
+            phase = "sale_wait_main" if digs >= self.target_digs else "digging"
 
         def result(
             status: str,
@@ -557,21 +577,7 @@ class KaoguWorkflow:
                 continue
             if status == "dig_confirmed":
                 if pending_dig:
-                    digs += 1
-                    pending_dig = False
-                    pending_dig_attempts = 0
-                    pending_dig_polls = 0
-                    dig.reset_repetition()
-                    context.emit(
-                        "dig_confirmed",
-                        digs=digs,
-                        targetDigs=self.target_digs,
-                    )
-                    phase = (
-                        "sale_wait_main"
-                        if digs >= self.target_digs
-                        else "digging"
-                    )
+                    confirm_pending_dig(evidence="archaeology_settlement")
                 context.waiter.wait(0.8)
                 continue
             if status == "dig_confirmed_on_main":
@@ -587,17 +593,7 @@ class KaoguWorkflow:
                     )
                     context.waiter.wait(0.8)
                     continue
-                digs += 1
-                pending_dig = False
-                pending_dig_attempts = 0
-                pending_dig_polls = 0
-                dig.reset_repetition()
-                context.emit(
-                    "dig_confirmed",
-                    digs=digs,
-                    targetDigs=self.target_digs,
-                    evidence="main_screen_personal_receipt",
-                )
+                confirm_pending_dig(evidence="main_screen_personal_receipt")
                 if digs >= self.target_digs:
                     phase = "sale_wait_main"
                 else:
@@ -660,6 +656,8 @@ class KaoguWorkflow:
             if status == "wait_for_start_pathing":
                 start_main_polls = 0
                 start_pathing_polls += 1
+                if pending_dig:
+                    dig_accepted = True
                 if start_pathing_polls > self.max_start_pathing_polls:
                     raise RuntimeError("前往考古地点长时间未结束，已安全停止并保留现场")
                 context.waiter.wait(1.0)
@@ -669,6 +667,13 @@ class KaoguWorkflow:
                 start_pathing_polls = 0
                 wait_polls += 1
                 if pending_dig:
+                    # A click can be retried only while its button remains
+                    # visible. Consecutive absent-button observations show
+                    # that the client accepted this dig, even if settlement
+                    # OCR is later missed.
+                    dig_absent_polls += 1
+                    if dig_absent_polls >= 2:
+                        dig_accepted = True
                     pending_dig_polls += 1
                     if pending_dig_polls >= self.max_wait_polls:
                         raise RuntimeError("本次考古长时间没有出现结算证据，已安全停止")
@@ -734,10 +739,19 @@ class KaoguWorkflow:
             elif status == "dig":
                 if digs >= self.target_digs:
                     return result("completed")
+                if pending_dig and dig_accepted:
+                    # The next visible button proves that the preceding click
+                    # completed. Do not spend another shovel retrying an
+                    # already accepted dig whose settlement OCR was missed.
+                    confirm_pending_dig(evidence="next_dig_button")
+                    if digs >= self.target_digs:
+                        continue
                 if pending_dig and pending_dig_attempts >= self.max_dig_attempts_per_round:
                     raise RuntimeError("本次挖掘按钮连续点击仍未进入结算，已安全停止")
                 metrics.record(dig.execute(action_context))
                 pending_dig = True
+                dig_accepted = False
+                dig_absent_polls = 0
                 pending_dig_attempts += 1
                 pending_dig_polls = 0
                 context.waiter.wait(1.8)
