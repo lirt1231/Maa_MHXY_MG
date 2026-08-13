@@ -475,6 +475,21 @@ class KaoguSceneTests(unittest.TestCase):
             {"status": "wait_for_antique_sale", "reason": "activation_pending"},
         )
 
+    def test_sale_pathing_uses_only_confirmed_antique_detail_dialog(self):
+        decision = classify_kaogu_scene(
+            [
+                text("物品", (600, 120, 70, 30)),
+                text("包裹", (1070, 180, 55, 28)),
+                text("类型：考古产品", (273, 256, 129, 26)),
+                text("使用", (380, 467, 48, 29)),
+            ],
+            {"inventory_page": (335, 5, 567, 58)},
+            IMAGE_SIZE,
+            phase="sale_pathing",
+        )
+
+        self.assertEqual(decision, {"status": "use_antique", "box": [380, 467, 48, 29]})
+
     def test_sorted_inventory_without_visible_antique_scans_next_rows(self):
         inventory = sale_flow_scenes()[1]
 

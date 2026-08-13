@@ -250,6 +250,18 @@ def _classify_antique_sale(texts, templates, image_size, phase):
         image_size,
         {"min_x": 0.3, "max_x": 0.75, "min_y": 0.35, "max_y": 0.9},
     )
+    antique_product_labels = find_items(
+        texts,
+        r"类型[:：]?考古产品",
+        image_size,
+        {"min_x": 0.1, "max_x": 0.55, "min_y": 0.25, "max_y": 0.55},
+    )
+    antique_detail_use_buttons = find_items(
+        texts,
+        r"^使用$",
+        image_size,
+        {"min_x": 0.3, "max_x": 0.55, "min_y": 0.5, "max_y": 0.8},
+    )
     organize_buttons = find_items(
         texts,
         r"^整理$",
@@ -280,12 +292,16 @@ def _classify_antique_sale(texts, templates, image_size, phase):
             "status": "close_inventory",
             "box": _inventory_close_box(valid_box(inventory_tabs[-1])),
         }
+    if phase == "sale_pathing" and antique_product_labels and antique_detail_use_buttons:
+        # Only the product detail dialog gives the generic Use label a
+        # trustworthy identity.  Its explicit archaeology-product label and
+        # the button's fixed dialog region are both required.
+        return {"status": "use_antique", "box": valid_box(antique_detail_use_buttons[-1])}
     if phase == "sale_pathing" and inventory_page:
         # The antique itself was already double-clicked from a template match.
-        # A remaining inventory view is not evidence that its generic ``使用``
-        # control belongs to that antique: it can be associated with a normal
-        # equipment or feature icon instead.  Do not issue a second click
-        # until the client explicitly shows pathing or the antique sale page.
+        # A remaining inventory view is not evidence that a generic ``使用``
+        # control belongs to that antique. Do not issue a second click until
+        # the details dialog, pathing, or sale page explicitly appears.
         return {"status": "wait_for_antique_sale", "reason": "activation_pending"}
 
     sale_complete = _template_box(
