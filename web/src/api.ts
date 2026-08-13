@@ -38,6 +38,10 @@ export const api = {
       method: "POST", body: JSON.stringify({ options })
     }),
   stop: (runId: string) => request<Run>(`/api/runs/${runId}/stop`, { method: "POST" }),
+  submitManualReview: (runId: string, requestId: string, answer: "A" | "B" | "C" | "D") =>
+    request(`/api/runs/${runId}/manual-review`, {
+      method: "POST", body: JSON.stringify({ requestId, answer })
+    }),
   capture: () => request("/api/metrics/capture", { method: "POST" }),
   startGame: () => request<SystemState>("/api/game/start", { method: "POST" }),
   openSystemSettings: (section: "screen-capture" | "accessibility") =>

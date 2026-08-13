@@ -469,7 +469,7 @@ class RunnerManager:
             raise RuntimeError("乡试人工复核请求编号无效")
         if not isinstance(payload["question"], str) or not isinstance(payload["options"], dict):
             raise RuntimeError("乡试人工复核题面无效")
-        if set(payload["options"]) != {"A", "B", "C", "D"} or not all(
+        if not {"A", "B"}.issubset(payload["options"]) or not set(payload["options"]).issubset({"A", "B", "C", "D"}) or not all(
             isinstance(value, str) and value for value in payload["options"].values()
         ):
             raise RuntimeError("乡试人工复核选项不完整")

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
 import { DataPanel } from "./DataPanel";
 import { MetricCorrectionDialog } from "./MetricCorrectionDialog";
+import { ManualReviewDialog, type ManualReview } from "./ManualReviewDialog";
 import { OnboardingDialog } from "./OnboardingDialog";
 import { PanelNavigation, type PanelKind } from "./PanelNavigation";
 import { TaskDialog } from "./TaskDialog";
@@ -105,6 +106,7 @@ export function App() {
   const [startingGame, setStartingGame] = useState(false);
   const [updatingTaskStatus, setUpdatingTaskStatus] = useState<string>();
   const [dailyDismissed, setDailyDismissed] = useState(false);
+  const [manualReview, setManualReview] = useState<ManualReview>();
   const [onboardingOpen, setOnboardingOpen] = useState(() => window.localStorage.getItem(ONBOARDING_KEY) !== "completed");
   const refreshSequence = useRef(0);
 
@@ -120,7 +122,12 @@ export function App() {
     if (runId) {
       const history = await api.runEvents(runId);
       if (sequence !== refreshSequence.current) return;
-      setLogs((current) => mergeLogs(history.items, current.filter((item) => item.runId === runId)));
+      setLogs((existingLogs) => {
+        const merged = mergeLogs(history.items, existingLogs.filter((item) => item.runId === runId));
+        const pending = [...merged].reverse().find((item) => item.type === "manual_review" && item.payload?.status !== "submitted");
+        setManualReview(pending?.payload as ManualReview | undefined);
+        return merged;
+      });
     } else {
       setLogs([]);
     }
@@ -196,9 +203,12 @@ export function App() {
     const receive = (event: MessageEvent) => {
       const item = JSON.parse(event.data) as LiveEvent;
       setLogs((current) => item.id && current.some((entry) => entry.id === item.id) ? current : [...current.slice(-199), item]);
+      if (item.type === "manual_review") {
+        setManualReview(item.payload?.status === "submitted" ? undefined : item.payload as ManualReview);
+      }
       if (item.type === "status" || item.type === "metric" || item.type === "game_data") refresh().catch(() => undefined);
     };
-    ["status", "log", "metric", "game_data", "system"].forEach((type) => source.addEventListener(type, receive));
+    ["status", "log", "manual_review", "metric", "game_data", "system"].forEach((type) => source.addEventListener(type, receive));
     source.onerror = () => setNotice({
       kind: "error",
       source: "connection",
@@ -274,6 +284,12 @@ export function App() {
       return;
     }
     await refreshAfterAction("任务已经停止，但页面没有更新");
+  }
+
+  async function submitManualReview(answer: "A" | "B" | "C" | "D") {
+    if (!current || !manualReview) return;
+    await api.submitManualReview(current.id, manualReview.requestId, answer);
+    setManualReview(undefined);
   }
 
   async function capture() {
@@ -389,6 +405,7 @@ export function App() {
     </div>
     {selected && <TaskDialog task={selected} busy={busy} onClose={() => setSelected(undefined)} onStart={startTask} onInspect={inspectTask} />}
     {correcting && metrics?.snapshots.at(-1) && <MetricCorrectionDialog snapshot={metrics.snapshots.at(-1)!} onClose={() => setCorrecting(false)} onSave={async (values) => { await api.correctMetric(metrics.snapshots.at(-1)!.id, values); await refresh(); }} />}
+    {manualReview && current?.taskId === "keju" && busy && <ManualReviewDialog review={manualReview} onSubmit={submitManualReview} />}
     {system && onboardingOpen && <OnboardingDialog
       system={system} busy={busy} startingGame={startingGame}
       onStartGame={startGame} onRefresh={refresh}
