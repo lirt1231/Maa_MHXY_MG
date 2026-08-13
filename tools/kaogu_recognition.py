@@ -123,7 +123,7 @@ def _classify_antique_sale(texts, templates, image_size, phase):
             "box": (
                 valid_box(close_controls[-1])
                 if close_controls
-                else _relative_box(image_size, 0.875, 0.13, 0.05, 0.08)
+                else _relative_box(image_size, 0.875, 0.18, 0.05, 0.07)
             ),
         }
 

@@ -1174,7 +1174,7 @@ class KaoguSceneTests(unittest.TestCase):
 
         self.assertEqual(
             decision,
-            {"status": "close_archaeology_for_sale", "box": [892, 93, 51, 57]},
+            {"status": "close_archaeology_for_sale", "box": [892, 129, 51, 50]},
         )
 
     def test_manual_mode_digs_with_any_selected_tool(self):
