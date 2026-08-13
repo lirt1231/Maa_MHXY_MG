@@ -442,7 +442,7 @@ def classify_kaogu_scene(
     if temporary_bag and not dig_buttons:
         return {
             "status": "close_temporary_bag",
-            "box": _relative_box(image_size, 0.655, 0.205, 0.045, 0.07),
+            "box": _relative_box(image_size, 0.655, 0.25, 0.045, 0.07),
         }
 
     shovel = _template_box(

@@ -1143,7 +1143,10 @@ class KaoguSceneTests(unittest.TestCase):
             phase="digging",
         )
 
-        self.assertEqual(decision["status"], "close_temporary_bag")
+        self.assertEqual(
+            decision,
+            {"status": "close_temporary_bag", "box": [838, 180, 58, 50]},
+        )
 
     def test_manual_mode_digs_with_any_selected_tool(self):
         decision = classify_kaogu_scene(
