@@ -76,6 +76,7 @@ OVERLAY_PATTERN = re.compile(
 # the click target for these controls.
 _TEMPORARY_BAG_CLOSE_BOX = (0.655, 0.205, 0.045, 0.070)
 _SANJIE_COMPLETION_CLOSE_BOX = (0.86, 0.20, 0.06, 0.10)
+_XIANGSHI_SETTLEMENT_CLOSE_BOX = (0.86, 0.20, 0.06, 0.10)
 
 
 def _has_overlay_identity(scene) -> bool:
@@ -319,6 +320,25 @@ def _fun_news_feed_identity(scene) -> bool:
 def classify_return_scene(task_id: str, scene) -> dict[str, Any]:
     """Classify only states where either confirmation or one known close is safe."""
     joined = _joined(scene)
+    xiangshi_settlement = (
+        task_id == "keju"
+        and _find_region(
+            scene, r"^科举乡试[·.。]?$", min_x=0.35, max_x=0.65, min_y=0.08, max_y=0.30
+        )
+        and _find_region(
+            scene, r"^获得经验$", min_x=0.35, max_x=0.65, min_y=0.65, max_y=0.85
+        )
+        and _find_region(
+            scene, r"^获得银币$", min_x=0.35, max_x=0.65, min_y=0.65, max_y=0.85
+        )
+    )
+    if xiangshi_settlement:
+        return {
+            "status": "close_known_page",
+            "scene": "xiangshi_settlement",
+            "action_id": "close:xiangshi_settlement",
+            "box": _relative_box(scene.image_size, *_XIANGSHI_SETTLEMENT_CLOSE_BOX),
+        }
     if scene.templates.get("battle") or _find_region(
         scene, r"^(?:取消|取消自动)$|战斗中", min_x=0.80, min_y=0.72
     ):

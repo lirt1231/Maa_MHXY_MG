@@ -176,6 +176,24 @@ class ReturnToMainWorkflowTests(unittest.TestCase):
         self.assertEqual(result.clicks, 1)
         self.assertEqual(runtime.clicks[0][0], [809, 131, 32, 37])
 
+    def test_xiangshi_settlement_closes_after_reward_identity_is_confirmed(self):
+        settlement = scene(
+            [
+                ("科举乡试·", [456, 153, 136, 29]),
+                ("获得经验", [460, 525, 74, 19]),
+                ("151417", [586, 527, 56, 18]),
+                ("获得银币", [460, 548, 74, 18]),
+                ("7268", [585, 548, 40, 20]),
+            ]
+        )
+        runtime = Runtime([settlement, main_scene(), main_scene()])
+
+        result = ReturnToMainWorkflow("keju", wait_seconds=0).execute(runtime, Guard())
+
+        self.assertEqual(result.status, "confirmed")
+        self.assertEqual(result.outcome, "recovered")
+        self.assertEqual(runtime.clicks[0][0], [877, 144, 61, 72])
+
     def test_welfare_scratch_and_parent_are_distinct_close_actions(self):
         scratch = scene(
             [
