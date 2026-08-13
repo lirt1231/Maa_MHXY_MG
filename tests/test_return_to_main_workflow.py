@@ -657,7 +657,7 @@ class ReturnToMainWorkflowTests(unittest.TestCase):
             [[420, 520, 180, 48], [785, 190, 43, 57], [821, 466, 32, 37]],
         )
 
-    def test_live_sanjie_completion_waits_for_self_dismissal_without_clicking(self):
+    def test_live_sanjie_completion_closes_only_with_its_verified_upper_close(self):
         completion = scene(
             [
                 ("三界奇缘国", [103, 251, 46, 189]),
@@ -674,9 +674,9 @@ class ReturnToMainWorkflowTests(unittest.TestCase):
         ).execute(runtime, Guard())
 
         self.assertEqual(result.status, "confirmed")
-        self.assertEqual(result.outcome, "already_main")
-        self.assertEqual(result.clicks, 0)
-        self.assertEqual(runtime.clicks, [])
+        self.assertEqual(result.outcome, "recovered")
+        self.assertEqual(result.clicks, 1)
+        self.assertEqual(runtime.clicks[0][0], [902, 224, 43, 57])
 
     def test_persistent_sanjie_completion_exhausts_observations_without_clicking(self):
         completion = scene(

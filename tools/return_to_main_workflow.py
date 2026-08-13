@@ -445,13 +445,20 @@ def classify_return_scene(task_id: str, scene) -> dict[str, Any]:
         )
     )
     if sanjie_completion:
+        close_box = valid_box({"box": scene.templates.get("close_shimen")})
+        if close_box is not None and in_region(
+            {"box": close_box}, scene.image_size, min_x=0.84, min_y=0.15, max_y=0.38
+        ):
+            return {
+                "status": "close_known_page",
+                "scene": "sanjie_completion",
+                "action_id": "close:sanjie_completion",
+                "box": close_box,
+            }
         return {
             "status": "wait",
             "scene": "sanjie_completion",
-            # The live completion panel dismisses itself while OCR and
-            # template matching are still running. Clicking a coordinate from
-            # that stale frame can activate the main screen underneath.
-            "reason": "sanjie_completion_dismissing",
+            "reason": "sanjie_completion_close_unverified",
         }
 
     if task_id == "shimen" and _find_region(
