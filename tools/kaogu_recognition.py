@@ -105,6 +105,18 @@ def _main_screen_evidence(texts, templates, image_size):
 
 
 def _classify_antique_sale(texts, templates, image_size, phase):
+    auxiliary_titles = find_items(
+        texts,
+        r"^辅助技能$",
+        image_size,
+        {"min_x": 0.35, "max_x": 0.65, "max_y": 0.25},
+    )
+    if auxiliary_titles:
+        return {
+            "status": "close_skills_for_sale",
+            "box": _relative_box(image_size, 0.74, 0.12, 0.05, 0.08),
+        }
+
     archaeology_titles = find_items(
         texts,
         r"^工坊[·•.]?考古$",

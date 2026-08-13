@@ -1164,6 +1164,19 @@ class KaoguSceneTests(unittest.TestCase):
             {"status": "close_archaeology_for_sale", "box": [1110, 102, 35, 35]},
         )
 
+    def test_sale_cleanup_closes_auxiliary_skills_before_opening_inventory(self):
+        decision = classify_kaogu_scene(
+            [text("辅助技能", (540, 100, 150, 35))],
+            {},
+            IMAGE_SIZE,
+            phase="sale_wait_main",
+        )
+
+        self.assertEqual(
+            decision,
+            {"status": "close_skills_for_sale", "box": [947, 86, 64, 58]},
+        )
+
     def test_sale_cleanup_uses_bounded_corner_when_close_ocr_is_missing(self):
         decision = classify_kaogu_scene(
             [text("工坊·考古", (435, 102, 148, 33))],
