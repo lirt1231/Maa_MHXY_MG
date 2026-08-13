@@ -1344,6 +1344,7 @@ class KaoguRunnerTests(unittest.TestCase):
         return SimpleNamespace(
             inspect_scene=False,
             recognize_only=False,
+            cleanup_only=False,
             max_steps=max_steps,
             target_digs=target_digs,
             tool_mode=tool_mode,
@@ -1424,6 +1425,30 @@ class KaoguRunnerTests(unittest.TestCase):
             )
 
         self.assertEqual(FakeRuntime.instances[0].clicks, [])
+
+    @patch("tools.run_kaogu_macos.MacOSTaskRuntime", FakeRuntime)
+    def test_cleanup_only_skips_purchase_and_dig_inputs(self):
+        FakeRuntime.scenes = sale_flow_scenes()
+        guard = CancellationGuard()
+        guard.wait = lambda _seconds: None
+        args = self._args()
+        args.cleanup_only = True
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            return_code = run(args, guard, FakePurchaseGuard())
+
+        self.assertEqual(return_code, 0)
+        result = next(
+            json.loads(line[len("result_json="):])
+            for line in output.getvalue().splitlines()
+            if line.startswith("result_json=")
+        )
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["digs"], TARGET_DIGS)
+        reasons = [reason for _, reason in FakeRuntime.instances[0].clicks]
+        self.assertNotIn("购买一个洛阳铲", reasons)
+        self.assertFalse(any("次挖掘" in reason for reason in reasons))
 
     @patch("tools.run_kaogu_macos.MacOSTaskRuntime", FakeRuntime)
     def test_reserved_purchase_closes_shop_before_verifying_existing_tool(self):

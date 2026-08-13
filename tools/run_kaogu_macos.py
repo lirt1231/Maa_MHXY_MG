@@ -52,6 +52,11 @@ def parse_args():
     parser.add_argument("--max-steps", type=int, default=MAX_STEPS)
     parser.add_argument("--target-digs", type=int, default=TARGET_DIGS)
     parser.add_argument(
+        "--cleanup-only",
+        action="store_true",
+        help="仅清理并售卖本轮已挖出的非真品古董",
+    )
+    parser.add_argument(
         "--tool-mode",
         choices=("selected", "luoyang_shovel"),
         default="selected",
@@ -67,6 +72,7 @@ def parse_args():
 def run(args, guard, purchase_guard=None):
     runtime = MacOSTaskRuntime(guard)
     target_digs = getattr(args, "target_digs", TARGET_DIGS)
+    cleanup_only = bool(getattr(args, "cleanup_only", False))
     tool_mode = getattr(args, "tool_mode", "luoyang_shovel")
     if purchase_guard is None:
         purchase_guard = FilePurchaseGuard(PURCHASE_GUARD_PATH)
@@ -76,6 +82,7 @@ def run(args, guard, purchase_guard=None):
             print("purchase_guard_recovered=orphaned_owner", flush=True)
     outcome = KaoguWorkflow(
         target_digs=target_digs,
+        initial_digs=target_digs if cleanup_only else 0,
         tool_mode=tool_mode,
         max_steps=args.max_steps,
         max_purchases=MAX_PURCHASES,
