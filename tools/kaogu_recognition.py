@@ -280,8 +280,13 @@ def _classify_antique_sale(texts, templates, image_size, phase):
             "status": "close_inventory",
             "box": _inventory_close_box(valid_box(inventory_tabs[-1])),
         }
-    if phase == "sale_pathing" and inventory_page and use_buttons:
-        return {"status": "use_antique", "box": valid_box(use_buttons[-1])}
+    if phase == "sale_pathing" and inventory_page:
+        # The antique itself was already double-clicked from a template match.
+        # A remaining inventory view is not evidence that its generic ``使用``
+        # control belongs to that antique: it can be associated with a normal
+        # equipment or feature icon instead.  Do not issue a second click
+        # until the client explicitly shows pathing or the antique sale page.
+        return {"status": "wait_for_antique_sale", "reason": "activation_pending"}
 
     sale_complete = _template_box(
         templates,
