@@ -49,6 +49,11 @@ class MetricCorrection(BaseModel):
     experienceRequired: int | None = Field(default=None, ge=0)
 
 
+class ManualReviewResponse(BaseModel):
+    requestId: str = Field(min_length=1, max_length=128)
+    answer: Literal["A", "B", "C", "D"]
+
+
 def create_app(
     database_path: Path | None = None, *, resource_tracking: bool = False
 ) -> FastAPI:
@@ -171,6 +176,15 @@ def create_app(
             return runner.stop(run_id)
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/api/runs/{run_id}/manual-review", status_code=202)
+    def submit_manual_review(run_id: str, request: ManualReviewResponse):
+        try:
+            return runner.submit_manual_review(run_id, request.requestId, request.answer)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.get("/api/runs")
     def runs(limit: int = Query(20, ge=1, le=200)):

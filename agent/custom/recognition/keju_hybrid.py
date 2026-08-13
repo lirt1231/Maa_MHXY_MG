@@ -552,6 +552,37 @@ class KejuHybridAnswer(CustomRecognition):
                 box=(0, 0, 0, 0), detail="当前为答题结果或课堂复习页"
             )
 
+        manual_override = getattr(self, "manual_review_override", None)
+        if manual_override is not None:
+            expected_question = str(manual_override.get("question", ""))
+            expected_options = manual_override.get("options", {})
+            selected_answer = str(manual_override.get("answer", "")).upper()
+            self.manual_review_override = None
+            if (
+                question != expected_question
+                or valid_options != expected_options
+                or selected_answer not in valid_options
+            ):
+                self.last_status = "unreliable"
+                self.last_question = question
+                self.last_options = valid_options
+                self.last_reason = "人工选择提交后题面或选项已变化，未执行点击"
+                raise RuntimeError(self.last_reason)
+            target = option_boxes.get(selected_answer) or option_rois[selected_answer]
+            center_x = target[0] + target[2] // 2
+            center_y = target[1] + target[3] // 2
+            self.last_status = "ready"
+            self.last_question = question
+            self.last_options = valid_options
+            self.last_answer = selected_answer
+            self.last_source = "manual_review"
+            self.last_click = (center_x, center_y)
+            self.last_image_size = (image.shape[1], image.shape[0])
+            logger.info(f"科举人工复核已重新确认当前题面，选择：{selected_answer}")
+            return CustomRecognition.AnalyzeResult(
+                box=tuple(target), detail=f"人工复核答题:{selected_answer}"
+            )
+
         # 一道题在提交后仍可能保留数秒活动态。去重必须发生在查库和
         # 模型请求之前，否则虽然外层不会重复点击，仍会浪费一次模型调用。
         cache_key = round_number

@@ -20,10 +20,33 @@ from tools.run_keju_macos import (
     should_end_loop,
     stable_question_key,
     task_result,
+    await_manual_review,
 )
 
 
 class KejuArgumentTests(unittest.TestCase):
+    def test_manual_review_accepts_only_the_matching_request_and_choice(self):
+        stream = io.StringIO(
+            '{"requestId":"stale","answer":"A"}\n'
+            'not json\n'
+            '{"requestId":"fixed-request","answer":"D"}\n'
+        )
+        payload = {
+            "question": "常识题", "options": {"A": "甲", "B": "乙", "C": "丙", "D": "丁"},
+            "manualReview": {"reason": "置信度不足"},
+        }
+        with patch("tools.run_keju_macos.os.urandom", return_value=bytes.fromhex("00" * 16)), patch(
+            "tools.run_keju_macos.sys.stdin", stream
+        ), patch("tools.run_keju_macos.print") as printed:
+            # The generated ID is deterministic and is replaced in the input stream.
+            stream = io.StringIO(
+                '{"requestId":"stale","answer":"A"}\n'
+                'not json\n'
+                '{"requestId":"' + "00" * 16 + '","answer":"D"}\n'
+            )
+            with patch("tools.run_keju_macos.sys.stdin", stream):
+                self.assertEqual(await_manual_review(payload), "D")
+        self.assertTrue(any("manual_review_request_json=" in str(call) for call in printed.call_args_list))
     def test_exam_profile_overrides_only_the_selected_exam_fields(self):
         profile = model_profile_for_exam({
             "url": "https://example.test/v1/chat/completions",

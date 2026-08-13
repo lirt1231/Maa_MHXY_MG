@@ -34,6 +34,7 @@ INSPECTION_TIMEOUT_SECONDS = 15.0
 RESULT_PREFIX = "result_json="
 HOME_RECOVERY_PREFIX = "home_recovery_json="
 RESOURCE_SNAPSHOT_PREFIX = "resource_snapshot_json="
+MANUAL_REVIEW_PREFIX = "manual_review_request_json="
 BEFORE_RESOURCE_CAPTURE_ATTEMPTS = 2
 RESOURCE_CAPTURE_FIELDS_BY_TASK = {
     "kaogu": frozenset({"silver"}),
@@ -366,6 +367,7 @@ class RunnerManager:
         self._stop_requested = False
         self._inspecting = False
         self._completion = threading.Event()
+        self._manual_review: dict | None = None
 
     @property
     def current(self) -> dict | None:
@@ -415,6 +417,7 @@ class RunnerManager:
             }
             self._current = run
             self._stop_requested = False
+            self._manual_review = None
             completion = threading.Event()
             self._completion = completion
             self.database.create_run(run)
@@ -426,6 +429,60 @@ class RunnerManager:
                 name=f"dashboard-{task_id}",
             ).start()
             return dict(run)
+
+    def submit_manual_review(self, run_id: str, request_id: str, answer: str) -> dict:
+        answer = str(answer or "").upper()
+        with self._lock:
+            current = self._current
+            pending = self._manual_review
+            if (
+                not current or current["id"] != run_id or current["taskId"] != "keju"
+                or current["status"] != "running" or not pending
+            ):
+                raise RuntimeError("当前没有可提交的乡试人工复核")
+            if pending.get("requestId") != request_id or answer not in {"A", "B", "C", "D"}:
+                raise ValueError("人工复核请求已过期或选项无效")
+            process = self._process
+            if process is None or process.stdin is None:
+                raise RuntimeError("人工复核输入通道不可用")
+            process.stdin.write(json.dumps({"requestId": request_id, "answer": answer}) + "\n")
+            process.stdin.flush()
+            self._manual_review = None
+            current["stage"] = "正在复核人工选择"
+            self.database.update_run_stage(run_id, "running", current["stage"])
+            self._emit("info", "manual_review", "已提交人工选择，正在复核当前题面", {
+                "requestId": request_id, "answer": answer, "status": "submitted",
+            })
+            return {"runId": run_id, "requestId": request_id, "answer": answer, "status": "submitted"}
+
+    def _handle_manual_review_request(self, run: dict, line: str) -> bool:
+        if run["taskId"] != "keju" or not line.startswith(MANUAL_REVIEW_PREFIX):
+            return False
+        try:
+            payload = json.loads(line[len(MANUAL_REVIEW_PREFIX):])
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("乡试人工复核请求不是有效 JSON") from exc
+        required = {"requestId", "question", "options", "review"}
+        if not isinstance(payload, dict) or set(payload) != required:
+            raise RuntimeError("乡试人工复核请求字段无效")
+        if not isinstance(payload["requestId"], str) or not payload["requestId"]:
+            raise RuntimeError("乡试人工复核请求编号无效")
+        if not isinstance(payload["question"], str) or not isinstance(payload["options"], dict):
+            raise RuntimeError("乡试人工复核题面无效")
+        if set(payload["options"]) != {"A", "B", "C", "D"} or not all(
+            isinstance(value, str) and value for value in payload["options"].values()
+        ):
+            raise RuntimeError("乡试人工复核选项不完整")
+        if not isinstance(payload["review"], dict):
+            raise RuntimeError("乡试人工复核材料无效")
+        with self._lock:
+            if self._stop_requested:
+                return True
+            self._manual_review = payload
+            run["stage"] = "等待人工选择乡试答案"
+            self.database.update_run_stage(run["id"], "running", run["stage"])
+            self._emit("warning", "manual_review", "乡试需要人工选择答案", payload)
+        return True
 
     def inspect(self, task_id: str, options: dict | None) -> dict:
         normalized = validate_options(task_id, options)
@@ -739,6 +796,7 @@ class RunnerManager:
                     cwd=ROOT,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
+                    stdin=subprocess.PIPE,
                     text=True,
                     encoding="utf-8",
                     errors="replace",
@@ -1410,6 +1468,8 @@ class RunnerManager:
                 message = line.strip()
                 if message:
                     output_lines.append(message)
+                    if self._handle_manual_review_request(run, message):
+                        continue
                     progress = user_progress(run["taskId"], message)
                     if progress and progress["message"] != last_progress_message:
                         with self._lock:
@@ -1634,6 +1694,7 @@ class RunnerManager:
                                 run["taskId"], output_lines
                             )
                     self._process = None
+                    self._manual_review = None
                     if self._current and self._current["id"] == run["id"]:
                         self._current["status"] = status
                         self._current["stage"] = {

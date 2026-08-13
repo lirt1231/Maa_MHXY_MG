@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import Callable, Mapping
 
 try:
     from .automation_actions import ActionMetrics
@@ -74,6 +75,7 @@ class KejuWorkflow:
     max_waiting_polls: int = 180
     max_same_question_polls: int = 8
     max_recognition_failures: int = 4
+    manual_review_handler: Callable[[Mapping], str] | None = None
 
     def __post_init__(self):
         if (
@@ -195,6 +197,22 @@ class KejuWorkflow:
                 context.waiter.wait(min(self.delay, 1.0))
                 continue
             if status in {"no_question", "unreliable"}:
+                manual_review = decision.get("manualReview")
+                if (
+                    status == "unreliable"
+                    and isinstance(manual_review, Mapping)
+                    and self.manual_review_handler is not None
+                ):
+                    selected_answer = self.manual_review_handler(decision)
+                    if selected_answer not in {"A", "B", "C", "D"}:
+                        raise RuntimeError("人工复核返回了无效选项")
+                    submit = getattr(self.source, "submit_manual_answer", None)
+                    if not callable(submit):
+                        raise RuntimeError("当前科举运行器不支持人工复核提交")
+                    submit(selected_answer, question=decision.get("question", ""), options=decision.get("options", {}))
+                    context.emit("manual_review_submitted", answer=selected_answer)
+                    recognition_failures = 0
+                    continue
                 recognition_failures += 1
                 if recognition_failures >= self.max_recognition_failures:
                     if status == "no_question":

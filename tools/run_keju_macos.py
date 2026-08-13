@@ -409,6 +409,7 @@ class KejuMacOSObservationSource:
             "answer": getattr(self.recognizer, "last_answer", ""),
             "source": getattr(self.recognizer, "last_source", ""),
             "click": getattr(self.recognizer, "last_click", None),
+            "manualReview": getattr(self.recognizer, "last_manual_review", None),
         }
         if status == "wrong_exam_type":
             expected_label = EXAM_LABELS[self.exam_type]
@@ -445,6 +446,39 @@ class KejuMacOSObservationSource:
             MacOSQuizScene(tuple(image_size)),
             decision,
         )
+
+    def submit_manual_answer(self, answer: str, *, question: str, options: dict) -> None:
+        self.recognizer.manual_review_override = {
+            "answer": answer,
+            "question": question,
+            "options": options,
+        }
+
+
+def await_manual_review(decision: dict) -> str:
+    """Print a stable review protocol and wait for one matching answer line."""
+    request_id = os.urandom(16).hex()
+    payload = {
+        "requestId": request_id,
+        "question": decision.get("question", ""),
+        "options": decision.get("options", {}),
+        "review": decision.get("manualReview", {}),
+    }
+    print("manual_review_request_json=" + json.dumps(payload, ensure_ascii=False), flush=True)
+    while True:
+        line = sys.stdin.readline()
+        if not line:
+            raise RuntimeError("人工复核等待期间输入通道已关闭，已保留页面")
+        try:
+            response = json.loads(line)
+        except json.JSONDecodeError:
+            print("manual_review_rejected=invalid_json", flush=True)
+            continue
+        answer = str(response.get("answer", "")).upper()
+        if response.get("requestId") != request_id or answer not in {"A", "B", "C", "D"}:
+            print("manual_review_rejected=stale_or_invalid", flush=True)
+            continue
+        return answer
 
 
 def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | None:
@@ -622,6 +656,7 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
         delay=args.delay,
         max_waiting_polls=MAX_WAITING_POLLS,
         max_same_question_polls=MAX_SAME_QUESTION_POLLS,
+        manual_review_handler=await_manual_review if args.exam_type == "xiangshi" else None,
     ).execute(
         WorkflowContext(runtime, guard, workflow_event),
         preview=args.recognize_only,

@@ -6,7 +6,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from dashboard.database import Database
 from dashboard.events import EventBroker
@@ -83,6 +83,30 @@ class RunnerStopBarrierTests(unittest.TestCase):
 
     def _start(self):
         return self.manager.start("zhuogui", {"rounds": 1}, checklist_confirmed=True)
+
+    def test_manual_review_submission_requires_current_xiangshi_request(self):
+        run = {
+            "id": "xiangshi-review", "taskId": "keju", "taskName": "科举乡试",
+            "status": "running", "stage": "等待人工选择乡试答案", "options": {},
+            "startedAt": "2026-08-13T00:00:00+00:00",
+        }
+        self.manager.database.create_run(run)
+        process = Mock()
+        process.stdin = Mock()
+        self.manager._current = run
+        self.manager._process = process
+        self.manager._manual_review = {
+            "requestId": "request-1", "question": "题目",
+            "options": {"A": "甲", "B": "乙", "C": "丙", "D": "丁"}, "review": {},
+        }
+
+        submitted = self.manager.submit_manual_review("xiangshi-review", "request-1", "C")
+
+        self.assertEqual(submitted["status"], "submitted")
+        self.assertIsNone(self.manager._manual_review)
+        process.stdin.write.assert_called_once()
+        with self.assertRaisesRegex(RuntimeError, "没有可提交"):
+            self.manager.submit_manual_review("xiangshi-review", "request-1", "C")
 
     def _wait_for_status(self, expected: str, timeout: float = 1.0):
         deadline = time.monotonic() + timeout
