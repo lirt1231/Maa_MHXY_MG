@@ -105,6 +105,24 @@ def _main_screen_evidence(texts, templates, image_size):
 
 
 def _classify_antique_sale(texts, templates, image_size, phase):
+    archaeology_titles = find_items(
+        texts,
+        r"^工坊[·•.]?考古$",
+        image_size,
+        {"min_x": 0.35, "max_x": 0.65, "max_y": 0.25},
+    )
+    close_controls = find_items(
+        texts,
+        r"^(?:×|x|X)$",
+        image_size,
+        {"min_x": 0.75, "max_y": 0.3},
+    )
+    if archaeology_titles and close_controls:
+        return {
+            "status": "close_archaeology_for_sale",
+            "box": valid_box(close_controls[-1]),
+        }
+
     temporary_bag = find_items(
         texts,
         r"临时(?:道具|物品)(?:栏|包裹)",

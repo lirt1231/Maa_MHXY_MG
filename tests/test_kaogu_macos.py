@@ -1148,6 +1148,22 @@ class KaoguSceneTests(unittest.TestCase):
             {"status": "close_temporary_bag", "box": [838, 180, 58, 50]},
         )
 
+    def test_sale_cleanup_closes_the_archaeology_window_before_opening_inventory(self):
+        decision = classify_kaogu_scene(
+            [
+                text("工坊·考古", (548, 98, 185, 33)),
+                text("×", (1110, 102, 35, 35)),
+            ],
+            {},
+            IMAGE_SIZE,
+            phase="sale_wait_main",
+        )
+
+        self.assertEqual(
+            decision,
+            {"status": "close_archaeology_for_sale", "box": [1110, 102, 35, 35]},
+        )
+
     def test_manual_mode_digs_with_any_selected_tool(self):
         decision = classify_kaogu_scene(
             [text("挖掘", (1044, 550, 101, 51))],

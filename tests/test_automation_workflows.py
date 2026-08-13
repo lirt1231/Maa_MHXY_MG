@@ -1257,6 +1257,25 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
         click_reasons = [entry[-1] for entry in adapter.trace if entry[0] == "click"]
         self.assertEqual(click_reasons, ["进行第 1 次挖掘"])
 
+    def test_kaogu_cleanup_closes_archaeology_before_selling(self):
+        adapter = _DesktopAdapterA([
+            _scene("close_archaeology_for_sale"),
+            _scene("antique_sale_main_confirmed"),
+            _scene("antique_sale_main_confirmed"),
+        ])
+        workflow = KaoguWorkflow(
+            target_digs=1,
+            initial_digs=1,
+            max_steps=3,
+            classifier=_kaogu_classifier,
+        )
+
+        result = workflow.execute(WorkflowContext(adapter, adapter))
+
+        self.assertEqual(result.status, "completed")
+        click_reasons = [entry[-1] for entry in adapter.trace if entry[0] == "click"]
+        self.assertEqual(click_reasons, ["考古流程：close_archaeology_for_sale"])
+
     def test_kaogu_does_not_downgrade_capture_failure_before_target(self):
         adapter = _FailingSceneAdapter([])
         workflow = KaoguWorkflow(target_digs=1, classifier=_kaogu_classifier)
