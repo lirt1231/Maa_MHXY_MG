@@ -9,7 +9,7 @@ from typing import Any
 
 _NUMBER_RE = re.compile(r"(?<!\d)(\d[\d,，.]*)(?!\d)")
 _HUI_SHI_TITLE_RE = re.compile(r"(?:科举)?会试(?:成绩|完成|结束|奖励)?")
-_XIANG_SHI_TITLE_RE = re.compile(r"科举乡试(?:成绩|完成|结束|奖励)?")
+_XIANG_SHI_TITLE_RE = re.compile(r"科举乡试(?:成绩|完成|结束|奖励)?[·.。]?")
 _GOLD_RE = re.compile(r"(?:获得|奖励|本次)?金币")
 _CURRENT_REWARD_RE = re.compile(r"(?:本次|本场)(?:会)?(?:获得)?奖金")
 _EXPERIENCE_RE = re.compile(r"(?:获得|奖励|本次)?(?:经验|经验值)")
