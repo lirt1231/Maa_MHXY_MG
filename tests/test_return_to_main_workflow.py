@@ -596,6 +596,30 @@ class ReturnToMainWorkflowTests(unittest.TestCase):
         self.assertEqual(result.status, "confirmed")
         self.assertEqual(runtime.clicks[0][0], [909, 458, 32, 37])
 
+    def test_shimen_quick_reward_on_main_screen_needs_no_close_click(self):
+        def main_with_quick_reward():
+            current = main_scene()
+            current.texts.extend(
+                [
+                    {"text": "活动", "box": [262, 49, 37, 19]},
+                    {"text": "红罗羹", "box": [842, 562, 56, 19]},
+                    {"text": "使用", "box": [841, 599, 60, 27]},
+                ]
+            )
+            current.templates["close_generic"] = [905, 439, 39, 40]
+            return current
+
+        runtime = Runtime([main_with_quick_reward(), main_with_quick_reward()])
+        result = ReturnToMainWorkflow("shimen", wait_seconds=0).execute(
+            runtime, Guard()
+        )
+
+        self.assertEqual(result.status, "confirmed")
+        self.assertEqual(result.outcome, "already_main")
+        self.assertEqual(result.clicks, 0)
+        self.assertTrue(result.evidence["anchors"])
+        self.assertEqual(runtime.clicks, [])
+
     def test_full_shimen_terminal_chain_recovers_in_one_run(self):
         completion = scene(
             [

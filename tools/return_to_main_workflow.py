@@ -238,6 +238,37 @@ def _full_team_panel_present(scene) -> bool:
     return bool(has_header and has_side_tabs)
 
 
+def _shimen_quick_reward_on_main_screen(scene, anchors: list[str]) -> bool:
+    """Recognize the non-modal Shimen reward card that remains on the main UI.
+
+    The completed task can leave a consumable card at the lower right.  Its
+    close glyph resembles a generic dialog close, but the surrounding main
+    screen stays fully usable.  Treat it as main-screen evidence only when all
+    independent main-screen anchors are present; a reward popup with fewer
+    anchors must still take its explicit close path.
+    """
+    if not {
+        "task_team_tabs",
+        "left_menu",
+        "activity_toolbar",
+        "menu_plus",
+    }.issubset(anchors):
+        return False
+    has_reward = _find_region(
+        scene, r"^(?:绿芦羹|红罗羹)$", min_x=0.72, min_y=0.55, max_y=0.92
+    )
+    has_use = _find_region(scene, r"^使\s*用$", min_x=0.72, min_y=0.65, max_y=0.98)
+    close_box = valid_box({"box": scene.templates.get("close_generic")})
+    return bool(
+        has_reward
+        and has_use
+        and close_box is not None
+        and in_region(
+            {"box": close_box}, scene.image_size, min_x=0.84, min_y=0.50, max_y=0.78
+        )
+    )
+
+
 def _fun_news_feed_identity(scene) -> bool:
     channels = {
         str(item.get("text", ""))
@@ -343,10 +374,16 @@ def classify_return_scene(task_id: str, scene) -> dict[str, Any]:
             "reason": "team_panel_identity_incomplete",
         }
 
+    quick_reward_on_main_screen = (
+        task_id == "shimen" and _shimen_quick_reward_on_main_screen(scene, anchors)
+    )
     main_screen_evidence = (
         len(anchors) >= 3
         and not scene.templates.get("close_welfare")
-        and not scene.templates.get("close_generic")
+        and (
+            not scene.templates.get("close_generic")
+            or quick_reward_on_main_screen
+        )
         and not _has_overlay_identity(scene)
     )
     if main_screen_evidence and _find_region(
@@ -359,7 +396,11 @@ def classify_return_scene(task_id: str, scene) -> dict[str, Any]:
     ):
         return {"status": "wait", "reason": "transient_completion"}
     if main_screen_evidence:
-        return {"status": "main_screen", "anchors": anchors}
+        return {
+            "status": "main_screen",
+            "anchors": anchors,
+            "quickReward": quick_reward_on_main_screen,
+        }
 
     if task_id == "shimen" and _fixed_temporary_bag(scene):
         return {
