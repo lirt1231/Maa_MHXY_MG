@@ -114,7 +114,7 @@ def _classify_antique_sale(texts, templates, image_size, phase):
     if auxiliary_titles:
         return {
             "status": "close_skills_for_sale",
-            "box": _relative_box(image_size, 0.74, 0.12, 0.05, 0.08),
+            "box": _relative_box(image_size, 0.74, 0.14, 0.05, 0.07),
         }
 
     archaeology_titles = find_items(

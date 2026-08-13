@@ -1174,7 +1174,7 @@ class KaoguSceneTests(unittest.TestCase):
 
         self.assertEqual(
             decision,
-            {"status": "close_skills_for_sale", "box": [947, 86, 64, 58]},
+            {"status": "close_skills_for_sale", "box": [947, 101, 64, 50]},
         )
 
     def test_sale_cleanup_uses_bounded_corner_when_close_ocr_is_missing(self):
