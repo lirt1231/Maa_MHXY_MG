@@ -155,8 +155,8 @@ def load_local_model_config():
 
 def model_profile_for_exam(config: dict, exam_type: str) -> dict:
     """Merge shared local configuration with an optional exam profile."""
-    profile = dict(DEFAULT_MODEL_PROFILES.get(exam_type, {}))
-    profile.update(config)
+    profile = dict(config)
+    profile.update(DEFAULT_MODEL_PROFILES.get(exam_type, {}))
     profiles = config.get("exam_profiles", {})
     if isinstance(profiles, dict) and isinstance(profiles.get(exam_type), dict):
         profile.update(profiles[exam_type])

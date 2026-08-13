@@ -61,6 +61,11 @@ class KejuArgumentTests(unittest.TestCase):
         self.assertEqual(profile["timeout"], 12)
         self.assertEqual(profile["url"], "https://example.test/v1/chat/completions")
         self.assertNotIn("exam_profiles", profile)
+
+    def test_default_exam_profile_overrides_legacy_shared_model(self):
+        profile = model_profile_for_exam({"model": "legacy-shared"}, "xiangshi")
+
+        self.assertEqual(profile["model"], "gemini-3.5-flash")
     def test_xiangshi_defaults_to_ten_answers(self):
         with patch(
             "tools.run_keju_macos.sys.argv",
