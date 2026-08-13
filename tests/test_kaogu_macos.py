@@ -1164,6 +1164,19 @@ class KaoguSceneTests(unittest.TestCase):
             {"status": "close_archaeology_for_sale", "box": [1110, 102, 35, 35]},
         )
 
+    def test_sale_cleanup_uses_bounded_corner_when_close_ocr_is_missing(self):
+        decision = classify_kaogu_scene(
+            [text("工坊·考古", (435, 102, 148, 33))],
+            {},
+            (1020, 718),
+            phase="sale_wait_main",
+        )
+
+        self.assertEqual(
+            decision,
+            {"status": "close_archaeology_for_sale", "box": [892, 93, 51, 57]},
+        )
+
     def test_manual_mode_digs_with_any_selected_tool(self):
         decision = classify_kaogu_scene(
             [text("挖掘", (1044, 550, 101, 51))],

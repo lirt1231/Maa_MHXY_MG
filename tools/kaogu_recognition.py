@@ -117,10 +117,14 @@ def _classify_antique_sale(texts, templates, image_size, phase):
         image_size,
         {"min_x": 0.75, "max_y": 0.3},
     )
-    if archaeology_titles and close_controls:
+    if archaeology_titles:
         return {
             "status": "close_archaeology_for_sale",
-            "box": valid_box(close_controls[-1]),
+            "box": (
+                valid_box(close_controls[-1])
+                if close_controls
+                else _relative_box(image_size, 0.875, 0.13, 0.05, 0.08)
+            ),
         }
 
     temporary_bag = find_items(
