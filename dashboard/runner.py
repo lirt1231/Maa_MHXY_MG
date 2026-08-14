@@ -670,13 +670,16 @@ class RunnerManager:
         raise ValueError("不支持的任务")
 
     @staticmethod
-    def _recovery_command(task_id: str) -> list[str]:
-        return [
+    def _recovery_command(task_id: str, *, confirm_only: bool = False) -> list[str]:
+        command = [
             sys.executable,
             str(ROOT / "tools/run_return_to_main_macos.py"),
             "--task-id",
             task_id,
         ]
+        if confirm_only:
+            command.append("--confirm-only")
+        return command
 
     @staticmethod
     def _resource_snapshot_command(task_id: str, phase: str) -> list[str]:
@@ -1622,9 +1625,70 @@ class RunnerManager:
                                         run, "after"
                                     )
                             else:
-                                status = "failed"
-                                failure_phase = "recovery"
-                                error = "任务已完成，但未能返回主界面"
+                                # The close workflow can lose a frame during a page
+                                # transition after it has already returned home. Verify
+                                # that state again without permitting any further input.
+                                with self._lock:
+                                    run["stage"] = "正在只读确认主界面"
+                                    if self._current and self._current["id"] == run["id"]:
+                                        self._current["stage"] = run["stage"]
+                                    self.database.update_run_stage(
+                                        run["id"], "recovering", run["stage"],
+                                        result=task_result,
+                                        home_recovery=home_recovery,
+                                        failure_phase=None,
+                                    )
+                                    self._emit(
+                                        "info", "status", "恢复未确认，正在只读确认主界面",
+                                        {"status": "recovering", "homeRecovery": home_recovery},
+                                    )
+                                    self._process = subprocess.Popen(
+                                        self._recovery_command(
+                                            run["taskId"], confirm_only=True
+                                        ),
+                                        cwd=ROOT,
+                                        stdout=subprocess.PIPE,
+                                        stderr=subprocess.STDOUT,
+                                        text=True,
+                                        encoding="utf-8",
+                                        errors="replace",
+                                        bufsize=1,
+                                        start_new_session=True,
+                                    )
+                                    confirmation_process = self._process
+                                confirmation_lines = []
+                                assert confirmation_process.stdout is not None
+                                for line in confirmation_process.stdout:
+                                    message = line.strip()
+                                    if message:
+                                        confirmation_lines.append(message)
+                                confirmation_return_code = confirmation_process.wait()
+                                with self._lock:
+                                    stopped = self._stop_requested
+                                if stopped:
+                                    status = "cancelled"
+                                    failure_phase = None
+                                else:
+                                    confirmation = self._parse_home_recovery(confirmation_lines)
+                                    if (
+                                        confirmation["status"] == "confirmed"
+                                        and confirmation_return_code == 0
+                                    ):
+                                        status = "succeeded"
+                                        failure_phase = None
+                                        home_recovery = confirmation
+                                        run["homeRecovery"] = home_recovery
+                                        if (
+                                            self._tracks_task_resources(run["taskId"])
+                                            and task_result["status"] == "completed"
+                                        ):
+                                            after_snapshot = self._capture_resource_snapshot(
+                                                run, "after"
+                                            )
+                                    else:
+                                        status = "failed"
+                                        failure_phase = "recovery"
+                                        error = "任务已完成，但未能返回主界面"
                 else:
                     status = "failed"
                     failure_phase = "task"

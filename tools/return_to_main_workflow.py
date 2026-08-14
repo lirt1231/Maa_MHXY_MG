@@ -646,6 +646,7 @@ class ReturnToMainResult:
 @dataclass
 class ReturnToMainWorkflow:
     task_id: str
+    confirm_only: bool = False
     max_observations: int = 12
     max_clicks: int = 4
     wait_seconds: float = 0.8
@@ -693,6 +694,13 @@ class ReturnToMainWorkflow:
                 guard.wait(self.wait_seconds)
                 continue
             if status == "close_known_page":
+                if self.confirm_only:
+                    return ReturnToMainResult(
+                        "failed",
+                        reason="只读确认未检测到主界面",
+                        actions=observations,
+                        clicks=clicks,
+                    )
                 action_id = decision.get("action_id")
                 if not isinstance(action_id, str) or action_id in used_actions:
                     return ReturnToMainResult("failed", reason="同一关闭动作不得重复", actions=observations, clicks=clicks)

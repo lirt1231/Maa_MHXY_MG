@@ -229,6 +229,18 @@ class ReturnToMainWorkflowTests(unittest.TestCase):
         self.assertEqual(result.clicks, 0)
         self.assertEqual(runtime.clicks, [])
 
+    def test_confirm_only_refuses_known_close_without_input(self):
+        runtime = Runtime([self.known_page("日常活动 师门任务")])
+
+        result = ReturnToMainWorkflow(
+            "shimen", confirm_only=True, wait_seconds=0
+        ).execute(runtime, Guard())
+
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.reason, "只读确认未检测到主界面")
+        self.assertEqual(result.clicks, 0)
+        self.assertEqual(runtime.clicks, [])
+
     def test_expanded_chat_panel_uses_scaled_fixed_collapse_control(self):
         chat = scene(
             [

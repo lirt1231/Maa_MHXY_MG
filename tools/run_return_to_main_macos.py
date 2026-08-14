@@ -25,11 +25,18 @@ def emit(payload):
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--task-id", required=True)
+    parser.add_argument(
+        "--confirm-only",
+        action="store_true",
+        help="只读取并确认主界面，不执行任何点击",
+    )
     args = parser.parse_args()
     guard = CancellationGuard()
     guard.install_signal_handlers()
     try:
-        result = ReturnToMainWorkflow(args.task_id).execute(MacOSTaskRuntime(guard), guard)
+        result = ReturnToMainWorkflow(
+            args.task_id, confirm_only=args.confirm_only
+        ).execute(MacOSTaskRuntime(guard), guard)
         emit(result.to_payload())
         return 0 if result.status == "confirmed" else 1
     except CancellationRequested as exc:

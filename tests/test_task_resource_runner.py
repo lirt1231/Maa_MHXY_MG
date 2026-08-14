@@ -159,6 +159,15 @@ def recovery_process():
     ])
 
 
+def failed_recovery_process():
+    return FinishedProcess([
+        "home_recovery_json=" + json.dumps({
+            "status": "failed", "outcome": None, "scene": None,
+            "reason": "恢复停止：no_known_close", "actions": 4, "clicks": 2,
+        }, ensure_ascii=False)
+    ], return_code=1)
+
+
 class TaskResourceRunnerTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -258,6 +267,31 @@ class TaskResourceRunnerTests(unittest.TestCase):
         self.assertEqual(current["resourceYield"]["experienceDelta"], 777620)
         self.assertEqual(current["resourceYield"]["silverDelta"], 4974)
         self.assertEqual(current["resourceYield"]["goldDelta"], 0)
+
+    def test_shimen_rechecks_main_read_only_then_records_after_resources(self):
+        processes = [
+            snapshot_process(
+                "before", captured_at="2026-08-14T00:04:56+00:00",
+                experience=161891345, gold=825276, silver=6568946,
+            ),
+            task_process(task_id="shimen"),
+            failed_recovery_process(),
+            recovery_process(),
+            snapshot_process(
+                "after", captured_at="2026-08-14T00:11:20+00:00",
+                experience=162668965, gold=825276, silver=6573920,
+            ),
+        ]
+        with patch("dashboard.runner.subprocess.Popen", side_effect=processes) as popen:
+            self.start_shimen()
+            current = self.wait_for(lambda run: run["status"] == "succeeded")
+
+        self.assertEqual(popen.call_count, 5)
+        self.assertIn("--confirm-only", popen.call_args_list[3].args[0])
+        self.assertEqual(current["homeRecovery"]["status"], "confirmed")
+        self.assertEqual(current["resourceYield"]["attributionStatus"], "reliable")
+        self.assertEqual(current["resourceYield"]["experienceDelta"], 777620)
+        self.assertEqual(current["resourceYield"]["silverDelta"], 4974)
 
     def test_already_completed_does_not_capture_after_or_report_zero(self):
         processes = [
