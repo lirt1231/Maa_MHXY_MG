@@ -233,11 +233,24 @@ class ReturnToMainWorkflowTests(unittest.TestCase):
         runtime = Runtime([self.known_page("日常活动 师门任务")])
 
         result = ReturnToMainWorkflow(
-            "shimen", confirm_only=True, wait_seconds=0
+            "shimen", confirm_only=True, max_observations=1, wait_seconds=0
         ).execute(runtime, Guard())
 
         self.assertEqual(result.status, "failed")
         self.assertEqual(result.reason, "只读确认未检测到主界面")
+        self.assertEqual(result.clicks, 0)
+        self.assertEqual(runtime.clicks, [])
+
+    def test_confirm_only_tolerates_one_incomplete_frame_without_input(self):
+        incomplete = scene([("福利", [10, 135, 45, 25])])
+        runtime = Runtime([incomplete, main_scene(), main_scene()])
+
+        result = ReturnToMainWorkflow(
+            "shimen", confirm_only=True, wait_seconds=0
+        ).execute(runtime, Guard())
+
+        self.assertEqual(result.status, "confirmed")
+        self.assertEqual(result.outcome, "already_main")
         self.assertEqual(result.clicks, 0)
         self.assertEqual(runtime.clicks, [])
 

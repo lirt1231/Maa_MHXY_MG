@@ -695,12 +695,9 @@ class ReturnToMainWorkflow:
                 continue
             if status == "close_known_page":
                 if self.confirm_only:
-                    return ReturnToMainResult(
-                        "failed",
-                        reason="只读确认未检测到主界面",
-                        actions=observations,
-                        clicks=clicks,
-                    )
+                    main_confirmation = MainScreenConfirmation()
+                    guard.wait(self.wait_seconds)
+                    continue
                 action_id = decision.get("action_id")
                 if not isinstance(action_id, str) or action_id in used_actions:
                     return ReturnToMainResult("failed", reason="同一关闭动作不得重复", actions=observations, clicks=clicks)
@@ -720,5 +717,19 @@ class ReturnToMainWorkflow:
                 guard.wait(self.wait_seconds)
                 continue
             reason = decision.get("reason") or "unknown_page"
+            if self.confirm_only:
+                main_confirmation = MainScreenConfirmation()
+                guard.wait(self.wait_seconds)
+                continue
             return ReturnToMainResult("failed", reason=f"恢复停止：{reason}", actions=observations, clicks=clicks)
+        if self.confirm_only:
+            return ReturnToMainResult(
+                "failed",
+                reason="只读确认未检测到主界面",
+                actions=observations,
+                clicks=clicks,
+            )
+        return ReturnToMainResult(
+            "failed", reason="返回主界面观察预算已耗尽", actions=observations, clicks=clicks
+        )
         return ReturnToMainResult("failed", reason="返回主界面观察预算已耗尽", actions=observations, clicks=clicks)
