@@ -107,5 +107,24 @@ class CaptureStabilityGate:
             raise RuntimeError("当前场景来自已失效的截图标定，已阻止输入")
         return signature
 
+    def can_relock_to(self, signature: CaptureSignature) -> bool:
+        """Allow a read-only re-lock after macOS changes backing scale.
+
+        A new geometry is never accepted by ``observe`` or ``validate``.  The
+        runtime must first capture a second compatible fresh frame, then call
+        ``relock`` before it can authorize a later input.
+        """
+        return bool(
+            self.baseline is not None
+            and signature.source == self.baseline.source
+            and signature.image_size == self.baseline.image_size
+        )
+
+    def relock(self, signature: CaptureSignature) -> CaptureSignature:
+        if not self.can_relock_to(signature):
+            raise RuntimeError("新截图来源或规范化尺寸不允许重新标定")
+        self.baseline = signature
+        return signature
+
 
 __all__ = ["CaptureSignature", "CaptureStabilityGate"]

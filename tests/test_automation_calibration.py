@@ -88,6 +88,22 @@ class CaptureStabilityGateTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "旧标定已失效"):
             gate.observe(maa)
+        self.assertFalse(gate.can_relock_to(maa))
+
+    def test_matching_normalized_system_capture_can_relock_after_scale_change(self):
+        gate = CaptureStabilityGate()
+        gate.observe(signature())
+        scaled = signature(
+            source_size=(750, 570),
+            content_rect=(42, 52, 666, 462),
+            pixel_scale=1.0,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "旧标定已失效"):
+            gate.observe(scaled)
+        self.assertTrue(gate.can_relock_to(scaled))
+        self.assertIs(gate.relock(scaled), scaled)
+        self.assertIs(gate.validate(scaled), scaled)
 
     def test_missing_or_stale_scene_signature_cannot_authorize_input(self):
         gate = CaptureStabilityGate()

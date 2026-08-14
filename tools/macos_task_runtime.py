@@ -155,7 +155,28 @@ class MacOSTaskRuntime:
         frame = self.backend.capture(self.guard)
         image = frame.image
         first_capture = self.capture_gate.baseline is None
-        signature = self.capture_gate.observe(frame.signature)
+        try:
+            signature = self.capture_gate.observe(frame.signature)
+        except RuntimeError:
+            if not self.capture_gate.can_relock_to(frame.signature):
+                raise
+            # A window crossing display scale spaces can change raw pixels
+            # between input steps. Re-capture before re-locking so no changed
+            # frame can immediately authorize an action.
+            candidate = frame.signature
+            self.guard.wait(0.25)
+            frame = self.backend.capture(self.guard)
+            image = frame.image
+            if not candidate.is_compatible_with(frame.signature):
+                raise RuntimeError("截图几何变化尚未稳定，已阻止重新标定")
+            signature = self.capture_gate.relock(frame.signature)
+            log_event(
+                "capture_calibration_relocked",
+                targetId=self.target_id,
+                windowId=self.window_id,
+                **signature.to_payload(),
+                **frame.geometry_payload(),
+            )
         if first_capture:
             log_event(
                 "capture_calibration_locked",
