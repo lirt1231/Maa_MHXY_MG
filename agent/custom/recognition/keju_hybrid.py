@@ -6,7 +6,9 @@ import tempfile
 import time
 import unicodedata
 from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
 
 import requests
 from maa.context import Context
@@ -319,6 +321,50 @@ def _request_model(url, api_key, model, prompt, timeout, extra_body=None):
     return payload["choices"][0]["message"]["content"]
 
 
+def _request_huishi_models(
+    url,
+    api_key,
+    primary_model,
+    fallback_model,
+    prompt,
+    timeout,
+    extra_body=None,
+):
+    """Start both 会试 requests together while always preferring the primary."""
+    start_barrier = Barrier(2)
+
+    def request(model_name):
+        start_barrier.wait()
+        return _request_model(
+            url,
+            api_key,
+            model_name,
+            prompt,
+            timeout,
+            extra_body,
+        )
+
+    executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="keju-model")
+    primary_future = executor.submit(request, primary_model)
+    fallback_future = executor.submit(request, fallback_model)
+    request_errors = (requests.RequestException, KeyError, IndexError, ValueError)
+    try:
+        try:
+            return primary_future.result(), primary_model, None
+        except request_errors as primary_exc:
+            primary_error = f"{type(primary_exc).__name__}: {primary_exc}"
+            try:
+                return fallback_future.result(), fallback_model, primary_error
+            except request_errors as fallback_exc:
+                raise requests.RequestException(
+                    f"主模型失败 ({primary_error}); 备用模型失败 "
+                    f"({type(fallback_exc).__name__}: {fallback_exc})"
+                ) from fallback_exc
+    finally:
+        # A successful primary response must not wait for a slower fallback.
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
 def _request_codex_model(prompt, timeout):
     schema = {
         "type": "object",
@@ -629,6 +675,9 @@ class KejuHybridAnswer(CustomRecognition):
         model = os.environ.get("MAA_KEJU_MODEL", "").strip() or str(
             attach.get("model", "")
         ).strip()
+        fallback_model = os.environ.get(
+            "MAA_KEJU_FALLBACK_MODEL", ""
+        ).strip() or str(attach.get("fallback_model", "")).strip()
         timeout = float(
             os.environ.get("MAA_KEJU_TIMEOUT", attach.get("timeout", 12))
         )
@@ -787,19 +836,47 @@ class KejuHybridAnswer(CustomRecognition):
                         **({} if xiangshi_mode else {"force_answer": force_model_answer}),
                     )
                 with timings.track("model_request"):
-                    model_content = _request_model(
-                        url,
-                        api_key,
-                        model,
-                        prompt,
-                        timeout,
-                        extra_body=model_extra_body,
-                    )
+                    if force_model_answer and fallback_model:
+                        (
+                            model_content,
+                            responding_model,
+                            primary_model_error,
+                        ) = _request_huishi_models(
+                            url,
+                            api_key,
+                            model,
+                            fallback_model,
+                            prompt,
+                            timeout,
+                            extra_body=model_extra_body,
+                        )
+                    else:
+                        model_content = _request_model(
+                            url,
+                            api_key,
+                            model,
+                            prompt,
+                            timeout,
+                            extra_body=model_extra_body,
+                        )
+                        responding_model = model
+                        primary_model_error = None
                 with timings.track("parse_decision"):
                     model_decision = parse_model_decision(
                         model_content, tuple(valid_options)
                     )
-                    accept_model_decision(model_decision, "模型")
+                    decision_label = (
+                        f"备用模型 {responding_model}"
+                        if responding_model != model
+                        else "模型"
+                    )
+                    accept_model_decision(model_decision, decision_label)
+                    if responding_model != model and model_answer:
+                        fallback_validation = model_error
+                        model_source = "huishi_qwen_fallback"
+                        model_error = f"主模型失败，已采用 {responding_model}: {primary_model_error}"
+                        if fallback_validation:
+                            model_error += f"; {fallback_validation}"
                 if model_answer and model_source is None:
                     model_source = "web_search_verified_model"
             except (requests.RequestException, KeyError, IndexError, ValueError) as exc:

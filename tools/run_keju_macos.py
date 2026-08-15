@@ -541,6 +541,10 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
         os.environ["MAA_KEJU_URL"] = url
     if model:
         os.environ["MAA_KEJU_MODEL"] = model
+    if local_config.get("fallback_model"):
+        os.environ["MAA_KEJU_FALLBACK_MODEL"] = str(
+            local_config["fallback_model"]
+        )
     if local_config.get("timeout"):
         os.environ["MAA_KEJU_TIMEOUT"] = str(local_config["timeout"])
     if local_config.get("max_tokens"):

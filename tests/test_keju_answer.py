@@ -3,6 +3,7 @@ import tempfile
 import unittest
 import json
 import os
+import threading
 from unittest.mock import Mock, patch
 
 import numpy as np
@@ -38,6 +39,42 @@ from custom.recognition import keju_hybrid  # noqa: E402
 
 
 class QuestionBankTests(unittest.TestCase):
+    def test_huishi_parallel_model_request_prefers_successful_primary(self):
+        calls = []
+
+        def request(_url, _key, model, *_args):
+            calls.append(model)
+            return model
+
+        with patch.object(keju_hybrid, "_request_model", side_effect=request):
+            content, model, primary_error = keju_hybrid._request_huishi_models(
+                "https://example.test", "key", "gemini", "qwen-turbo",
+                "prompt", 6,
+            )
+
+        self.assertCountEqual(calls, ["gemini", "qwen-turbo"])
+        self.assertEqual((content, model, primary_error), ("gemini", "gemini", None))
+
+    def test_huishi_parallel_model_request_uses_ready_fallback_after_timeout(self):
+        fallback_started = threading.Event()
+
+        def request(_url, _key, model, *_args):
+            if model == "qwen-turbo":
+                fallback_started.set()
+                return "qwen answer"
+            self.assertTrue(fallback_started.wait(1))
+            raise keju_hybrid.requests.ReadTimeout("primary timed out")
+
+        with patch.object(keju_hybrid, "_request_model", side_effect=request):
+            content, model, primary_error = keju_hybrid._request_huishi_models(
+                "https://example.test", "key", "gemini", "qwen-turbo",
+                "prompt", 6,
+            )
+
+        self.assertEqual(content, "qwen answer")
+        self.assertEqual(model, "qwen-turbo")
+        self.assertIn("ReadTimeout", primary_error)
+
     def test_top_three_candidates_are_sorted(self):
         bank = {
             "科举殿试是谁主持进行的": ["李世民"],
