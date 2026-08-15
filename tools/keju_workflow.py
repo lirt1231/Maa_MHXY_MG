@@ -232,6 +232,18 @@ class KejuWorkflow:
             if status == "wrong_exam_type":
                 raise RuntimeError(str(decision.get("reason") or "当前科举考试类型不匹配"))
             if status == "unverified_exam_type":
+                if answered > 0:
+                    recognition_failures += 1
+                    if recognition_failures < self.max_recognition_failures:
+                        context.emit(
+                            "recognition_retry",
+                            polls=recognition_failures,
+                            limit=self.max_recognition_failures,
+                            status=status,
+                            reason=decision.get("reason"),
+                        )
+                        context.waiter.wait(min(self.delay, 1.0))
+                        continue
                 raise RuntimeError(str(decision.get("reason") or "无法确认当前科举考试类型"))
             raise RuntimeError(f"未处理的科举状态：{status}")
 

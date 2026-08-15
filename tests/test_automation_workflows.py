@@ -503,6 +503,40 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
             ["wait", "wait", "click", "wait"],
         )
 
+    def test_keju_retries_one_unverified_transition_after_confirmed_answer(self):
+        adapter = _DesktopAdapterA([])
+        source = _QuizSource([
+            _quiz_observation(
+                "ready",
+                question="第1/2题 示例题一",
+                question_key="round:1",
+                question_round=(1, 2),
+                answer="甲",
+                click=(620, 360),
+            ),
+            _quiz_observation("unverified_exam_type"),
+            _quiz_observation(
+                "ready",
+                question="第2/2题 示例题二",
+                question_key="round:2",
+                question_round=(2, 2),
+                answer="乙",
+                click=(720, 360),
+            ),
+        ])
+
+        outcome = KejuWorkflow(
+            source,
+            max_answers=2,
+            delay=0,
+        ).execute(WorkflowContext(adapter, adapter))
+
+        self.assertEqual(outcome.status, "completed")
+        self.assertEqual(
+            [entry[0] for entry in adapter.trace],
+            ["click", "wait", "click"],
+        )
+
     def test_keju_retry_reports_the_recognition_reason(self):
         adapter = _DesktopAdapterA([])
         source = _QuizSource([
