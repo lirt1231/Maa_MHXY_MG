@@ -10,6 +10,7 @@ import numpy as np
 from tools.run_keju_macos import (
     CancellationRequested,
     bind_keju_window,
+    capture_keju_settlement_reward,
     classify_keju_inspection,
     detect_exam_type,
     main,
@@ -22,6 +23,41 @@ from tools.run_keju_macos import (
     task_result,
     await_manual_review,
 )
+
+
+class KejuSettlementCaptureTests(unittest.TestCase):
+    def test_uses_captured_frame_metadata_for_reward_evidence(self):
+        image = np.zeros((718, 1020, 3), dtype=np.uint8)
+        capture = Mock()
+        capture.capture.return_value = image
+        capture.last_frame = SimpleNamespace(
+            frame_id="settlement-frame-1",
+            capture_method="maa",
+        )
+        recognition = SimpleNamespace(filtered_results=[
+            SimpleNamespace(text="科举乡试", box=(457, 138, 128, 30)),
+            SimpleNamespace(text="获得经验", box=(459, 538, 75, 22)),
+            SimpleNamespace(text="142923", box=(585, 538, 58, 22)),
+            SimpleNamespace(text="获得银币", box=(459, 562, 75, 22)),
+            SimpleNamespace(text="7347", box=(584, 564, 41, 20)),
+        ])
+        task = Mock(succeeded=True)
+        task.wait.return_value = task
+        task.get.return_value = SimpleNamespace(
+            nodes=[SimpleNamespace(recognition=recognition)]
+        )
+        tasker = Mock()
+        tasker.post_recognition.return_value = task
+
+        reward = capture_keju_settlement_reward(
+            tasker, capture, Mock(), "xiangshi"
+        )
+
+        self.assertEqual(reward["status"], "confirmed")
+        self.assertEqual(reward["experience"], 142923)
+        self.assertEqual(reward["silver"], 7347)
+        self.assertEqual(reward["evidence"]["frameId"], "settlement-frame-1")
+        self.assertEqual(reward["evidence"]["captureMethod"], "maa")
 
 
 class KejuArgumentTests(unittest.TestCase):

@@ -331,6 +331,9 @@ def capture_keju_settlement_reward(tasker, capture, guard, exam_type: str) -> di
     for poll in range(1, HUI_SHI_REWARD_POLLS + 1):
         guard.checkpoint()
         image = capture.capture(guard)
+        frame = capture.last_frame
+        if frame is None:
+            raise RuntimeError("结算截图后端未返回结构化帧")
         height, width = image.shape[:2]
         task = tasker.post_recognition(
             "OCR", JOCR(expected=[".*"], roi=(0, 0, width, height), threshold=0.2), image,
@@ -352,8 +355,8 @@ def capture_keju_settlement_reward(tasker, capture, guard, exam_type: str) -> di
             result = parser(texts, (width, height))
             if result["status"] == "confirmed":
                 result["evidence"].update({
-                    "frameId": capture.last_signature.frame_id,
-                    "captureMethod": capture.last_signature.capture_method,
+                    "frameId": frame.frame_id,
+                    "captureMethod": frame.capture_method,
                     "imageSize": [width, height],
                     "poll": poll,
                 })
