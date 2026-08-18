@@ -68,6 +68,32 @@ class UserProgressTranslationTests(unittest.TestCase):
 
         self.assertEqual(progress["message"], "已识别题目，正在选择答案")
 
+    def test_keju_entry_progress_distinguishes_navigation_and_waiting(self):
+        cases = (
+            ("open_activity", "正在打开活动页面"),
+            ("open_daily", "正在打开日常活动列表"),
+            ("scroll_daily", "正在活动列表中查找科举入口"),
+            ("join_task", "已找到科举入口，正在点击参加"),
+            ("exam_ready", "已进入科举乡试页面，正在等待正式题目"),
+        )
+
+        for status, expected in cases:
+            with self.subTest(status=status):
+                progress = user_progress(
+                    "keju",
+                    json.dumps({"event": "entry_status", "status": status}),
+                )
+                self.assertEqual(progress["message"], expected)
+
+        huishi = user_progress(
+            "keju_huishi",
+            '{"event":"entry_status","status":"exam_ready"}',
+        )
+        self.assertEqual(
+            huishi["message"],
+            "已进入科举会试页面，正在等待正式题目",
+        )
+
     def test_game_driven_monitor_reports_read_only_auto_completion(self):
         started = user_progress(
             "baotu",

@@ -131,6 +131,18 @@ def _structured_message(task_id: str, data: dict) -> str | None:
     event = data.get("event")
     if event == "target_bound":
         return "已连接到游戏窗口"
+    if event == "entry_status" and task_id in {"keju", "keju_huishi"}:
+        status = data.get("status")
+        if status == "exam_ready":
+            label = "乡试" if task_id == "keju" else "会试"
+            return f"已进入科举{label}页面，正在等待正式题目"
+        return {
+            "open_activity": "正在打开活动页面",
+            "open_daily": "正在打开日常活动列表",
+            "scroll_daily": "正在活动列表中查找科举入口",
+            "join_task": "已找到科举入口，正在点击参加",
+            "wait": "活动页面正在加载，正在继续等待",
+        }.get(status)
     if event in {"game_auto_monitor_started", "game_auto_monitor"}:
         task = str(data.get("task", "任务")).strip() or "任务"
         return f"{task}正在由游戏自动完成，请勿操作游戏窗口"
