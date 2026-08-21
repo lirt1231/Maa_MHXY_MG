@@ -112,6 +112,30 @@ class SearchParserTests(unittest.TestCase):
 
 
 class SearchAggregationTests(unittest.TestCase):
+    def test_game_question_discards_unrelated_search_results(self):
+        def provider(_query, _timeout, _limit):
+            return [
+                {
+                    "provider": "test", "kind": "result",
+                    "title": "Best Vietnam Food", "snippet": "Pho and Banh Mi",
+                    "url": "https://example.com/vietnam", "rank": 1,
+                },
+                {
+                    "provider": "test", "kind": "result",
+                    "title": "须弥海门派技能", "snippet": "须弥海技能说明",
+                    "url": "https://example.com/xumihai", "rank": 2,
+                },
+            ]
+
+        result = search_web_evidence(
+            "下列选项中不属于须弥海门派技能的是",
+            options={"A": "击水三千", "B": "扶摇直上"},
+            providers={"test": provider},
+        )
+
+        self.assertEqual(len(result["evidence"]), 1)
+        self.assertEqual(result["evidence"][0]["title"], "须弥海门派技能")
+
     def test_providers_start_concurrently_and_results_are_merged(self):
         barrier = threading.Barrier(2)
 
