@@ -7,6 +7,7 @@ afterEach(cleanup);
 describe("ManualReviewDialog", () => {
   it("shows model and search material and submits the selected answer", async () => {
     const submit = vi.fn().mockResolvedValue(undefined);
+    const exit = vi.fn().mockResolvedValue(undefined);
     render(<ManualReviewDialog review={{
       requestId: "request-1", question: "哪项正确？",
       options: { A: "甲", B: "乙", C: "丙", D: "丁" },
@@ -14,7 +15,7 @@ describe("ManualReviewDialog", () => {
         model: { answer: "B", confidence: 0.55, reason: "模型依据" },
         webSearch: { query: "哪项正确", evidence: [{ title: "搜索来源", snippet: "搜索摘要", url: "https://example.test" }] },
       },
-    }} onSubmit={submit} />);
+    }} onSubmit={submit} onExit={exit} />);
 
     expect(screen.getByText("模型依据")).toBeTruthy();
     expect(screen.getByText("搜索摘要")).toBeTruthy();
@@ -23,5 +24,19 @@ describe("ManualReviewDialog", () => {
 
     await Promise.resolve();
     expect(submit).toHaveBeenCalledWith("B");
+  });
+
+  it("stops the pending answer flow when the player exits", async () => {
+    const submit = vi.fn().mockResolvedValue(undefined);
+    const exit = vi.fn().mockResolvedValue(undefined);
+    render(<ManualReviewDialog review={{
+      requestId: "request-1", question: "题目", options: { A: "甲", B: "乙" }, review: {},
+    }} onSubmit={submit} onExit={exit} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "退出答题" }));
+
+    await Promise.resolve();
+    expect(exit).toHaveBeenCalledOnce();
+    expect(submit).not.toHaveBeenCalled();
   });
 });

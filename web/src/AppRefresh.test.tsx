@@ -121,6 +121,32 @@ describe("App daily refresh", () => {
     expect(apiMock.submitManualReview).toHaveBeenCalledWith("xiangshi-run", "request-1", "C");
   });
 
+  it("stops the xiangshi run from its manual review dialog", async () => {
+    const run = {
+      id: "xiangshi-run", taskId: "keju", taskName: "科举乡试", status: "running",
+      stage: "等待人工选择乡试答案", options: {}, startedAt: "2026-08-13T00:00:00Z",
+    };
+    apiMock.system.mockResolvedValueOnce({
+      platform: "darwin", gameRunning: true, windowFound: true, screenCapturePermission: true,
+      accessibilityPermission: true, available: true, status: "running", metricCollectedToday: true, run,
+    });
+    apiMock.runs.mockResolvedValueOnce({ items: [run], summary: { total: 0, succeeded: 0, failed: 0, successRate: 0, averageDurationMs: 0 } });
+    apiMock.runEvents.mockResolvedValueOnce({ items: [{
+      id: 10, runId: "xiangshi-run", createdAt: "2026-08-13T00:00:00Z", level: "warning", type: "manual_review",
+      message: "乡试需要人工选择答案", payload: {
+        requestId: "request-1", question: "常识题", options: { A: "甲", B: "乙" }, review: {},
+      },
+    }] });
+
+    render(<App />);
+    await flushRefresh();
+    fireEvent.click(screen.getByRole("button", { name: "退出答题" }));
+    await flushRefresh();
+
+    expect(apiMock.stop).toHaveBeenCalledWith("xiangshi-run");
+    expect(screen.queryByRole("dialog", { name: "乡试人工复核" })).toBeNull();
+  });
+
   it("refreshes once after the next local midnight and clears the timer on unmount", async () => {
     vi.setSystemTime(new Date(2026, 6, 28, 23, 59, 59, 500));
     const view = render(<App />);

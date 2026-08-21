@@ -20,12 +20,14 @@ export type ManualReview = {
   };
 };
 
-export function ManualReviewDialog({ review, onSubmit }: {
+export function ManualReviewDialog({ review, onSubmit, onExit }: {
   review: ManualReview;
   onSubmit: (answer: "A" | "B" | "C" | "D") => Promise<void>;
+  onExit: () => Promise<void>;
 }) {
   const [selected, setSelected] = useState<"A" | "B" | "C" | "D">();
   const [submitting, setSubmitting] = useState(false);
+  const [exiting, setExiting] = useState(false);
   const [error, setError] = useState<string>();
   const model = review.review.model;
   const evidence = review.review.webSearch?.evidence || [];
@@ -37,6 +39,12 @@ export function ManualReviewDialog({ review, onSubmit }: {
     catch (reason) { setError(reason instanceof Error ? reason.message : "提交失败"); setSubmitting(false); }
   }
 
+  async function exit() {
+    setExiting(true); setError(undefined);
+    try { await onExit(); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "退出失败"); setExiting(false); }
+  }
+
   return <div className="dialog-backdrop manual-review-backdrop">
     <section className="dialog manual-review-dialog" role="dialog" aria-modal="true" aria-label="乡试人工复核">
       <span className="eyebrow">乡试人工复核</span>
@@ -45,7 +53,7 @@ export function ManualReviewDialog({ review, onSubmit }: {
       <div className="manual-review-options" role="radiogroup" aria-label="答案选项">
         {(["A", "B", "C", "D"] as const).filter((answer) => Boolean(review.options[answer])).map((answer) => <button
           key={answer} type="button" role="radio" aria-checked={selected === answer}
-          className={selected === answer ? "selected" : ""} disabled={submitting}
+          className={selected === answer ? "selected" : ""} disabled={submitting || exiting}
           onClick={() => setSelected(answer)}><b>{answer}</b><span>{review.options[answer]}</span>
         </button>)}
       </div>
@@ -60,7 +68,7 @@ export function ManualReviewDialog({ review, onSubmit }: {
         {evidence.length ? <ul>{evidence.map((item, index) => <li key={`${item.id || "evidence"}-${index}`}><strong>{item.title || item.provider || "搜索结果"}</strong><p>{item.snippet || "无摘要"}</p>{item.url && <a href={item.url} target="_blank" rel="noreferrer">打开来源</a>}</li>)}</ul> : <p>没有可用的搜索结果。</p>}
       </section>
       {error && <p className="manual-review-error" role="alert">{error}</p>}
-      <div className="dialog-actions"><button className="button primary" disabled={!selected || submitting} onClick={submit}>{submitting ? "正在复核当前题面…" : "确认答案"}</button></div>
+      <div className="dialog-actions"><button className="button ghost" disabled={submitting || exiting} onClick={exit}>{exiting ? "正在退出答题…" : "退出答题"}</button><button className="button primary" disabled={!selected || submitting || exiting} onClick={submit}>{submitting ? "正在复核当前题面…" : "确认答案"}</button></div>
     </section>
   </div>;
 }

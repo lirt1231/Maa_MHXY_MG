@@ -283,6 +283,7 @@ export function App() {
       });
       return;
     }
+    setManualReview(undefined);
     await refreshAfterAction("任务已经停止，但页面没有更新");
   }
 
@@ -405,7 +406,7 @@ export function App() {
     </div>
     {selected && <TaskDialog task={selected} busy={busy} onClose={() => setSelected(undefined)} onStart={startTask} onInspect={inspectTask} />}
     {correcting && metrics?.snapshots.at(-1) && <MetricCorrectionDialog snapshot={metrics.snapshots.at(-1)!} onClose={() => setCorrecting(false)} onSave={async (values) => { await api.correctMetric(metrics.snapshots.at(-1)!.id, values); await refresh(); }} />}
-    {manualReview && current?.taskId === "keju" && busy && <ManualReviewDialog review={manualReview} onSubmit={submitManualReview} />}
+    {manualReview && current?.taskId === "keju" && busy && <ManualReviewDialog review={manualReview} onSubmit={submitManualReview} onExit={stopTask} />}
     {system && onboardingOpen && <OnboardingDialog
       system={system} busy={busy} startingGame={startingGame}
       onStartGame={startGame} onRefresh={refresh}
