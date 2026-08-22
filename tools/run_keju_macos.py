@@ -413,6 +413,7 @@ class KejuMacOSObservationSource:
             "source": getattr(self.recognizer, "last_source", ""),
             "click": getattr(self.recognizer, "last_click", None),
             "manualReview": getattr(self.recognizer, "last_manual_review", None),
+            "result": getattr(self.recognizer, "last_terminal_result", None),
         }
         if status == "wrong_exam_type":
             expected_label = EXAM_LABELS[self.exam_type]
@@ -688,7 +689,7 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
     result_payload = {
         **outcome.payload,
     }
-    if outcome.status == "completed":
+    if outcome.status == "completed" and "settlement_reward" not in result_payload:
         result_payload["settlement_reward"] = capture_keju_settlement_reward(
             tasker, capture, guard, args.exam_type
         )

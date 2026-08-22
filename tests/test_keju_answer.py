@@ -818,6 +818,43 @@ class HybridAnswerTests(unittest.TestCase):
         self.assertEqual(recognizer.last_answer, "C")
         self.assertEqual(recognizer.last_source, "huishi_forced_model_guess")
 
+    def test_huishi_terminal_result_is_completed_without_model_request(self):
+        recognizer = object.__new__(keju_hybrid.KejuHybridAnswer)
+        image = np.ones((720, 923, 3), dtype=np.uint8)
+        option_results = iter([
+            ("A.本场会试获得奖金382", [340, 315, 225, 80]),
+            ("B.殿试资格", [570, 315, 230, 80]),
+            ("C.本次科举您回答正确13切莫气馁，下次再战", [340, 395, 225, 75]),
+            ("D.再接再厉", [570, 395, 230, 75]),
+        ])
+
+        with (
+            patch.dict("os.environ", {"MAA_KEJU_EXAM_TYPE": "huishi"}),
+            patch.object(
+                keju_hybrid, "_ocr_region",
+                side_effect=["科举会试", "再接再厉"],
+            ),
+            patch.object(
+                keju_hybrid, "_ocr_region_with_box",
+                side_effect=lambda *_args: next(option_results),
+            ),
+            patch.object(keju_hybrid, "search_candidates") as search,
+            patch.object(keju_hybrid, "_request_model") as model,
+        ):
+            result = recognizer._analyze(
+                SimpleNamespace(), SimpleNamespace(image=image),
+                keju_hybrid._StageTimings(),
+            )
+
+        self.assertEqual(recognizer.last_status, "completed")
+        self.assertEqual(recognizer.last_terminal_result["correctAnswers"], 13)
+        self.assertEqual(
+            recognizer.last_terminal_result["settlementReward"]["gold"], 382
+        )
+        self.assertEqual(tuple(result.box), (0, 0, 0, 0))
+        search.assert_not_called()
+        model.assert_not_called()
+
     def test_recognizer_uses_codex_when_configured_api_fails(self):
         recognizer = object.__new__(keju_hybrid.KejuHybridAnswer)
         image = np.ones((720, 923, 3), dtype=np.uint8)

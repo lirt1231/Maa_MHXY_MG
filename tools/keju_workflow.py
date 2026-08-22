@@ -116,6 +116,21 @@ class KejuWorkflow:
             status = decision.get("status", "unknown")
             context.emit("quiz_observation", step=step, **decision)
 
+            if status == "completed":
+                terminal_result = decision.get("result")
+                payload = {
+                    "answers": answered,
+                    "clicks": metrics.clicks,
+                    "limit": self.max_answers,
+                }
+                if isinstance(terminal_result, Mapping):
+                    if isinstance(terminal_result.get("correctAnswers"), int):
+                        payload["correct_answers"] = terminal_result["correctAnswers"]
+                    reward = terminal_result.get("settlementReward")
+                    if isinstance(reward, Mapping):
+                        payload["settlement_reward"] = dict(reward)
+                return WorkflowResult("completed", payload)
+
             if status == "ready":
                 recognition_failures = 0
                 question = str(decision.get("question", ""))

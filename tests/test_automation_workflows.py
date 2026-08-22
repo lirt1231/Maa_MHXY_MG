@@ -411,6 +411,30 @@ class PlatformNeutralWorkflowContractTests(unittest.TestCase):
             ["click", "click", "click", "click"],
         )
 
+    def test_keju_terminal_result_completes_without_waiting_or_clicking(self):
+        adapter = _DesktopAdapterA([])
+        source = _QuizSource([
+            _quiz_observation(
+                "completed",
+                result={
+                    "correctAnswers": 13,
+                    "settlementReward": {
+                        "status": "confirmed", "gold": 382,
+                        "evidence": {"sourcePage": "huishi_terminal_text"},
+                    },
+                },
+            ),
+        ])
+
+        outcome = KejuWorkflow(source, max_answers=20, delay=0).execute(
+            WorkflowContext(adapter, adapter)
+        )
+
+        self.assertEqual(outcome.status, "completed")
+        self.assertEqual(outcome.payload["correct_answers"], 13)
+        self.assertEqual(outcome.payload["settlement_reward"]["gold"], 382)
+        self.assertEqual(adapter.trace, [])
+
     def test_keju_same_question_never_causes_a_second_click(self):
         adapter = _DesktopAdapterA([])
         repeated = _quiz_observation(

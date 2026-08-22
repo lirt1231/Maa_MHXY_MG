@@ -438,6 +438,7 @@ class KejuHybridAnswer(CustomRecognition):
             )
 
     def _analyze(self, context, argv, timings):
+        self.last_terminal_result = None
         with timings.track("screenshot"):
             image = _recognition_image(context, argv)
         expected_exam_type = os.environ.get("MAA_KEJU_EXAM_TYPE", "xiangshi")
@@ -533,6 +534,35 @@ class KejuHybridAnswer(CustomRecognition):
                 options[choice] = _clean_option_text(choice, text)
                 option_boxes[choice] = box
         valid_options = {choice: text for choice, text in options.items() if text}
+        if expected_exam_type == "huishi":
+            terminal_text = re.sub(
+                r"\s+", "", question + "".join(valid_options.values())
+            )
+            correct_match = re.search(
+                r"本次科举(?:您)?回答正确(\d+)", terminal_text
+            )
+            terminal_marker = re.search(
+                r"切莫气馁|下次再战|再接再厉|殿试资格", terminal_text
+            )
+            if correct_match and terminal_marker:
+                result = {"correctAnswers": int(correct_match.group(1))}
+                reward_match = re.search(
+                    r"本场(?:会试)?(?:获得)?奖金(\d+)", terminal_text
+                )
+                if reward_match:
+                    result["settlementReward"] = {
+                        "status": "confirmed",
+                        "gold": int(reward_match.group(1)),
+                        "evidence": {"sourcePage": "huishi_terminal_text"},
+                    }
+                self.last_terminal_result = result
+                self.last_status = "completed"
+                self.last_question = question
+                self.last_options = valid_options
+                self.last_reason = "已识别会试最终结果页"
+                return CustomRecognition.AnalyzeResult(
+                    box=(0, 0, 0, 0), detail=self.last_reason
+                )
         requires_round_one = os.environ.get("MAA_KEJU_REQUIRE_ROUND_ONE") == "1"
         live_formal_without_round = (
             round_number is None
