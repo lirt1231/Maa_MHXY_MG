@@ -10,6 +10,7 @@ RECOGNITION_DIR = Path(__file__).resolve().parents[1] / "agent" / "custom" / "re
 sys.path.insert(0, str(RECOGNITION_DIR))
 
 from keju_knowledge import KejuKnowledgeStore  # noqa: E402
+from keju_web_search import clean_search_question  # noqa: E402
 
 
 class KejuKnowledgeStoreTests(unittest.TestCase):
@@ -148,6 +149,31 @@ class KejuKnowledgeStoreTests(unittest.TestCase):
         self.assertEqual(result["id"], "xiangshi-liubei-zhuge-couplet")
         self.assertEqual(result["answer"], "是的")
         self.assertGreaterEqual(result["similarity"], 90)
+
+    def test_default_seed_answers_recorded_huishi_round(self):
+        fixture = json.loads(
+            (Path(__file__).parent / "fixtures" / "huishi_2026_08_22.json")
+            .read_text(encoding="utf-8")
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            empty_bank = Path(directory) / "bank.txt"
+            empty_bank.write_text("", encoding="utf-8")
+            store = KejuKnowledgeStore(
+                Path(directory) / "knowledge.sqlite3",
+                RECOGNITION_DIR / "keju_knowledge_seed.json",
+                empty_bank,
+            )
+            for item in fixture["questions"]:
+                question = clean_search_question(item["rawQuestion"])
+                result = store.search(question, limit=1)[0]
+                self.assertEqual(
+                    result["answer"], item["options"][item["expectedAnswer"]],
+                    f"round {item['round']}: {result}",
+                )
+                self.assertGreaterEqual(
+                    result["similarity"], 90,
+                    f"round {item['round']}: {result}",
+                )
 
 
 if __name__ == "__main__":

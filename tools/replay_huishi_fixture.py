@@ -105,6 +105,7 @@ def replay_question(item: dict) -> dict:
         "status": getattr(recognizer, "last_status", "unknown"),
         "answer": getattr(recognizer, "last_answer", ""),
         "recordedAnswer": item.get("answer"),
+        "expectedAnswer": item.get("expectedAnswer", item.get("answer")),
         "source": getattr(recognizer, "last_source", ""),
         "reason": getattr(recognizer, "last_reason", ""),
         "elapsedMs": round((time.perf_counter() - started) * 1000),
@@ -135,6 +136,9 @@ def main() -> int:
         "questions": len(results),
         "changedAnswers": sum(
             item["answer"] != item["recordedAnswer"] for item in results
+        ),
+        "unexpectedAnswers": sum(
+            item["answer"] != item["expectedAnswer"] for item in results
         ),
         "elapsedMs": sum(item["elapsedMs"] for item in results),
     }, ensure_ascii=False), flush=True)
