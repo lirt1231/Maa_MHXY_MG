@@ -20,6 +20,7 @@ from .keju_answer_core import (
     VALID_CHOICES,
     build_xiangshi_prompt,
     build_verification_prompt,
+    deterministic_timed_guess,
     infer_direct_evidence_option,
     knowledge_fallback,
     local_fallback,
@@ -945,11 +946,22 @@ class KejuHybridAnswer(CustomRecognition):
             )
 
         with timings.track("parse_decision"):
+            timed_guess = None
+            if expected_exam_type == "huishi" and not (
+                trusted_local_answer or trusted_knowledge_answer or model_answer
+                or local_answer
+            ):
+                timed_guess = deterministic_timed_guess(question, valid_options)
+                if timed_guess:
+                    failure = model_error or "没有可用的题库或模型答案"
+                    model_error = f"{failure}; 限时会试已执行确定性猜测"
+                    model_reason = "主备用决策均不可用，按当前题面稳定选择有效选项"
             final_answer = (
                 trusted_local_answer
                 or trusted_knowledge_answer
                 or model_answer
                 or local_answer
+                or timed_guess
             )
             source = (
                 "question_bank_exact"
@@ -959,6 +971,10 @@ class KejuHybridAnswer(CustomRecognition):
                 else model_source
                 if model_answer
                 else "question_bank_fallback"
+                if local_answer
+                else "huishi_deterministic_guess"
+                if timed_guess
+                else "unavailable"
             )
         if final_answer not in VALID_CHOICES or final_answer not in valid_options:
             self.last_manual_review = {

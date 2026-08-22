@@ -1,3 +1,4 @@
+import hashlib
 import json
 import re
 from difflib import SequenceMatcher
@@ -10,6 +11,18 @@ except ImportError:  # Allow the pure logic module to be tested without MaaFrame
 
 VALID_CHOICES = ("A", "B", "C", "D")
 REFERENCE_SIZE = (1280, 720)
+
+
+def deterministic_timed_guess(question, options):
+    """Choose a stable valid option when a timed exam has no usable decision."""
+    choices = [choice for choice in VALID_CHOICES if choice in options]
+    if not choices:
+        return None
+    material = normalize_text(question) + "|" + "|".join(
+        f"{choice}:{normalize_text(options[choice])}" for choice in choices
+    )
+    index = hashlib.sha256(material.encode("utf-8")).digest()[0] % len(choices)
+    return choices[index]
 
 
 def looks_like_answer_result(question, options):

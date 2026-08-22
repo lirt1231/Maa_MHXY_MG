@@ -18,6 +18,7 @@ sys.path.insert(0, str(RECOGNITION_DIR))
 from keju_answer_core import (  # noqa: E402
     answer_to_option,
     build_verification_prompt,
+    deterministic_timed_guess,
     knowledge_fallback,
     infer_direct_evidence_option,
     local_fallback,
@@ -285,6 +286,15 @@ class HybridAnswerTests(unittest.TestCase):
             validate_forced_model_decision(guess, ("A", "B", "C", "D")),
             ("D", None),
         )
+
+    def test_timed_guess_is_stable_and_uses_only_available_options(self):
+        options = {"A": "甲", "C": "丙", "D": "丁"}
+
+        first = deterministic_timed_guess("完全未知的会试题", options)
+
+        self.assertIn(first, options)
+        self.assertEqual(first, deterministic_timed_guess("完全未知的会试题", options))
+        self.assertIsNone(deterministic_timed_guess("题目", {}))
 
     def test_forced_model_guess_still_requires_an_explanation(self):
         answer, error = validate_forced_model_decision({
@@ -854,6 +864,53 @@ class HybridAnswerTests(unittest.TestCase):
         self.assertEqual(tuple(result.box), (0, 0, 0, 0))
         search.assert_not_called()
         model.assert_not_called()
+
+    def test_huishi_guesses_when_primary_and_fallback_models_fail(self):
+        recognizer = object.__new__(keju_hybrid.KejuHybridAnswer)
+        image = np.ones((720, 923, 3), dtype=np.uint8)
+        context = SimpleNamespace(get_node_data=lambda _name: {"attach": {}})
+        options = {"A": "甲", "B": "乙", "C": "丙", "D": "丁"}
+        option_results = iter([
+            (f"{choice}.{text}", [340, 315, 225, 80])
+            for choice, text in options.items()
+        ])
+
+        with (
+            patch.dict("os.environ", {
+                "MAA_KEJU_EXAM_TYPE": "huishi",
+                "MAA_KEJU_RECOGNIZE_ONLY": "1",
+                "MAA_KEJU_API_KEY": "test-key",
+                "MAA_KEJU_URL": "https://example.test/v1/chat/completions",
+                "MAA_KEJU_MODEL": "primary",
+                "MAA_KEJU_FALLBACK_MODEL": "fallback",
+                "MAA_KEJU_WEB_SEARCH_ENABLED": "0",
+            }),
+            patch.object(
+                keju_hybrid, "_ocr_region",
+                side_effect=["科举会试", "第8/20题完全未知的会试题"],
+            ),
+            patch.object(
+                keju_hybrid, "_ocr_region_with_box",
+                side_effect=lambda *_args: next(option_results),
+            ),
+            patch.object(keju_hybrid, "search_candidates", return_value=[]),
+            patch.object(keju_hybrid, "search_knowledge", return_value=[]),
+            patch.object(
+                keju_hybrid, "_request_huishi_models",
+                side_effect=keju_hybrid.requests.ReadTimeout("both failed"),
+            ),
+        ):
+            recognizer._analyze(
+                context, SimpleNamespace(image=image),
+                keju_hybrid._StageTimings(),
+            )
+
+        self.assertEqual(recognizer.last_status, "ready")
+        self.assertEqual(recognizer.last_source, "huishi_deterministic_guess")
+        self.assertEqual(
+            recognizer.last_answer,
+            deterministic_timed_guess("完全未知的会试题", options),
+        )
 
     def test_recognizer_uses_codex_when_configured_api_fails(self):
         recognizer = object.__new__(keju_hybrid.KejuHybridAnswer)
