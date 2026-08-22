@@ -378,6 +378,24 @@ def infer_direct_evidence_option(evidence, options, question=None):
     return {"answer": choice, "evidence_ids": evidence_ids}
 
 
+def infer_unique_reason_option(decision, options):
+    """Correct a letter that contradicts the only option named in its reason."""
+    if not decision:
+        return None
+    reason = normalize_text(decision.get("reason", ""))
+    answer = decision.get("answer")
+    if not reason or answer not in options:
+        return None
+    mentioned = []
+    for choice, option_text in options.items():
+        normalized_option = normalize_text(str(option_text))
+        if len(normalized_option) >= 2 and normalized_option in reason:
+            mentioned.append(choice)
+    if len(mentioned) == 1 and mentioned[0] != answer:
+        return mentioned[0]
+    return None
+
+
 def resolve_model_decision(
     decision,
     valid_evidence_ids,
@@ -401,6 +419,14 @@ def resolve_model_decision(
     )
     if answer is not None:
         return answer, False, None
+    reason_option = infer_unique_reason_option(decision, options)
+    if reason_option is not None:
+        return (
+            reason_option,
+            False,
+            f"理由选项纠偏：{label}返回字母{decision.get('answer')}，"
+            f"但理由唯一明确指向选项{reason_option}",
+        )
     direct_evidence = infer_direct_evidence_option(evidence, options, question)
     if direct_evidence is not None:
         corrected = direct_evidence["answer"]

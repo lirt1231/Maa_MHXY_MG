@@ -21,6 +21,7 @@ from keju_answer_core import (  # noqa: E402
     deterministic_timed_guess,
     knowledge_fallback,
     infer_direct_evidence_option,
+    infer_unique_reason_option,
     local_fallback,
     looks_like_answer_result,
     parse_model_answer,
@@ -353,6 +354,38 @@ class HybridAnswerTests(unittest.TestCase):
         self.assertEqual(answer, "C")
         self.assertFalse(forced)
         self.assertIn("证据直接纠偏", error)
+
+    def test_unique_reason_option_corrects_mismatched_answer_letter(self):
+        options = {
+            "A": "白象王", "B": "大鹏王", "C": "九灵元圣", "D": "青狮王",
+        }
+        decision = {
+            "answer": "B", "confidence": 0.95, "evidence_ids": ["web-1"],
+            "reason": "证据说明青狮王提高所有狮驼伙伴的伤害，因此选择B。",
+        }
+        evidence = [{
+            "id": "web-1", "title": "青狮王助战解析",
+            "snippet": "青狮王提高所有狮驼伙伴的伤害。",
+        }]
+
+        answer, forced, error = resolve_model_decision(
+            decision, {"web-1"}, 0.62, "备用模型",
+            evidence=evidence, options=options, force_answer=True,
+        )
+
+        self.assertEqual(infer_unique_reason_option(decision, options), "D")
+        self.assertEqual(answer, "D")
+        self.assertFalse(forced)
+        self.assertIn("理由选项纠偏", error)
+
+    def test_reason_discussing_multiple_options_does_not_override_letter(self):
+        options = {"A": "成都", "B": "长沙", "C": "重庆", "D": "武汉"}
+        decision = {
+            "answer": "C", "confidence": 0.8, "evidence_ids": [],
+            "reason": "成都和武汉均不符，答案是重庆。",
+        }
+
+        self.assertIsNone(infer_unique_reason_option(decision, options))
 
     def test_multiple_supported_options_do_not_trigger_direct_override(self):
         evidence = [
