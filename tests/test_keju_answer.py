@@ -745,6 +745,18 @@ class HybridAnswerTests(unittest.TestCase):
             keju_hybrid._clean_question_text("第3题圆周率是多少"),
             "圆周率是多少",
         )
+        self.assertEqual(
+            keju_hybrid._clean_question_text(
+                "第2题剩余时间哪位助战可以增加其他狮驼伙伴的物理伤害"
+            ),
+            "哪位助战可以增加其他狮驼伙伴的物理伤害",
+        )
+        self.assertEqual(
+            keju_hybrid._clean_question_text(
+                "第4题剩余时间20圆我国卫星火箭发射基地西昌位于"
+            ),
+            "我国卫星火箭发射基地西昌位于",
+        )
 
     def test_title_uses_expanded_fallback_before_rejecting_exam_type(self):
         recognizer = object.__new__(keju_hybrid.KejuHybridAnswer)
