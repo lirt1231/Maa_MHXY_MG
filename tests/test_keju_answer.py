@@ -701,6 +701,18 @@ class HybridAnswerTests(unittest.TestCase):
         self.assertLessEqual(question_bottom, keju_hybrid.MAC_OPTION_ROIS["A"][1])
         self.assertGreaterEqual(keju_hybrid.MAC_QUESTION_ROI[3], 80)
 
+    def test_question_cleaning_removes_observed_timer_icon_noise_only(self):
+        self.assertEqual(
+            keju_hybrid._clean_question_text(
+                "第3题剩余时间圆我国古代的乐府双璧是指"
+            ),
+            "我国古代的乐府双璧是指",
+        )
+        self.assertEqual(
+            keju_hybrid._clean_question_text("第3题圆周率是多少"),
+            "圆周率是多少",
+        )
+
     def test_title_uses_expanded_fallback_before_rejecting_exam_type(self):
         recognizer = object.__new__(keju_hybrid.KejuHybridAnswer)
         image = np.ones((720, 923, 3), dtype=np.uint8)

@@ -30,6 +30,9 @@ def clean_search_question(question: str) -> str:
     text = re.sub(r"^正确率[:：]?\s*\d+\s*/\s*\d+", "", text)
     text = re.sub(r"^当前得分[:：]?\s*\d+", "", text)
     text = re.sub(r"^剩余时间\s*\d*", "", text)
+    text = re.sub(
+        r"^圆(?=(?:我国|世界|在|被|目前|大运河|昆曲|电度表))", "", text
+    )
     return text.strip("-—:：,，.。?？!！ ")
 
 
@@ -366,23 +369,22 @@ def _deduplicate(evidence: list[dict]) -> list[dict]:
     return output
 
 
-def _game_evidence_terms(question: str, options: dict | None) -> tuple[str, ...]:
-    """Return distinctive terms that web evidence must contain for game questions."""
-    if not re.search(r"神兽|召唤灵|宠物|技能|星盘|星印|门派|法宝|内丹", question):
+def _evidence_terms(question: str, options: dict | None) -> tuple[str, ...]:
+    """Return terms that evidence must contain for a fully observed quiz."""
+    if not options:
         return ()
     terms = []
-    for segment in re.findall(r"[\u4e00-\u9fff]{2,}", question):
-        for size in range(2, min(4, len(segment)) + 1):
+    for segment in re.findall(r"[\u4e00-\u9fff]{3,}", question):
+        for size in range(3, min(4, len(segment)) + 1):
             terms.extend(
                 segment[index:index + size]
                 for index in range(len(segment) - size + 1)
             )
-    if options:
-        terms.extend(str(value).strip() for value in options.values())
+    terms.extend(str(value).strip() for value in options.values())
     return tuple(dict.fromkeys(term for term in terms if len(term) >= 2))
 
 
-def _is_relevant_game_evidence(item: dict, terms: tuple[str, ...]) -> bool:
+def _is_relevant_evidence(item: dict, terms: tuple[str, ...]) -> bool:
     if not terms:
         return True
     text = f"{item.get('title', '')} {item.get('snippet', '')}"
@@ -450,7 +452,7 @@ def search_web_evidence(
     """Query every search route/provider pair in one concurrent window."""
     routes = build_search_routes(question, options)
     query = routes[0][1] if routes else ""
-    game_evidence_terms = _game_evidence_terms(query, options)
+    evidence_terms = _evidence_terms(query, options)
     available = providers if providers is not None else DEFAULT_PROVIDERS
     selected = (
         {name: available[name] for name in provider_names if name in available}
@@ -481,7 +483,7 @@ def search_web_evidence(
             items = provider(route_query, timeout, provider_limit)
             items = [
                 item for item in items
-                if _is_relevant_game_evidence(item, game_evidence_terms)
+                if _is_relevant_evidence(item, evidence_terms)
             ]
             if route_name.startswith("option_evidence:"):
                 target_term = route_query.rsplit(" ", 1)[-1]

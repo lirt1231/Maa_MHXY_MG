@@ -203,6 +203,7 @@ def _clean_question_text(text):
         r"^正确率[:：]?\d+/\d+",
         r"^当前得分[:：]?\d+",
         r"^剩余时间[:：]?\d+",
+        r"^剩余时间[:：]?圆(?=(?:我国|世界|在|被|目前|大运河|昆曲|电度表))",
     ):
         text = re.sub(pattern, "", text)
     return text.strip("-—:：,，.。 ")

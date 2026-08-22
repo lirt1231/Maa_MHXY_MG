@@ -30,6 +30,13 @@ class SearchQuestionTests(unittest.TestCase):
     def test_timer_label_without_ocr_number_is_removed(self):
         self.assertEqual(clean_search_question("剩余时间古代社会尊称"), "古代社会尊称")
 
+    def test_timer_icon_ocr_is_removed_without_rewriting_round_question(self):
+        self.assertEqual(
+            clean_search_question("剩余时间圆我国古代的乐府双璧是指"),
+            "我国古代的乐府双璧是指",
+        )
+        self.assertEqual(clean_search_question("圆周率是多少"), "圆周率是多少")
+
     def test_contextual_route_contains_game_and_every_option(self):
         routes = build_search_routes(
             "剩余时间20下列神兽中初始技能没有感知的是",
@@ -112,6 +119,30 @@ class SearchParserTests(unittest.TestCase):
 
 
 class SearchAggregationTests(unittest.TestCase):
+    def test_common_question_discards_results_unrelated_to_question_or_options(self):
+        def provider(_query, _timeout, _limit):
+            return [
+                {
+                    "provider": "test", "kind": "result",
+                    "title": "Bihar land records", "snippet": "Revenue department",
+                    "url": "https://example.com/land", "rank": 1,
+                },
+                {
+                    "provider": "test", "kind": "result",
+                    "title": "古代计时", "snippet": "日晷影子移动一寸",
+                    "url": "https://example.com/sundial", "rank": 2,
+                },
+            ]
+
+        result = search_web_evidence(
+            "一寸光阴一寸金用哪种古代计时器量出",
+            options={"A": "日晷", "B": "漏刻", "C": "圭表", "D": "漏壶"},
+            providers={"test": provider},
+        )
+
+        self.assertEqual(len(result["evidence"]), 1)
+        self.assertIn("日晷", result["evidence"][0]["snippet"])
+
     def test_game_question_discards_unrelated_search_results(self):
         def provider(_query, _timeout, _limit):
             return [
