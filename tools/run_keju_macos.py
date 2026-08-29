@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Answer 科举乡试 or enter and answer 科举会试 on the macOS client."""
+"""Answer 科举乡试、会试或殿试 on the macOS client."""
 
 from __future__ import annotations
 
@@ -46,14 +46,22 @@ RESULT_STATUSES = {
 EXAM_TASK_IDS = {
     "xiangshi": "keju",
     "huishi": "keju_huishi",
+    "dianshi": "keju_dianshi",
 }
 EXAM_LABELS = {
     "xiangshi": "乡试",
     "huishi": "会试",
+    "dianshi": "殿试",
 }
 EXAM_FINAL_QUESTION_NUMBERS = {
     "xiangshi": 10,
     "huishi": 20,
+    "dianshi": 15,
+}
+EXAM_MAX_STEPS = {
+    "xiangshi": 10,
+    "huishi": 30,
+    "dianshi": 15,
 }
 DEFAULT_MODEL_PROFILES = {
     "xiangshi": {
@@ -63,6 +71,12 @@ DEFAULT_MODEL_PROFILES = {
         "minimum_confidence": 0.70,
     },
     "huishi": {
+        "model": "gemini-3-flash-preview-nothinking",
+        "timeout": 6,
+        "max_tokens": 220,
+        "minimum_confidence": 0.62,
+    },
+    "dianshi": {
         "model": "gemini-3-flash-preview-nothinking",
         "timeout": 6,
         "max_tokens": 220,
@@ -98,7 +112,7 @@ def parse_args():
         "--exam-type",
         choices=tuple(EXAM_TASK_IDS),
         default="xiangshi",
-        help="严格限定为科举乡试或科举会试，不允许混用页面",
+        help="严格限定为科举乡试、会试或殿试，不允许混用页面",
     )
     parser.add_argument("--max-steps", type=int)
     parser.add_argument("--delay", type=float, default=3.0)
@@ -139,8 +153,8 @@ def parse_args():
     )
     args = parser.parse_args()
     if args.max_steps is None:
-        args.max_steps = 10 if args.exam_type == "xiangshi" else 20
-    maximum = 10 if args.exam_type == "xiangshi" else 30
+        args.max_steps = EXAM_FINAL_QUESTION_NUMBERS[args.exam_type]
+    maximum = EXAM_MAX_STEPS[args.exam_type]
     if args.max_steps < 1 or args.max_steps > maximum:
         parser.error(f"--max-steps 必须在 1–{maximum} 之间")
     return args

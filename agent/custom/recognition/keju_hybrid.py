@@ -164,10 +164,18 @@ def _exam_type_from_title(text):
     normalized = re.sub(r"\s+", "", text or "")
     matches = {
         exam_type
-        for exam_type, label in {"xiangshi": "科举乡试", "huishi": "科举会试"}.items()
+        for exam_type, label in {
+            "xiangshi": "科举乡试",
+            "huishi": "科举会试",
+            "dianshi": "科举殿试",
+        }.items()
         if label in normalized
     }
     return matches.pop() if len(matches) == 1 else None
+
+
+def _uses_huishi_answer_policy(exam_type):
+    return exam_type in {"huishi", "dianshi"}
 
 
 def _sorted_ocr_text(results, row_height_threshold=20):
@@ -536,7 +544,7 @@ class KejuHybridAnswer(CustomRecognition):
                 options[choice] = _clean_option_text(choice, text)
                 option_boxes[choice] = box
         valid_options = {choice: text for choice, text in options.items() if text}
-        if expected_exam_type == "huishi":
+        if _uses_huishi_answer_policy(expected_exam_type):
             terminal_text = re.sub(
                 r"\s+", "", question + "".join(valid_options.values())
             )
@@ -549,7 +557,7 @@ class KejuHybridAnswer(CustomRecognition):
             if correct_match and terminal_marker:
                 result = {"correctAnswers": int(correct_match.group(1))}
                 reward_match = re.search(
-                    r"本场(?:会试)?(?:获得)?奖金(\d+)", terminal_text
+                    r"本场(?:会试|殿试)?(?:获得)?奖金(\d+)", terminal_text
                 )
                 if reward_match:
                     result["settlementReward"] = {
@@ -561,7 +569,7 @@ class KejuHybridAnswer(CustomRecognition):
                 self.last_status = "completed"
                 self.last_question = question
                 self.last_options = valid_options
-                self.last_reason = "已识别会试最终结果页"
+                self.last_reason = "已识别限时科举最终结果页"
                 return CustomRecognition.AnalyzeResult(
                     box=(0, 0, 0, 0), detail=self.last_reason
                 )
@@ -787,7 +795,7 @@ class KejuHybridAnswer(CustomRecognition):
         model_error = None
         model_source = None
         xiangshi_mode = expected_exam_type == "xiangshi"
-        force_model_answer = expected_exam_type == "huishi"
+        force_model_answer = _uses_huishi_answer_policy(expected_exam_type)
         minimum_confidence = float(
             os.environ.get(
                 "MAA_KEJU_MODEL_MIN_CONFIDENCE",
@@ -948,7 +956,7 @@ class KejuHybridAnswer(CustomRecognition):
 
         with timings.track("parse_decision"):
             timed_guess = None
-            if expected_exam_type == "huishi" and not (
+            if _uses_huishi_answer_policy(expected_exam_type) and not (
                 trusted_local_answer or trusted_knowledge_answer or model_answer
                 or local_answer
             ):

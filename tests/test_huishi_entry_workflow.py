@@ -99,6 +99,22 @@ class HuishiEntryWorkflowTests(unittest.TestCase):
             "exam_ready",
         )
 
+    def test_dianshi_entry_requires_its_own_title(self):
+        exam = scene(item("科举殿试", (430, 120, 130, 30)))
+
+        self.assertEqual(
+            classify_keju_entry_scene(
+                exam.texts, {}, exam.image_size, exam_type="dianshi"
+            )["status"],
+            "exam_ready",
+        )
+        self.assertEqual(
+            classify_keju_entry_scene(
+                exam.texts, {}, exam.image_size, exam_type="huishi"
+            )["status"],
+            "wrong_exam_type",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -779,6 +779,34 @@ class HybridAnswerTests(unittest.TestCase):
         self.assertEqual(recognizer.last_exam_type, "xiangshi")
         self.assertEqual(recognizer.last_status, "no_question")
 
+    def test_dianshi_title_is_a_distinct_exam_type(self):
+        self.assertEqual(
+            keju_hybrid._exam_type_from_title("科举殿试"),
+            "dianshi",
+        )
+        self.assertTrue(keju_hybrid._uses_huishi_answer_policy("dianshi"))
+
+    def test_dianshi_recognizer_accepts_its_exact_title(self):
+        recognizer = object.__new__(keju_hybrid.KejuHybridAnswer)
+        image = np.ones((720, 923, 3), dtype=np.uint8)
+
+        with (
+            patch.dict("os.environ", {"MAA_KEJU_EXAM_TYPE": "dianshi"}),
+            patch.object(
+                keju_hybrid,
+                "_ocr_region",
+                side_effect=["科举殿试", ""],
+            ),
+        ):
+            recognizer._analyze(
+                SimpleNamespace(),
+                SimpleNamespace(image=image),
+                keju_hybrid._StageTimings(),
+            )
+
+        self.assertEqual(recognizer.last_exam_type, "dianshi")
+        self.assertEqual(recognizer.last_status, "no_question")
+
     def test_formal_question_without_round_prefix_can_be_answered(self):
         recognizer = object.__new__(keju_hybrid.KejuHybridAnswer)
         image = np.ones((720, 923, 3), dtype=np.uint8)

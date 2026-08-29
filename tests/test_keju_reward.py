@@ -46,6 +46,26 @@ class KejuSettlementRewardTests(unittest.TestCase):
         self.assertEqual(reward["gold"], 1635)
         self.assertNotIn("experience", reward)
 
+    def test_dianshi_uses_the_gold_only_settlement_parser(self):
+        reward = parse_huishi_settlement_reward([
+            {"text": "科举殿试", "box": [420, 120, 160, 28]},
+            {"text": "本场殿试获得奖金", "box": [350, 390, 160, 30]},
+            {"text": "2,048", "box": [520, 390, 76, 30]},
+        ], IMAGE_SIZE)
+
+        self.assertEqual(reward["status"], "confirmed")
+        self.assertEqual(reward["gold"], 2048)
+
+    def test_dianshi_does_not_treat_the_prize_pool_as_a_personal_reward(self):
+        reward = parse_huishi_settlement_reward([
+            {"text": "科举殿试", "box": [420, 120, 160, 28]},
+            {"text": "本场殿试未获得奖金", "box": [350, 360, 180, 30]},
+            {"text": "本次奖金池总数", "box": [550, 360, 150, 30]},
+            {"text": "10000000", "box": [705, 360, 120, 30]},
+        ], IMAGE_SIZE)
+
+        self.assertEqual(reward["status"], "unavailable")
+
     def test_huishi_rejects_xiangshi_settlement(self):
         reward = parse_huishi_settlement_reward([
             {"text": "科举乡试", "box": [457, 138, 128, 30]},

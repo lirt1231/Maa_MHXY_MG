@@ -21,6 +21,7 @@ except ImportError:
 
 
 MAX_ENTRY_TRANSITION_POLLS = 12
+EXAM_LABELS = {"xiangshi": "乡试", "huishi": "会试", "dianshi": "殿试"}
 
 
 def _title_texts(texts, image_size) -> str:
@@ -41,15 +42,25 @@ def classify_keju_entry_scene(
     texts, templates, image_size, *, exam_type="huishi", daily_tab_confirmed=False
 ):
     """Require an independently visible title before beginning answer input."""
-    if exam_type not in {"xiangshi", "huishi"}:
+    if exam_type not in EXAM_LABELS:
         raise ValueError("科举入口考试类型无效")
-    label = "乡试" if exam_type == "xiangshi" else "会试"
-    other_label = "会试" if exam_type == "xiangshi" else "乡试"
+    label = EXAM_LABELS[exam_type]
     title = _title_texts(texts, image_size)
     if f"科举{label}" in title:
         return {"status": "exam_ready"}
-    if f"科举{other_label}" in title:
-        return {"status": "wrong_exam_type", "reason": f"当前显示科举{other_label}，不能开始科举{label}"}
+    other_label = next(
+        (
+            candidate
+            for candidate in EXAM_LABELS.values()
+            if candidate != label and f"科举{candidate}" in title
+        ),
+        None,
+    )
+    if other_label:
+        return {
+            "status": "wrong_exam_type",
+            "reason": f"当前显示科举{other_label}，不能开始科举{label}",
+        }
     navigation = classify_daily_navigation(
         texts,
         templates,
@@ -83,12 +94,12 @@ class HuishiEntryWorkflow:
     def __post_init__(self):
         if self.max_steps <= 0:
             raise ValueError("科举进入识别步骤必须是正整数")
-        if self.exam_type not in {"xiangshi", "huishi"}:
+        if self.exam_type not in EXAM_LABELS:
             raise ValueError("科举入口考试类型无效")
 
     def execute(self, context: WorkflowContext, *, inspect: bool = False) -> WorkflowOutcome:
         metrics = ActionMetrics()
-        label = "科举乡试" if self.exam_type == "xiangshi" else "科举会试"
+        label = f"科举{EXAM_LABELS[self.exam_type]}"
         daily_actions = DailyActivityActions(label)
         awaiting_exam = False
         transition_polls = 0

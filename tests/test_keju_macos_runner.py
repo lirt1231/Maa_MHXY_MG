@@ -130,6 +130,33 @@ class KejuArgumentTests(unittest.TestCase):
         ):
             self.assertEqual(parse_args().max_steps, 20)
 
+    def test_dianshi_defaults_to_fifteen_answers(self):
+        with patch(
+            "tools.run_keju_macos.sys.argv",
+            ["run_keju_macos.py", "--exam-type", "dianshi"],
+        ):
+            self.assertEqual(parse_args().max_steps, 15)
+
+    def test_dianshi_uses_huishi_model_policy(self):
+        profile = model_profile_for_exam({}, "dianshi")
+
+        self.assertEqual(profile["model"], "gemini-3-flash-preview-nothinking")
+        self.assertEqual(profile["minimum_confidence"], 0.62)
+
+    def test_dianshi_rejects_more_than_fifteen_answers(self):
+        with patch(
+            "tools.run_keju_macos.sys.argv",
+            [
+                "run_keju_macos.py",
+                "--exam-type",
+                "dianshi",
+                "--max-steps",
+                "16",
+            ],
+        ), redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                parse_args()
+
     def test_wait_for_entry_is_opt_in_and_parseable(self):
         with patch(
             "tools.run_keju_macos.sys.argv",
@@ -339,6 +366,19 @@ class KejuMacOSRunnerStateTests(unittest.TestCase):
             "status": "formal_question_ready",
             "examType": "xiangshi",
         })
+
+    def test_inspection_detects_dianshi_from_the_title_band(self):
+        image_size = (1000, 720)
+        texts = [
+            {"text": "科举殿试", "box": [430, 120, 120, 30]},
+            {"text": "第6/15题 以下哪个著作", "box": [330, 250, 360, 40]},
+        ]
+
+        self.assertEqual(detect_exam_type(texts, image_size), "dianshi")
+        self.assertEqual(
+            classify_keju_inspection(texts, image_size),
+            {"status": "formal_question_ready", "examType": "dianshi"},
+        )
 
     def test_exam_type_rejects_missing_or_ambiguous_title(self):
         image_size = (1000, 720)
