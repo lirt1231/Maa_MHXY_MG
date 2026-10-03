@@ -21,7 +21,7 @@
         },
         "huishi": {
             "model": "gemini-3.1-flash-lite-preview",
-            "timeout": 6,
+            "timeout": 6.5,
             "max_tokens": 220,
             "minimum_confidence": 0.62
         }
