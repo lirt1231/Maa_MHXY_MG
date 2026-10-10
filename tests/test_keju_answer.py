@@ -387,7 +387,7 @@ class HybridAnswerTests(unittest.TestCase):
         self.assertTrue(huishi[1])
         self.assertIn("限时会试强制作答", huishi[2])
 
-    def test_unique_repeated_web_option_overrides_unsupported_model_choice(self):
+    def test_web_mentions_do_not_override_model_choice(self):
         evidence = [
             {"id": "web-1", "title": "历史事件", "snippet": "国民政府宣布迁都重庆。"},
             {"id": "web-2", "title": "抗战史", "snippet": "1937年11月迁都重庆市。"},
@@ -405,11 +405,41 @@ class HybridAnswerTests(unittest.TestCase):
         )
 
         self.assertEqual(inferred, {"answer": "C", "evidence_ids": ["web-1", "web-2"]})
-        self.assertEqual(answer, "C")
+        self.assertEqual(answer, "D")
         self.assertFalse(forced)
-        self.assertIn("证据直接纠偏", error)
+        self.assertIsNone(error)
 
-    def test_unique_reason_option_corrects_mismatched_answer_letter(self):
+    def test_question_eight_keeps_model_answer_reason_and_citations(self):
+        decision = {
+            "answer": "A", "confidence": 0.90,
+            "evidence_ids": ["web-1", "web-3"],
+            "reason": "十八般武艺指使用各种武术器械的功夫和技能。",
+        }
+        original = json.loads(json.dumps(decision))
+        evidence = [
+            {"id": "web-1", "title": "十八般武艺", "snippet": "正确答案：使用兵器的技能。"},
+            {"id": "web-2", "title": "我们常说的十八般武艺最初指的是什么？", "snippet": "错误选项A的分析：使用十八种兵器的技能是常见误解。"},
+            {"id": "web-3", "title": "十八般武艺", "snippet": "泛指使用各种武术器械的功夫和技能。"},
+        ]
+        with patch("custom.recognition.keju_answer_core.infer_direct_evidence_option") as correction:
+            result = keju_hybrid.resolve_model_decision(
+                decision, {"web-1", "web-2", "web-3"}, 0.62, "模型",
+                evidence=evidence,
+                options={"A": "用十八种兵器的技能", "B": "十八个武术流派", "C": "十八种武术动作", "D": "十八个武林高手"},
+                question="我们常说的十八般武艺最初指的是什么？",
+                force_answer=True,
+            )
+        self.assertEqual(result, ("A", False, None))
+        self.assertEqual(decision, original)
+        correction.assert_not_called()
+
+    def test_structural_validation_rejects_option_missing_from_current_page(self):
+        decision = {"answer": "D", "confidence": 0.9, "evidence_ids": ["web-1"], "reason": "理由"}
+        answer, error = validate_model_decision(decision, {"web-1"}, options={"A": "甲", "B": "乙"})
+        self.assertIsNone(answer)
+        self.assertIn("选项无效", error)
+
+    def test_reason_text_does_not_rewrite_model_answer_letter(self):
         options = {
             "A": "白象王", "B": "大鹏王", "C": "九灵元圣", "D": "青狮王",
         }
@@ -428,9 +458,9 @@ class HybridAnswerTests(unittest.TestCase):
         )
 
         self.assertEqual(infer_unique_reason_option(decision, options), "D")
-        self.assertEqual(answer, "D")
+        self.assertEqual(answer, "B")
         self.assertFalse(forced)
-        self.assertIn("理由选项纠偏", error)
+        self.assertIsNone(error)
 
     def test_reason_discussing_multiple_options_does_not_override_letter(self):
         options = {"A": "成都", "B": "长沙", "C": "重庆", "D": "武汉"}
@@ -480,7 +510,7 @@ class HybridAnswerTests(unittest.TestCase):
         self.assertEqual(decision["evidence_ids"], ["web-1", "web-3"])
         self.assertEqual(decision["reason"], "web-1 明确支持 C。")
 
-    def test_model_decision_requires_confidence_and_valid_web_citation(self):
+    def test_model_decision_requires_confidence_reason_and_nonempty_citations(self):
         low = {
             "answer": "C",
             "confidence": 0.4,
@@ -508,8 +538,10 @@ class HybridAnswerTests(unittest.TestCase):
             "reason": "证据支持 C。",
         }
         answer, error = validate_model_decision(uncited, {"web-1"}, 0.62)
+        self.assertEqual((answer, error), ("C", None))
+        answer, error = validate_model_decision({**uncited, "evidence_ids": []}, {"web-1"}, 0.62)
         self.assertIsNone(answer)
-        self.assertIn("没有引用", error)
+        self.assertIn("没有提供证据引用", error)
 
         verified = {
             "answer": "C",
@@ -522,7 +554,7 @@ class HybridAnswerTests(unittest.TestCase):
             ("C", None),
         )
 
-    def test_model_decision_rejects_unsupported_option_guess(self):
+    def test_model_decision_does_not_validate_numeric_evidence_meaning(self):
         decision = {
             "answer": "D",
             "confidence": 0.95,
@@ -552,8 +584,8 @@ class HybridAnswerTests(unittest.TestCase):
             options={"A": "10", "B": "8", "C": "14", "D": "12"},
         )
 
-        self.assertIsNone(answer)
-        self.assertIn("未明确支持", error)
+        self.assertEqual(answer, decision["answer"])
+        self.assertIsNone(error)
 
     def test_true_false_decision_accepts_substantive_cited_fact(self):
         question = "向别人介绍自己的弟弟妹妹应该用舍弟舍妹？"
@@ -588,7 +620,7 @@ class HybridAnswerTests(unittest.TestCase):
             ("B", None),
         )
 
-    def test_true_false_decision_rejects_question_echo_without_fact(self):
+    def test_true_false_decision_does_not_inspect_web_fact(self):
         question = "向别人介绍自己的弟弟妹妹应该用舍弟舍妹？"
         decision = {
             "answer": "B",
@@ -605,10 +637,10 @@ class HybridAnswerTests(unittest.TestCase):
             question=question,
         )
 
-        self.assertIsNone(answer)
-        self.assertIn("未明确支持", error)
+        self.assertEqual(answer, decision["answer"])
+        self.assertIsNone(error)
 
-    def test_true_false_decision_rejects_answer_reason_polarity_mismatch(self):
+    def test_true_false_decision_does_not_infer_reason_polarity(self):
         question = "向别人介绍自己的弟弟妹妹应该用舍弟舍妹？"
         decision = {
             "answer": "A",
@@ -630,10 +662,10 @@ class HybridAnswerTests(unittest.TestCase):
             question=question,
         )
 
-        self.assertIsNone(answer)
-        self.assertIn("未明确支持", error)
+        self.assertEqual(answer, decision["answer"])
+        self.assertIsNone(error)
 
-    def test_negative_skill_question_requires_a_complete_list_without_target(self):
+    def test_negative_skill_question_leaves_semantics_to_model(self):
         question = "下列神兽中初始技能没有感知的是"
         options = {"A": "超级大熊猫", "D": "超级赤焰兽"}
         evidence = [
@@ -656,10 +688,10 @@ class HybridAnswerTests(unittest.TestCase):
             {"web-a", "web-d"}, evidence=evidence, options=options, question=question,
         )
 
-        self.assertIsNone(wrong[0])
+        self.assertEqual(wrong, ("A", None))
         self.assertEqual(right, ("D", None))
 
-    def test_model_decision_remaps_external_answer_letter_by_text(self):
+    def test_model_decision_does_not_remap_external_answer_letter(self):
         evidence = [{
             "id": "web-1",
             "title": "火车鸣笛题",
@@ -675,12 +707,12 @@ class HybridAnswerTests(unittest.TestCase):
         correct = {**wrong, "answer": "B", "reason": "网页C对应倒退，映射为当前B。"}
         options = {"A": "故障", "B": "倒退", "C": "停留", "D": "前进"}
 
-        self.assertIsNone(validate_model_decision(
+        self.assertEqual(validate_model_decision(
             wrong,
             {"web-1"},
             evidence=evidence,
             options=options,
-        )[0])
+        ), ("C", None))
         self.assertEqual(validate_model_decision(
             correct,
             {"web-1"},
@@ -999,9 +1031,6 @@ class HybridAnswerTests(unittest.TestCase):
                     patch.object(keju_hybrid, "resolve_model_decision", return_value=(
                         "A", False, "证据直接纠偏：测试纠正",
                     )),
-                    patch.object(keju_hybrid, "infer_direct_evidence_option", return_value={
-                        "answer": "A", "evidence_ids": ["web-1"],
-                    }),
                     patch.object(keju_hybrid.logger, "info") as log,
                 ):
                     recognizer._analyze(

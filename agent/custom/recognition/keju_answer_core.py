@@ -271,9 +271,12 @@ def validate_model_decision(
     options=None,
     question=None,
 ):
-    """Accept only a confident decision that cites retrieved web evidence."""
+    """Check response structure and confidence; leave evidence meaning to the model."""
     if not decision:
         return None, f"{label}回复中没有有效选项"
+    valid_choices = tuple(options) if options is not None else VALID_CHOICES
+    if decision.get("answer") not in valid_choices:
+        return None, f"{label}回复的选项无效"
     confidence = decision["confidence"]
     if confidence < minimum_confidence:
         return (
@@ -282,23 +285,8 @@ def validate_model_decision(
         )
     if not decision.get("reason", "").strip():
         return None, f"{label}没有提供证据解释"
-    if not set(valid_evidence_ids).intersection(decision["evidence_ids"]):
-        return None, f"{label}没有引用有效的网页证据"
-    if evidence is not None and options is not None:
-        cited = [
-            item
-            for item in evidence
-            if item.get("id") in set(decision["evidence_ids"])
-        ]
-        selected_text = str(options.get(decision["answer"], ""))
-        if not _web_evidence_supports_selected_option(
-            cited,
-            selected_text,
-            question=question,
-            options=options,
-            reason=decision.get("reason", ""),
-        ):
-            return None, f"{label}引用的网页证据未明确支持当前选项文本"
+    if not decision.get("evidence_ids"):
+        return None, f"{label}没有提供证据引用"
     return decision["answer"], None
 
 
@@ -407,7 +395,7 @@ def resolve_model_decision(
     question=None,
     force_answer=False,
 ):
-    """Apply strict evidence validation, then the explicit 会试-only guess policy."""
+    """Validate model metadata without correcting its answer or citations."""
     answer, strict_error = validate_model_decision(
         decision,
         valid_evidence_ids,
@@ -419,23 +407,6 @@ def resolve_model_decision(
     )
     if answer is not None:
         return answer, False, None
-    reason_option = infer_unique_reason_option(decision, options)
-    if reason_option is not None:
-        return (
-            reason_option,
-            False,
-            f"理由选项纠偏：{label}返回字母{decision.get('answer')}，"
-            f"但理由唯一明确指向选项{reason_option}",
-        )
-    direct_evidence = infer_direct_evidence_option(evidence, options, question)
-    if direct_evidence is not None:
-        corrected = direct_evidence["answer"]
-        return (
-            corrected,
-            False,
-            f"证据直接纠偏：{label}严格校验未通过（{strict_error}），"
-            f"网页证据唯一明确支持选项{corrected}",
-        )
     if not force_answer:
         return None, False, strict_error
 

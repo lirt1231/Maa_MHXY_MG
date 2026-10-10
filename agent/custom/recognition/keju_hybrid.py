@@ -21,7 +21,6 @@ from .keju_answer_core import (
     build_xiangshi_prompt,
     build_verification_prompt,
     deterministic_timed_guess,
-    infer_direct_evidence_option,
     knowledge_fallback,
     local_fallback,
     looks_like_answer_result,
@@ -870,14 +869,6 @@ class KejuHybridAnswer(CustomRecognition):
                 )
             if forced_guess:
                 model_source = "huishi_forced_model_guess"
-            elif model_error and model_error.startswith("证据直接纠偏"):
-                correction = infer_direct_evidence_option(
-                    web_result["evidence"], valid_options, question
-                )
-                if correction:
-                    model_source = "web_evidence_direct_override"
-                    model_evidence_ids = correction["evidence_ids"]
-                    model_reason = model_error
 
         def request_codex_decision(prompt):
             nonlocal model_source
