@@ -20,6 +20,7 @@
             "minimum_confidence": 0.70
         },
         "huishi": {
+            "fallback_model": "qwen-turbo",
             "model": "gemini-3.1-flash-lite-preview",
             "timeout": 6.5,
             "max_tokens": 220,
