@@ -913,6 +913,58 @@ class HybridAnswerTests(unittest.TestCase):
         self.assertEqual(recognizer.last_answer, "C")
         self.assertEqual(recognizer.last_source, "huishi_forced_model_guess")
 
+    def test_model_logs_preserve_original_reply_before_correction_or_parse_failure(self):
+        original = {
+            "answer": "C", "confidence": 0.92,
+            "evidence_ids": ["web-2"], "reason": "模型原始理由",
+        }
+        for raw in (json.dumps(original, ensure_ascii=False), "无效 JSON 回复"):
+            with self.subTest(raw=raw):
+                recognizer = object.__new__(keju_hybrid.KejuHybridAnswer)
+                option_results = iter([
+                    (f"{choice}.{text}", [340, 315, 225, 80])
+                    for choice, text in {"A": "甲", "B": "乙", "C": "丙", "D": "丁"}.items()
+                ])
+                with (
+                    patch.dict(os.environ, {
+                        "MAA_KEJU_EXAM_TYPE": "huishi",
+                        "MAA_KEJU_RECOGNIZE_ONLY": "1",
+                        "MAA_KEJU_API_KEY": "test-key",
+                        "MAA_KEJU_URL": "https://example.test",
+                        "MAA_KEJU_MODEL": "test-model",
+                        "MAA_KEJU_FALLBACK_MODEL": "",
+                        "MAA_KEJU_WEB_SEARCH_ENABLED": "0",
+                    }),
+                    patch.object(keju_hybrid, "_ocr_region", side_effect=[
+                        "科举会试", "第8/20题测试题目",
+                    ]),
+                    patch.object(keju_hybrid, "_ocr_region_with_box", side_effect=lambda *_: next(option_results)),
+                    patch.object(keju_hybrid, "search_candidates", return_value=[]),
+                    patch.object(keju_hybrid, "search_knowledge", return_value=[]),
+                    patch.object(keju_hybrid, "_request_model", return_value=raw),
+                    patch.object(keju_hybrid, "resolve_model_decision", return_value=(
+                        "A", False, "证据直接纠偏：测试纠正",
+                    )),
+                    patch.object(keju_hybrid, "infer_direct_evidence_option", return_value={
+                        "answer": "A", "evidence_ids": ["web-1"],
+                    }),
+                    patch.object(keju_hybrid.logger, "info") as log,
+                ):
+                    recognizer._analyze(
+                        SimpleNamespace(get_node_data=lambda _: {"attach": {}}),
+                        SimpleNamespace(image=np.ones((720, 923, 3), dtype=np.uint8)),
+                        keju_hybrid._StageTimings(),
+                    )
+                messages = [call.args[0] for call in log.call_args_list]
+                response = json.loads(next(m.split("：", 1)[1] for m in messages if m.startswith("科举模型原始回复：")))
+                summary = json.loads(next(m.split("：", 1)[1] for m in messages if m.startswith("科举混合答题：")))
+                self.assertEqual(response["raw_response"], raw)
+                self.assertEqual(response["model"], "test-model")
+                self.assertEqual(response["parsed_decision"], original if raw.startswith("{") else None)
+                self.assertEqual(summary["answer"], "A")
+                self.assertEqual(summary["model_responses"][0]["raw_response"], raw)
+                self.assertEqual(summary["model_responses"][0]["parsed_decision"], response["parsed_decision"])
+
     def test_huishi_terminal_result_is_completed_without_model_request(self):
         recognizer = object.__new__(keju_hybrid.KejuHybridAnswer)
         image = np.ones((720, 923, 3), dtype=np.uint8)

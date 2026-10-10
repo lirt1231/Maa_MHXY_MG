@@ -794,6 +794,7 @@ class KejuHybridAnswer(CustomRecognition):
         model_reason = ""
         model_error = None
         model_source = None
+        model_responses = []
         xiangshi_mode = expected_exam_type == "xiangshi"
         force_model_answer = _uses_huishi_answer_policy(expected_exam_type)
         minimum_confidence = float(
@@ -806,6 +807,23 @@ class KejuHybridAnswer(CustomRecognition):
             )
         )
         valid_web_ids = {item["id"] for item in web_result["evidence"]}
+
+        def record_model_response(content, responding_model):
+            decision = parse_model_decision(content, tuple(valid_options))
+            response_record = {
+                "model": responding_model,
+                "raw_response": content,
+                "parsed_decision": decision,
+            }
+            model_responses.append(response_record)
+            # Persist before validation can replace the answer, reason or citations.
+            # Also retain malformed replies and replies that end in manual review.
+            logger.info("科举模型原始回复：" + json.dumps({
+                "question": question,
+                "options": valid_options,
+                **response_record,
+            }, ensure_ascii=False))
+            return decision
 
         def accept_model_decision(decision, label):
             nonlocal model_answer, model_confidence, model_evidence_ids
@@ -852,9 +870,7 @@ class KejuHybridAnswer(CustomRecognition):
                     prompt, max(timeout, codex_timeout)
                 )
             with timings.track("parse_decision"):
-                model_decision = parse_model_decision(
-                    model_content, tuple(valid_options)
-                )
+                model_decision = record_model_response(model_content, "codex")
                 accept_model_decision(model_decision, "Codex")
             if model_answer and model_source is None:
                 model_source = "web_search_verified_codex"
@@ -902,9 +918,7 @@ class KejuHybridAnswer(CustomRecognition):
                         responding_model = model
                         primary_model_error = None
                 with timings.track("parse_decision"):
-                    model_decision = parse_model_decision(
-                        model_content, tuple(valid_options)
-                    )
+                    model_decision = record_model_response(model_content, responding_model)
                     decision_label = (
                         f"备用模型 {responding_model}"
                         if responding_model != model
@@ -1072,6 +1086,7 @@ class KejuHybridAnswer(CustomRecognition):
                     "model_evidence_ids": model_evidence_ids,
                     "model_reason": model_reason,
                     "model_error": model_error,
+                    "model_responses": model_responses,
                 },
                 ensure_ascii=False,
             )
