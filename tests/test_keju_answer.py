@@ -46,7 +46,7 @@ class QuestionBankTests(unittest.TestCase):
 
         def request(_url, _key, model, *_args):
             calls.append(model)
-            return model
+            return json.dumps({"answer": "A", "confidence": 0.35, "reason": model})
 
         with patch.object(keju_hybrid, "_request_model", side_effect=request):
             content, model, primary_error = keju_hybrid._request_huishi_models(
@@ -55,7 +55,8 @@ class QuestionBankTests(unittest.TestCase):
             )
 
         self.assertCountEqual(calls, ["gemini", "qwen-turbo"])
-        self.assertEqual((content, model, primary_error), ("gemini", "gemini", None))
+        self.assertEqual(json.loads(content)["reason"], "gemini")
+        self.assertEqual((model, primary_error), ("gemini", None))
 
     def test_huishi_parallel_model_request_uses_ready_fallback_after_timeout(self):
         fallback_started = threading.Event()
@@ -63,7 +64,7 @@ class QuestionBankTests(unittest.TestCase):
         def request(_url, _key, model, *_args):
             if model == "qwen-turbo":
                 fallback_started.set()
-                return "qwen answer"
+                return json.dumps({"answer": "B", "reason": "qwen answer"})
             self.assertTrue(fallback_started.wait(1))
             raise keju_hybrid.requests.ReadTimeout("primary timed out")
 
@@ -73,9 +74,62 @@ class QuestionBankTests(unittest.TestCase):
                 "prompt", 6,
             )
 
-        self.assertEqual(content, "qwen answer")
+        self.assertEqual(json.loads(content)["reason"], "qwen answer")
         self.assertEqual(model, "qwen-turbo")
         self.assertIn("ReadTimeout", primary_error)
+
+    def test_huishi_parallel_models_switch_on_unusable_primary_and_log_both(self):
+        fallback = json.dumps({"answer": "B", "confidence": 0.9, "reason": "备用理由"})
+        invalid_replies = (
+            "", "not JSON", '{"answer":"D","reason":"当前页面没有D"}',
+            '{"answer":"A","reason":""}', '{"answer":"A"}',
+        )
+        for primary in invalid_replies:
+            with self.subTest(primary=primary):
+                ready = threading.Event()
+                def request(_url, _key, model, *_args):
+                    if model == "fallback":
+                        ready.set()
+                        return fallback
+                    self.assertTrue(ready.wait(1))
+                    return primary
+                observer = Mock()
+                with patch.object(keju_hybrid, "_request_model", side_effect=request) as request_mock:
+                    content, model, error = keju_hybrid._request_huishi_models(
+                        "url", "key", "primary", "fallback", "prompt", 6,
+                        valid_choices=("A", "B"), response_observer=observer,
+                    )
+                self.assertEqual((content, model), (fallback, "fallback"))
+                self.assertIn("ValueError", error)
+                self.assertEqual(request_mock.call_count, 2)
+                self.assertEqual(observer.call_args_list[0].args, (primary, "primary"))
+                self.assertEqual(observer.call_args_list[1].args, (fallback, "fallback"))
+
+    def test_huishi_successful_primary_does_not_wait_for_slow_fallback(self):
+        release = threading.Event()
+        finished = threading.Event()
+        def request(_url, _key, model, *_args):
+            if model == "fallback":
+                release.wait(2)
+                finished.set()
+            return '{"answer":"A","reason":"有效理由"}'
+        try:
+            with patch.object(keju_hybrid, "_request_model", side_effect=request):
+                _, model, error = keju_hybrid._request_huishi_models(
+                    "url", "key", "primary", "fallback", "prompt", 6,
+                )
+            self.assertEqual((model, error), ("primary", None))
+            self.assertFalse(finished.is_set())
+        finally:
+            release.set()
+            self.assertTrue(finished.wait(1))
+
+    def test_huishi_rejects_unusable_primary_and_fallback(self):
+        with patch.object(keju_hybrid, "_request_model", return_value="bad reply"):
+            with self.assertRaisesRegex(keju_hybrid.requests.RequestException, "主模型失败.*备用模型失败"):
+                keju_hybrid._request_huishi_models(
+                    "url", "key", "primary", "fallback", "prompt", 6,
+                )
 
     def test_top_three_candidates_are_sorted(self):
         bank = {
@@ -964,6 +1018,53 @@ class HybridAnswerTests(unittest.TestCase):
                 self.assertEqual(summary["answer"], "A")
                 self.assertEqual(summary["model_responses"][0]["raw_response"], raw)
                 self.assertEqual(summary["model_responses"][0]["parsed_decision"], response["parsed_decision"])
+
+    def test_recognizer_switches_to_parallel_fallback_and_preserves_rejected_reply(self):
+        for fallback, expected_source in (
+            ('{"answer":"B","confidence":0.35,"reason":"备用判断"}', "huishi_qwen_fallback"),
+            ("also invalid", "huishi_deterministic_guess"),
+        ):
+            with self.subTest(fallback=fallback):
+                recognizer = object.__new__(keju_hybrid.KejuHybridAnswer)
+                option_results = iter([
+                    (f"{choice}.{text}", [340, 315, 225, 80])
+                    for choice, text in {"A": "甲", "B": "乙", "C": "丙", "D": "丁"}.items()
+                ])
+                with (
+                    patch.dict(os.environ, {
+                        "MAA_KEJU_EXAM_TYPE": "huishi",
+                        "MAA_KEJU_RECOGNIZE_ONLY": "1",
+                        "MAA_KEJU_API_KEY": "test-key",
+                        "MAA_KEJU_URL": "https://example.test",
+                        "MAA_KEJU_MODEL": "primary",
+                        "MAA_KEJU_FALLBACK_MODEL": "qwen-turbo",
+                        "MAA_KEJU_USE_CODEX": "0",
+                        "MAA_KEJU_WEB_SEARCH_ENABLED": "0",
+                    }),
+                    patch.object(keju_hybrid, "_ocr_region", side_effect=[
+                        "科举会试", "第8/20题测试题目",
+                    ]),
+                    patch.object(keju_hybrid, "_ocr_region_with_box", side_effect=lambda *_: next(option_results)),
+                    patch.object(keju_hybrid, "search_candidates", return_value=[]),
+                    patch.object(keju_hybrid, "search_knowledge", return_value=[]),
+                    patch.object(keju_hybrid, "_request_model", side_effect=lambda _u, _k, model, *_: fallback if model == "qwen-turbo" else "primary invalid"),
+                    patch.object(keju_hybrid.logger, "info") as log,
+                ):
+                    recognizer._analyze(
+                        SimpleNamespace(get_node_data=lambda _: {"attach": {}}),
+                        SimpleNamespace(image=np.ones((720, 923, 3), dtype=np.uint8)),
+                        keju_hybrid._StageTimings(),
+                    )
+                self.assertEqual(recognizer.last_status, "ready")
+                self.assertEqual(recognizer.last_source, expected_source)
+                if expected_source == "huishi_qwen_fallback":
+                    self.assertEqual(recognizer.last_answer, "B")
+                summary = json.loads(next(
+                    call.args[0].split("：", 1)[1] for call in log.call_args_list
+                    if call.args[0].startswith("科举混合答题：")
+                ))
+                self.assertEqual([r["raw_response"] for r in summary["model_responses"]], ["primary invalid", fallback])
+                self.assertIn("主模型失败", summary["model_error"])
 
     def test_huishi_terminal_result_is_completed_without_model_request(self):
         recognizer = object.__new__(keju_hybrid.KejuHybridAnswer)

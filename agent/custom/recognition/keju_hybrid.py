@@ -28,6 +28,7 @@ from .keju_answer_core import (
     parse_model_decision,
     resolve_model_decision,
     scale_roi,
+    validate_forced_model_decision,
     validate_xiangshi_model_decision,
 )
 from .searchAnswer import search_candidates
@@ -339,8 +340,11 @@ def _request_huishi_models(
     prompt,
     timeout,
     extra_body=None,
+    *,
+    valid_choices=VALID_CHOICES,
+    response_observer=None,
 ):
-    """Start both 会试 requests together while always preferring the primary."""
+    """Start both requests together; prefer a usable primary 会试 decision."""
     start_barrier = Barrier(2)
 
     def request(model_name):
@@ -358,13 +362,26 @@ def _request_huishi_models(
     primary_future = executor.submit(request, primary_model)
     fallback_future = executor.submit(request, fallback_model)
     request_errors = (requests.RequestException, KeyError, IndexError, ValueError)
+
+    def usable_response(future, model_name):
+        content = future.result()
+        if response_observer is not None:
+            response_observer(content, model_name)
+        decision = parse_model_decision(content, tuple(valid_choices))
+        answer, error = validate_forced_model_decision(
+            decision, tuple(valid_choices), f"模型 {model_name}"
+        )
+        if answer is None:
+            raise ValueError(error)
+        return content
+
     try:
         try:
-            return primary_future.result(), primary_model, None
+            return usable_response(primary_future, primary_model), primary_model, None
         except request_errors as primary_exc:
             primary_error = f"{type(primary_exc).__name__}: {primary_exc}"
             try:
-                return fallback_future.result(), fallback_model, primary_error
+                return usable_response(fallback_future, fallback_model), fallback_model, primary_error
             except request_errors as fallback_exc:
                 raise requests.RequestException(
                     f"主模型失败 ({primary_error}); 备用模型失败 "
@@ -905,6 +922,8 @@ class KejuHybridAnswer(CustomRecognition):
                             prompt,
                             timeout,
                             extra_body=model_extra_body,
+                            valid_choices=tuple(valid_options),
+                            response_observer=record_model_response,
                         )
                     else:
                         model_content = _request_model(
@@ -918,7 +937,11 @@ class KejuHybridAnswer(CustomRecognition):
                         responding_model = model
                         primary_model_error = None
                 with timings.track("parse_decision"):
-                    model_decision = record_model_response(model_content, responding_model)
+                    if force_model_answer and fallback_model:
+                        # The selector already logged both rejected and selected replies.
+                        model_decision = parse_model_decision(model_content, tuple(valid_options))
+                    else:
+                        model_decision = record_model_response(model_content, responding_model)
                     decision_label = (
                         f"备用模型 {responding_model}"
                         if responding_model != model
