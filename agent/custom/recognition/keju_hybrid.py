@@ -227,7 +227,7 @@ def _ocr_region(context, image, name, scaled_roi):
     )
     if not detail or not detail.hit:
         return ""
-    if name == "科举乡试题目-混合":
+    if name == "科举题目-混合":
         return _question_ocr_text(detail.all_results)
     return _sorted_ocr_text(detail.all_results)
 
@@ -506,9 +506,7 @@ class KejuHybridAnswer(CustomRecognition):
             )
         question_roi, option_rois = keju_rois(image)
         with timings.track("ocr"):
-            raw_question = _ocr_region(
-                context, image, "科举乡试题目-混合", question_roi
-            )
+            raw_question = _ocr_region(context, image, "科举题目-混合", question_roi)
         if not raw_question:
             if wait_for_entry:
                 self.last_status = "waiting"
@@ -555,7 +553,7 @@ class KejuHybridAnswer(CustomRecognition):
         with timings.track("ocr"):
             for choice, roi in option_rois.items():
                 text, box = _ocr_region_with_box(
-                    context, image, f"科举乡试答案{choice}-混合", roi
+                    context, image, f"科举答案{choice}-混合", roi
                 )
                 options[choice] = _clean_option_text(choice, text)
                 option_boxes[choice] = box
