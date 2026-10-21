@@ -151,6 +151,15 @@ def parse_args():
         "--model",
         default=os.environ.get("MAA_KEJU_MODEL", ""),
     )
+    parser.add_argument(
+        "--web-search-provider",
+        action="append",
+        choices=("duckduckgo", "bing_rss", "deepseek"),
+        help=(
+            "覆盖搜索 provider，可重复指定；默认使用配置中的 duckduckgo,bing_rss。"
+            "使用 deepseek 前请设置 MAA_DEEPSEEK_API_KEY。"
+        ),
+    )
     args = parser.parse_args()
     if args.max_steps is None:
         args.max_steps = EXAM_FINAL_QUESTION_NUMBERS[args.exam_type]
@@ -582,7 +591,11 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
         os.environ["MAA_KEJU_WEB_SEARCH_LIMIT"] = str(
             web_search["limit_per_provider"]
         )
-    if web_search.get("providers"):
+    if args.web_search_provider:
+        os.environ["MAA_KEJU_WEB_SEARCH_PROVIDERS"] = ",".join(
+            args.web_search_provider
+        )
+    elif web_search.get("providers"):
         os.environ["MAA_KEJU_WEB_SEARCH_PROVIDERS"] = ",".join(
             map(str, web_search["providers"])
         )

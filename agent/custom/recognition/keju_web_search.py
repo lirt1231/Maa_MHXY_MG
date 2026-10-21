@@ -355,6 +355,55 @@ DEFAULT_PROVIDERS = {
 }
 
 
+def search_deepseek(query: str, timeout: float, limit: int) -> list[dict]:
+    """Search DeepSeek's structured web-search API without fetching pages."""
+    import os
+
+    api_key = os.environ.get("MAA_DEEPSEEK_API_KEY", "").strip()
+    if not api_key:
+        raise ValueError("MAA_DEEPSEEK_API_KEY is not configured")
+    query = (query or "").strip()[:128]
+    if not query:
+        return []
+    response = requests.post(
+        "https://api.deepseek.com/v1/tools/search",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "query": query,
+            "ori_question": query,
+            "count": max(1, min(int(limit), 50)),
+            "need_content": False,
+        },
+        timeout=timeout,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    evidence = []
+    for rank, item in enumerate(payload.get("results", []), start=1):
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title", "")).strip()
+        snippet = str(item.get("snippet", "") or item.get("summary", "")).strip()
+        url = str(item.get("url", "")).strip()
+        if not title and not snippet:
+            continue
+        evidence.append({
+            "provider": "deepseek",
+            "kind": "result",
+            "title": title[:240],
+            "snippet": snippet[:600],
+            "url": url[:1000],
+            "rank": rank,
+        })
+    return evidence
+
+
+DEFAULT_PROVIDERS["deepseek"] = search_deepseek
+
+
 def _deduplicate(evidence: list[dict]) -> list[dict]:
     output = []
     seen = set()
@@ -519,7 +568,7 @@ def search_web_evidence(
             for route_name, route_query in routes
             for name, provider in selected.items()
             if not route_name.startswith("option_evidence:")
-            or name == "duckduckgo"
+            or name in {"duckduckgo", "deepseek"}
         ]
         for future in as_completed(futures):
             route_name, name, items, error, elapsed_ms = future.result()
@@ -574,5 +623,6 @@ __all__ = [
     "parse_bing_html",
     "parse_duckduckgo_html",
     "parse_so360_html",
+    "search_deepseek",
     "search_web_evidence",
 ]

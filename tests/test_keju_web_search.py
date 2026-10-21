@@ -1,5 +1,6 @@
 import threading
 import unittest
+import unittest.mock
 import sys
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from keju_web_search import (  # noqa: E402
     parse_duckduckgo_html,
     parse_so360_html,
     search_web_evidence,
+    search_deepseek,
 )
 
 
@@ -66,6 +68,23 @@ class SearchQuestionTests(unittest.TestCase):
         self.assertNotIn(" 12", routes[1][1])
 
 class SearchParserTests(unittest.TestCase):
+    def test_deepseek_result_is_normalized(self):
+        response = unittest.mock.Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "results": [{
+                "title": "青狮王",
+                "url": "https://example.com/qing",
+                "snippet": "提升其他狮驼伙伴的物理伤害。",
+            }]
+        }
+        with unittest.mock.patch.dict("os.environ", {"MAA_DEEPSEEK_API_KEY": "test-key"}), \
+             unittest.mock.patch("keju_web_search.requests.post", return_value=response) as post:
+            evidence = search_deepseek("青狮王 技能", 1.0, 3)
+        self.assertEqual(evidence[0]["provider"], "deepseek")
+        self.assertEqual(evidence[0]["snippet"], "提升其他狮驼伙伴的物理伤害。")
+        self.assertEqual(post.call_args.kwargs["json"]["need_content"], False)
+
     def test_duckduckgo_result_has_decoded_target_and_snippet(self):
         payload = """
         <div class="result"><a class="result__a"
