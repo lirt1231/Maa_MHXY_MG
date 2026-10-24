@@ -157,7 +157,7 @@ def parse_args():
         choices=("duckduckgo", "bing_rss", "deepseek"),
         help=(
             "覆盖搜索 provider，可重复指定；默认使用配置中的 duckduckgo,bing_rss。"
-            "使用 deepseek 前请设置 MAA_DEEPSEEK_API_KEY。"
+            "DeepSeek 密钥优先读取 MAA_DEEPSEEK_API_KEY，其次读取 macOS 钥匙串。"
         ),
     )
     args = parser.parse_args()
@@ -599,6 +599,11 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
         os.environ["MAA_KEJU_WEB_SEARCH_PROVIDERS"] = ",".join(
             map(str, web_search["providers"])
         )
+    if "deepseek" in os.environ.get("MAA_KEJU_WEB_SEARCH_PROVIDERS", "").split(","):
+        if not os.environ.get("MAA_DEEPSEEK_API_KEY", "").strip():
+            search_key = read_keychain_password("Maa_MHXY_MG_DeepSeek", "deepseek")
+            if search_key:
+                os.environ["MAA_DEEPSEEK_API_KEY"] = search_key
     if local_config.get("minimum_confidence") is not None:
         os.environ["MAA_KEJU_MODEL_MIN_CONFIDENCE"] = str(
             local_config["minimum_confidence"]
