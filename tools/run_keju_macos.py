@@ -85,6 +85,8 @@ DEFAULT_MODEL_PROFILES = {
 }
 MAX_WAITING_POLLS = 180
 MAX_SAME_QUESTION_POLLS = 8
+# 殿试每五题之间有较长停顿，旧题仍可能被识别为可答题面。
+DIANSHI_MAX_SAME_QUESTION_POLLS = 20
 HUI_SHI_REWARD_POLLS = 8
 HUI_SHI_REWARD_POLL_SECONDS = 1.0
 _SEMANTIC_RECOGNITION_STATUSES = frozenset(
@@ -695,7 +697,11 @@ def run(args, guard: CancellationGuard, progress: dict | None = None) -> dict | 
         final_question_number=EXAM_FINAL_QUESTION_NUMBERS[args.exam_type],
         delay=args.delay,
         max_waiting_polls=MAX_WAITING_POLLS,
-        max_same_question_polls=MAX_SAME_QUESTION_POLLS,
+        max_same_question_polls=(
+            DIANSHI_MAX_SAME_QUESTION_POLLS
+            if args.exam_type == "dianshi"
+            else MAX_SAME_QUESTION_POLLS
+        ),
         manual_review_handler=await_manual_review if args.exam_type == "xiangshi" else None,
     ).execute(
         WorkflowContext(runtime, guard, workflow_event),
